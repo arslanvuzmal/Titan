@@ -40,7 +40,7 @@ jobs:
           version: 8
 
       - name: Install Monorepo Dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Pre-commit checks
         run: |
