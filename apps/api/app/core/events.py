@@ -37,10 +37,12 @@ class EventDispatcher:
         try:
             client = await Client.connect(temporal_host)
             
+            workflow_name = "SalesPipelineWorkflow" if event.event_type == "lead.created" else "TitanOrchestratorWorkflow"
+            
             # Start the main orchestrator workflow for this event.
             # We use the event_id as the workflow ID to ensure deduplication.
             await client.start_workflow(
-                "TitanOrchestratorWorkflow",
+                workflow_name,
                 event.model_dump(mode="json"),
                 id=f"orchestrator-{event.event_id}",
                 task_queue="titan-task-queue",
