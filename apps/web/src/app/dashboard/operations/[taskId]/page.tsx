@@ -54,7 +54,6 @@ export default function TaskDetailsPage({ params }: { params: { taskId: string }
           {/* Timeline Component */}
           <ExecutionTraceViewer 
             taskId={params.taskId} 
-            organizationId={orgId || "demo-org"} 
             token={mockToken} 
           />
         </div>

@@ -9,7 +9,7 @@ export interface TraceStep {
   step_number: number;
   step_name: string;
   status: StepStatus;
-  payload?: unknown;
+  payload?: any;
 }
 
 interface ExecutionTraceViewerProps {
