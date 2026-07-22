@@ -28,7 +28,7 @@ const navItems = [
   { name: 'Audit Logs', href: '/dashboard/audit', icon: ShieldCheck },
 ];
 
-export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
+export default function Sidebar({ isOpen }: SidebarProps) {
   const pathname = usePathname();
 
   return (

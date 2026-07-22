@@ -8,7 +8,7 @@ interface StatCardProps {
   trend?: string;
 }
 
-export default function StatCard({ title, value, icon, colorClass, trend }: StatCardProps) {
+export default function StatCard({ title, value, icon, colorClass }: StatCardProps) {
   return (
     <div className={`rounded shadow-sm text-white overflow-hidden ${colorClass}`}>
       <div className="p-4 flex items-center justify-between relative">

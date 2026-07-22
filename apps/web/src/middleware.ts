@@ -1,5 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+
 
 // Define the routes that strictly require authentication
 const isProtectedRoute = createRouteMatcher([
