@@ -9,6 +9,8 @@ with workflow.unsafe.imports_passed_through():
 
 from app.core.websocket import manager
 from typing import Optional, Dict, Any
+
+
 # Dummy activities for the Golden Path (These would normally be in a separate activities.py)
 @activity.defn
 async def ingest_and_validate_lead(payload: dict) -> dict:
@@ -53,7 +55,9 @@ class SalesPipelineWorkflow:
         org_id = event_data.get("organization_id", "demo-org")
 
         # Helper to emit steps
-        async def emit(step: int, name: str, status: str, payload: Optional[Dict[str, Any]] = None):
+        async def emit(
+            step: int, name: str, status: str, payload: Optional[Dict[str, Any]] = None
+        ):
             await workflow.execute_activity(
                 emit_workflow_update,
                 args=[

@@ -1,40 +1,53 @@
-from prometheus_client import Histogram, Counter, generate_latest, CONTENT_TYPE_LATEST
-from fastapi import APIRouter
-from fastapi.responses import Response
+"""TITAN Prometheus Metrics Exporter."""
+
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
+from fastapi import Response, APIRouter
 
 router = APIRouter()
 
-# --- Prometheus Metrics Definitions ---
+# Agent Metrics
+AGENT_EXECUTIONS = Counter(
+    "titan_agent_executions_total",
+    "Total number of agent executions",
+    ["agent_type", "status"],
+)
 
-# Histogram for tracking the duration of agent executions
-AGENT_EXECUTION_DURATION = Histogram(
+AGENT_DURATION = Histogram(
     "titan_agent_execution_duration_seconds",
-    "Time spent executing LangGraph agents",
-    ["agent_name"],
+    "Agent execution duration",
+    ["agent_type"],
+    buckets=[0.1, 0.5, 1.0, 5.0, 10.0, 30.0],
 )
 
-# Counter for tracking LLM token usage, labeled by model
-LLM_TOKENS_TOTAL = Counter(
-    "titan_llm_tokens_total", "Total number of tokens consumed by LLMs", ["model_name"]
+# LLM Metrics
+LLM_TOKENS = Counter(
+    "titan_llm_tokens_total",
+    "Total LLM tokens consumed",
+    ["model", "type"],  # type: prompt or completion
 )
 
-# Counter for tool executions, tracking success/failure rates
-TOOL_CALLS_TOTAL = Counter(
-    "titan_tool_calls_total", "Total number of tool calls made", ["tool_name", "status"]
+LLM_COST = Counter("titan_llm_cost_usd_total", "Total LLM cost in USD", ["model"])
+
+# Tool Metrics
+TOOL_CALLS = Counter(
+    "titan_tool_calls_total", "Total tool calls", ["tool_name", "status"]
 )
 
-# Histogram for tracking Human-in-the-Loop decision times
+# HITL Metrics
 HITL_APPROVAL_TIME = Histogram(
     "titan_hitl_approval_time_seconds",
-    "Time spent waiting for a human to approve a pending task",
+    "Time taken for human approval",
     ["workflow_type"],
+    buckets=[60, 300, 900, 1800, 3600],
+)
+
+# System Metrics
+ACTIVE_WORKFLOWS = Gauge(
+    "titan_active_workflows", "Number of active Temporal workflows"
 )
 
 
 @router.get("")
-async def metrics():
-    """
-    Exposes Prometheus-compatible metrics.
-    Scraping this endpoint allows visualizing data in Grafana.
-    """
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+def metrics_endpoint() -> Response:
+    """FastAPI endpoint for Prometheus scraping."""
+    return Response(generate_latest(), media_type="text/plain")

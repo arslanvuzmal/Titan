@@ -11,7 +11,10 @@ class MemoryManager:
 
     @staticmethod
     async def save_memory(
-        organization_id: str, memory_type: str, content: str, metadata: Optional[Dict[str, Any]] = None
+        organization_id: str,
+        memory_type: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> MemoryItem:
         """
         Saves a memory item securely to the tenant.
