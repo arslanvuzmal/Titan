@@ -17,7 +17,7 @@ app = FastAPI(
 
 # Rate Limiter setup
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore
 
 # Inject Security Headers
 app.add_middleware(SecurityHeadersMiddleware)

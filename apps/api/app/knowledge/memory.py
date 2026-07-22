@@ -1,5 +1,5 @@
 import uuid
-from typing import List
+from typing import List, Dict, Any, Optional
 from app.knowledge.schemas import MemoryItem
 from app.core.database import get_db
 
@@ -11,7 +11,7 @@ class MemoryManager:
 
     @staticmethod
     async def save_memory(
-        organization_id: str, memory_type: str, content: str, metadata: dict = None
+        organization_id: str, memory_type: str, content: str, metadata: Optional[Dict[str, Any]] = None
     ) -> MemoryItem:
         """
         Saves a memory item securely to the tenant.
@@ -96,7 +96,7 @@ class MemoryManager:
 
     @staticmethod
     async def append_episodic_memory(
-        organization_id: str, content: str, metadata: dict = None
+        organization_id: str, content: str, metadata: Optional[Dict[str, Any]] = None
     ) -> MemoryItem:
         """
         Episodic memories are append-only logs of what the agents accomplished.

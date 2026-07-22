@@ -4,7 +4,7 @@ import os
 import json
 import uuid
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
-from app.api.events import ingest_event_internal
+from app.core.events import TitanEvent, EventDispatcher
 
 router = APIRouter()
 
@@ -61,8 +61,9 @@ async def slack_webhook(request: Request, background_tasks: BackgroundTasks):
         "payload": payload,
     }
 
+    event = TitanEvent(**event_data)
     # Push to our main event router
-    background_tasks.add_task(ingest_event_internal, event_data)
+    background_tasks.add_task(EventDispatcher.dispatch, event)
 
     return {"status": "ok"}
 
@@ -96,6 +97,7 @@ async def hubspot_webhook(request: Request, background_tasks: BackgroundTasks):
         "payload": payload,
     }
 
-    background_tasks.add_task(ingest_event_internal, event_data)
+    event = TitanEvent(**event_data)
+    background_tasks.add_task(EventDispatcher.dispatch, event)
 
     return {"status": "ok"}

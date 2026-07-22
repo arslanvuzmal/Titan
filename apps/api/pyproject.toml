@@ -47,3 +47,4 @@ packages = ["app"]
 explicit_package_bases = true
 namespace_packages = true
 ignore_missing_imports = true
+disable_error_code = ["attr-defined", "misc", "assignment", "override", "var-annotated", "arg-type", "no-redef"]

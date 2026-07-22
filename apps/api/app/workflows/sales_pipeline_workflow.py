@@ -1,5 +1,5 @@
 from datetime import timedelta
-from temporalio import workflow
+from temporalio import workflow, activity
 from temporalio.common import RetryPolicy
 
 # Import activity definitions. Since we define the activities inside the worker/app,
@@ -7,16 +7,17 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from app.core.websocket import manager
 
-
+from app.core.websocket import manager
+from typing import Optional, Dict, Any
 # Dummy activities for the Golden Path (These would normally be in a separate activities.py)
-@workflow.activity
+@activity.defn
 async def ingest_and_validate_lead(payload: dict) -> dict:
     # 1-2. A new lead enters TITAN, normalizes event
     # In a real app, we would insert into the database here.
     return {"lead_id": "lead_123", "status": "validated", "data": payload}
 
 
-@workflow.activity
+@activity.defn
 async def execute_sales_agent_graph(lead_data: dict) -> dict:
     # 4-9. The LangGraph agent analyzes, researches (RAG), scores, and generates email
     # Mocking the langgraph execution for the demo
@@ -27,19 +28,19 @@ async def execute_sales_agent_graph(lead_data: dict) -> dict:
     }
 
 
-@workflow.activity
+@activity.defn
 async def execute_approved_actions(email_draft: str) -> dict:
     # 12-14. Send email, update CRM, schedule follow-up
     return {"status": "success", "crm_id": "crm_456"}
 
 
-@workflow.activity
+@activity.defn
 async def finalize_and_audit(results: dict) -> dict:
     # 15. Log every action immutably
     return {"status": "audited"}
 
 
-@workflow.activity
+@activity.defn
 async def emit_workflow_update(org_id: str, step_data: dict) -> None:
     # Helper activity to push websocket updates
     await manager.broadcast_to_org(org_id, step_data)
@@ -52,7 +53,7 @@ class SalesPipelineWorkflow:
         org_id = event_data.get("organization_id", "demo-org")
 
         # Helper to emit steps
-        async def emit(step: int, name: str, status: str, payload: dict = None):
+        async def emit(step: int, name: str, status: str, payload: Optional[Dict[str, Any]] = None):
             await workflow.execute_activity(
                 emit_workflow_update,
                 args=[

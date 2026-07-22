@@ -1,7 +1,7 @@
 import logging
 import json
 from copy import deepcopy
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class AuditLogger:
         tool_name: str,
         parameters: Dict[str, Any],
         outcome: str,
-        error_message: str = None,
+        error_message: Optional[str] = None,
     ):
         """
         Writes the audit trail to the database.
