@@ -23,7 +23,7 @@ AGENT_DURATION = Histogram(
 LLM_TOKENS = Counter(
     "titan_llm_tokens_total",
     "Total LLM tokens consumed",
-    ["model", "type"],  # type: prompt or completion
+    ["model", "type"],  # token_type: prompt or completion
 )
 
 LLM_COST = Counter("titan_llm_cost_usd_total", "Total LLM cost in USD", ["model"])
