@@ -1,0 +1,16 @@
+{
+  "name": "titan",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "db:generate": "turbo db:generate",
+    "db:push": "turbo db:push"
+  },
+  "devDependencies": {
+    "turbo": "^1.13.0"
+  },
+  "packageManager": "pnpm@8.15.0"
+}

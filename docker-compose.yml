@@ -1,0 +1,48 @@
+version: '3.9'
+
+services:
+  # 1. Primary Database with Vector Support
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: titan-postgres
+    environment:
+      POSTGRES_USER: titan
+      POSTGRES_PASSWORD: titan_dev_password
+      POSTGRES_DB: titan_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: >
+      postgres -c max_connections=200 
+               -c shared_buffers=256MB
+
+  # 2. Message Broker & Cache
+  redis:
+    image: redis:7-alpine
+    container_name: titan-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # 3. Temporal Server (Durable Execution Engine)
+  temporal:
+    image: temporalio/auto-setup:latest
+    container_name: titan-temporal
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=titan
+      - POSTGRES_PWD=titan_dev_password
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
+    ports:
+      - "7233:7233"   # gRPC
+      - "8233:8233"   # Web UI
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  redis_data:
