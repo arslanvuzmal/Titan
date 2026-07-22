@@ -7,6 +7,7 @@ const isProtectedRoute = createRouteMatcher([
   '/api/(.*)'
 ]);
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default clerkMiddleware((auth: any, req: any) => {
   // If the user navigates to a protected route without a valid session,
   // Clerk will automatically redirect them to the configured /sign-in page

@@ -9,6 +9,7 @@ export interface TraceStep {
   step_number: number;
   step_name: string;
   status: StepStatus;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload?: any;
 }
 

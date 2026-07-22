@@ -7,7 +7,7 @@ import { ShieldCheck, Calendar, CheckSquare, XSquare } from 'lucide-react';
 import { useApiClient } from '@/lib/api-client';
 
 export default function TaskDetailsPage({ params }: { params: { taskId: string } }) {
-  const { orgId } = useAuth();
+  useAuth();
   // Using a mock token for WebSocket if Clerk's getToken is async, 
   // normally you'd fetch it and pass it to the viewer.
   // For demonstration, we'll assume the component handles its own token fetch if needed,
