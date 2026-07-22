@@ -30,7 +30,9 @@ dev = [
     "respx",
     "ruff",
     "black",
-    "mypy"
+    "mypy",
+    "coverage",
+    "pytest-cov"
 ]
 
 [tool.uv.sources]
