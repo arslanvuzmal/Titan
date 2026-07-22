@@ -4,12 +4,23 @@ from app.core.config import settings
 from app.core.auth import get_current_user, require_role, UserContext
 from app.core.websocket import manager
 from app.api import tasks, events
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from app.core.rate_limiter import limiter
+from app.core.security_headers import SecurityHeadersMiddleware
 
 app = FastAPI(
     title="TITAN API",
     version="0.1.0",
     docs_url="/api/docs" if settings.ENVIRONMENT != "production" else None
 )
+
+# Rate Limiter setup
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Inject Security Headers
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS for Next.js Frontend
 app.add_middleware(

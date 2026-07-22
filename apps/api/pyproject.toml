@@ -19,7 +19,8 @@ dependencies = [
     "cryptography",
     "opentelemetry-api",
     "opentelemetry-sdk",
-    "prometheus-client"
+    "prometheus-client",
+    "slowapi"
 ]
 
 [project.optional-dependencies]
