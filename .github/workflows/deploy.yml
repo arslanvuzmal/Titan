@@ -33,7 +33,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install uv (API)
-        run: pip install uv==0.1.20
+        run: pip install uv
 
       - name: Lint Next.js
         working-directory: ./apps/web

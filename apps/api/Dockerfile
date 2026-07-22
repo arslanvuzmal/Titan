@@ -4,7 +4,7 @@
 FROM python:3.11-slim as builder
 
 # Install uv for fast dependency resolution
-RUN pip install --no-cache-dir uv==0.1.20
+RUN pip install --no-cache-dir uv
 
 WORKDIR /build
 
