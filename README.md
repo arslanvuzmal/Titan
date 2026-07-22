@@ -1,164 +1,140 @@
-# ⚡ TITAN 🤖💼
-[![CI/CD Pipeline](https://github.com/arslanvuzmal/titan/actions/workflows/ci.yml/badge.svg)](https://github.com/arslanvuzmal/titan/actions/workflows/ci.yml)
-[![Test Coverage](https://img.shields.io/badge/coverage-100%25-success.svg)](#)
+# TITAN: Autonomous AI Business Operations Platform
 
-**Autonomous AI Business Operations Platform**
+<div align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/arslanvuzmal/titan/ci-cd.yml?branch=main&label=CI%2FCD&style=for-the-badge&color=success" alt="CI/CD Status" />
+  <img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11" />
+  <img src="https://img.shields.io/badge/Node.js-20-green?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js 20" />
+  <img src="https://img.shields.io/badge/License-MIT-purple?style=for-the-badge" alt="License MIT" />
+</div>
 
-## CI/CD & Testing
+<br />
 
-TITAN features a massive multi-layered testing suite and strict CI/CD pipeline.
-
-### Running Tests Locally
-To debug CI/CD failures before pushing, run the debug script:
-```bash
-./scripts/debug_ci.sh
-```
-
-### Troubleshooting
-If the GitHub Actions pipeline fails:
-1. Ensure `apps/api/pyproject.toml` is valid and the environment installs cleanly.
-2. Ensure you have no ESLint warnings using `pnpm lint` in `apps/web`.
-3. Check the Actions log in GitHub for specific `ruff`, `black`, `mypy`, or `tsc` failures.
+**TITAN** is an enterprise-grade, event-driven AI operations platform designed to automate complex business workflows with human-in-the-loop oversight. Built for scale, observability, and absolute reliability.
 
 ---
 
-![Build Status](https://img.shields.io/github/actions/workflow/status/your-org/titan/ci.yml?branch=main)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
-![Node](https://img.shields.io/badge/node-20%2B-green.svg)
-![License](https://img.shields.io/badge/license-MIT-purple.svg)
+## 🏗️ Architecture
 
-TITAN is an enterprise-grade platform that orchestrates autonomous AI agents to handle complex business operations, from inbound sales qualification to deep market research. It utilizes a durable execution engine to guarantee state persistence and seamlessly integrates human-in-the-loop (HITL) approval workflows before taking sensitive actions.
-
----
-
-## 🏛️ Architecture
-
-TITAN utilizes a highly decoupled, event-driven architecture powered by LangGraph for AI state management and Temporal for durable orchestration.
+The entire system is orchestrated via an event-driven loop backed by Temporal and LangGraph, enabling resilient AI workflows that can pause for human feedback and resume automatically.
 
 ```mermaid
 graph TD
-    %% Define Styles
-    classDef frontend fill:#3c8dbc,stroke:#1e282c,stroke-width:2px,color:#fff
-    classDef api fill:#00a65a,stroke:#00733e,stroke-width:2px,color:#fff
-    classDef workflow fill:#f39c12,stroke:#c87f0a,stroke-width:2px,color:#fff
-    classDef ai fill:#8e44ad,stroke:#5e2a73,stroke-width:2px,color:#fff
-    classDef db fill:#34495e,stroke:#2c3e50,stroke-width:2px,color:#fff
+    %% Define styles
+    classDef client fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:white;
+    classDef api fill:#10b981,stroke:#059669,stroke-width:2px,color:white;
+    classDef core fill:#8b5cf6,stroke:#7c3aed,stroke-width:2px,color:white;
+    classDef data fill:#f59e0b,stroke:#d97706,stroke-width:2px,color:white;
+    classDef ext fill:#64748b,stroke:#475569,stroke-width:2px,color:white;
 
-    subgraph "Frontend (Next.js)"
-        UI[AdminLTE Dashboard]:::frontend
-        Auth[Clerk JWT]:::frontend
-    end
+    %% Client Layer
+    Dashboard["🖥️ Next.js Dashboard"]:::client
+    Webhooks["🪝 External Webhooks"]:::client
 
-    subgraph "API Layer (FastAPI)"
-        Ingest[Event Ingestion]:::api
-        WS[Real-time WebSockets]:::api
-    end
+    %% API Layer
+    FastAPI["⚡ FastAPI Gateway"]:::api
+    Auth["🔐 Clerk Auth"]:::api
 
-    subgraph "Execution Engine (Temporal)"
-        Orchestrator[Titan Orchestrator]:::workflow
-        HITL[Approval Gate]:::workflow
-    end
+    %% Core AI & Orchestration Layer
+    Temporal["⏳ Temporal.io (Orchestrator)"]:::core
+    LangGraph["🧠 LangGraph (AI Agents)"]:::core
+    Worker["⚙️ Python Worker Node"]:::core
 
-    subgraph "AI Intelligence (LangGraph)"
-        Context[Context Assembler]:::ai
-        Agents[Specialized Agents]:::ai
-        Verifier[Pydantic Verifier]:::ai
-    end
+    %% Data Layer
+    Redis["🔴 Redis (Cache & Queue)"]:::data
+    Postgres["🐘 PostgreSQL (State)"]:::data
+    VectorDB["📊 Qdrant (RAG Vector Store)"]:::data
 
-    subgraph "Knowledge & Storage"
-        Prisma[(PostgreSQL DB)]:::db
-        Vector[(pgvector)]:::db
-        Redis[(Redis Cache)]:::db
-    end
+    %% External
+    LLM["🤖 LLM Providers (OpenAI/Anthropic)"]:::ext
+    Tools["🛠️ External Tools (Stripe, Slack, etc.)"]:::ext
 
-    %% Flow
-    UI -->|API Requests| Ingest
-    Auth -->|Validates| Ingest
-    Ingest -->|Spawns| Orchestrator
+    %% Connections
+    Dashboard <-->|REST/WebSocket| FastAPI
+    Webhooks -->|Events| FastAPI
+    FastAPI <--> Auth
     
-    Orchestrator -->|Invokes| Context
-    Context -->|Fetches Memory| Vector
-    Context --> Agents
-    Agents --> Verifier
-    Verifier -->|Yields Action| HITL
+    FastAPI -->|Schedule Workflow| Temporal
+    FastAPI <--> Redis
+    FastAPI <--> Postgres
     
-    HITL -.->|Waits for| UI
-    UI -.->|Approves/Rejects| HITL
+    Temporal <-->|Dispatch| Worker
+    Worker <--> LangGraph
     
-    HITL -->|Persists State| Prisma
-    Orchestrator -->|Updates| WS
-    WS --> UI
+    LangGraph <-->|Context Retrieval| VectorDB
+    LangGraph <--> Tools
+    LangGraph <--> LLM
 ```
+
+---
+
+## 🚀 Key Features
+
+TITAN is built across a robust **16-step Golden Path** ensuring production readiness:
+- **Human-in-the-Loop (HITL):** AI agents automatically suspend execution and request human approval for high-risk actions.
+- **Resilient Workflows:** Powered by Temporal, workflows survive server crashes, rate limits, and network partitions with automatic retries.
+- **Retrieval-Augmented Generation (RAG):** Context-aware AI agents utilizing a vector database for semantic search and precise answers.
+- **Enterprise Security:** JWT-based authentication via Clerk, Role-Based Access Control (RBAC), and secrets management.
+- **Full Observability:** Distributed tracing (OpenTelemetry), PromQL metrics, and structured JSON logging.
 
 ---
 
 ## 🛠️ Tech Stack
 
-**Frontend:** Next.js 14 (App Router), React, TailwindCSS, AdminLTE UI aesthetics, Recharts, Clerk Auth.  
-**Backend:** FastAPI, Python 3.11, Pydantic V2.  
-**AI Orchestration:** LangGraph, LangChain.  
-**Durable Execution:** Temporal.io.  
-**Database & Vector Store:** PostgreSQL (via Prisma), `pgvector`.  
-**Infrastructure:** Docker Compose, Redis, pnpm, Turborepo.  
+| Category | Technologies |
+|---|---|
+| **Frontend** | Next.js 14, React 19, Tailwind CSS v4, Recharts, Lucide Icons |
+| **Backend** | Python 3.11, FastAPI, Pydantic, Prisma Client Python |
+| **AI & Orchestration** | LangGraph, LangChain, Temporal.io |
+| **Data Infrastructure** | PostgreSQL, Redis, Vector DB (Qdrant) |
+| **DevOps & CI/CD** | Docker, Docker Compose, GitHub Actions, GHCR |
 
 ---
 
-## 🚀 Quick Start (Local Development)
+## 💻 Local Setup
 
-### Prerequisites
-- Docker & Docker Desktop
-- [Node.js v20+](https://nodejs.org/)
-- [Python 3.11+](https://www.python.org/)
-- [pnpm](https://pnpm.io/) (`npm i -g pnpm`)
-- [uv](https://github.com/astral-sh/uv) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+Getting TITAN running locally is frictionless. The entire backing infrastructure runs in Docker.
 
-### 1. Clone & Install
+### 1. Start the Infrastructure
 ```bash
-git clone https://github.com/your-org/titan.git
-cd titan
+docker-compose up -d
+```
+*This spins up PostgreSQL, Redis, and the Temporal Server.*
 
-# Install Monorepo Node dependencies
-pnpm install
-
-# Install Python backend dependencies
+### 2. Install Dependencies
+**Backend (FastAPI)**
+```bash
 cd apps/api
 uv pip install -e .[dev]
 ```
 
-### 2. Environment Variables
-Copy the templates and fill in your keys (especially `CLERK_SECRET_KEY` and `OPENAI_API_KEY`).
+**Frontend (Next.js)**
 ```bash
-cp .env.example .env
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.local.example apps/web/.env.local
+cd apps/web
+pnpm install
 ```
 
-### 3. Start Infrastructure & Database
-Ensure Docker is running, then boot up Postgres, Redis, and Temporal.
+### 3. Run the Development Servers
+Open two terminals:
 ```bash
-# In the root directory
-docker-compose up -d
-
-# Push the Prisma schema to the database
-pnpm db:push
+# Terminal 1: Backend
+cd apps/api
+uvicorn app.main:app --reload
 ```
 
-### 4. Run the Stack
-Start the frontend, FastAPI server, and Temporal worker in parallel.
 ```bash
+# Terminal 2: Frontend
+cd apps/web
 pnpm dev
 ```
 
-The Dashboard will be available at `http://localhost:3000` and the API Swagger docs at `http://localhost:8000/api/docs`.
-
 ---
 
-## 🛡️ Strict Tenant Isolation
+## 📸 Screenshots
 
-TITAN is built for multi-tenancy. At the core of the data access layer and the RAG pipeline, every database transaction and vector search is strictly filtered by `organization_id`. The Context Assembler enforces this at the code level, guaranteeing that an AI Agent operating on behalf of Tenant A cannot access documents uploaded by Tenant B.
+*(Replace these placeholders with actual screenshots of your dashboard)*
 
-## 🤝 Contributing
-Code quality is enforced via GitHub Actions and `pre-commit`. Before pushing, ensure your code passes:
-```bash
-pre-commit run --all-files
-```
+![Dashboard Overview](https://placehold.co/800x400/1e1e2e/ffffff?text=Dashboard+Overview)
+*The main operations control center.*
+
+![Execution Trace](https://placehold.co/800x400/1e1e2e/ffffff?text=LangGraph+Execution+Trace)
+*Real-time observability into the LangGraph AI decision loops.*

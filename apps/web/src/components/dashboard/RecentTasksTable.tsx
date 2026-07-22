@@ -11,42 +11,49 @@ const mockTasks = [
 ];
 
 export default function RecentTasksTable() {
-  const getBadgeColor = (status: string) => {
+  const getBadgeStyle = (status: string) => {
     switch (status) {
-      case 'COMPLETED': return 'bg-[#00a65a] text-white';
-      case 'RUNNING': return 'bg-[#00c0ef] text-white';
-      case 'PENDING_APPROVAL': return 'bg-[#f39c12] text-white';
-      case 'FAILED': return 'bg-[#dd4b39] text-white';
-      default: return 'bg-gray-200 text-gray-800';
+      case 'COMPLETED': return 'bg-green-100 text-green-700 border-green-200';
+      case 'RUNNING': return 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse';
+      case 'PENDING_APPROVAL': return 'bg-orange-100 text-orange-700 border-orange-200';
+      case 'FAILED': return 'bg-red-100 text-red-700 border-red-200';
+      default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
   return (
-    <div className="bg-white rounded shadow-sm overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
-        <h3 className="font-medium text-gray-800">Recent Tasks</h3>
-        <button className="text-xs text-[#3c8dbc] hover:underline">View All</button>
+    <div className="bg-white rounded shadow-sm overflow-hidden h-full">
+      <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+        <h3 className="font-medium text-gray-800">Recent Workflow Executions</h3>
+        <button className="text-xs font-medium text-[#3c8dbc] hover:text-[#2c6ea0] transition-colors">View All &rarr;</button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
-          <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
+          <thead className="bg-white text-gray-500 font-medium border-b border-gray-100 text-xs uppercase tracking-wider">
             <tr>
-              <th className="px-4 py-3">Task ID</th>
-              <th className="px-4 py-3">Title</th>
-              <th className="px-4 py-3">Agent</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Time</th>
+              <th className="px-4 py-3 font-medium">Execution ID</th>
+              <th className="px-4 py-3 font-medium">Task</th>
+              <th className="px-4 py-3 font-medium">Agent Node</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Timestamp</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-gray-50 bg-white">
             {mockTasks.map((task) => (
-              <tr key={task.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-4 py-3 font-medium text-[#3c8dbc] cursor-pointer hover:underline">{task.id}</td>
-                <td className="px-4 py-3 text-gray-800">{task.title}</td>
-                <td className="px-4 py-3 text-gray-600">{task.agent}</td>
+              <tr key={task.id} className="hover:bg-blue-50/30 transition-colors group">
+                <td className="px-4 py-3 font-mono text-xs font-medium text-[#3c8dbc] cursor-pointer group-hover:underline">
+                  {task.id}
+                </td>
+                <td className="px-4 py-3 text-gray-800 font-medium">{task.title}</td>
+                <td className="px-4 py-3 text-gray-600">
+                  <span className="flex items-center">
+                    <span className="w-2 h-2 rounded-full bg-gray-300 mr-2"></span>
+                    {task.agent}
+                  </span>
+                </td>
                 <td className="px-4 py-3">
-                  <span className={`px-2 py-1 rounded text-xs font-semibold ${getBadgeColor(task.status)}`}>
-                    {task.status}
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getBadgeStyle(task.status)}`}>
+                    {task.status.replace('_', ' ')}
                   </span>
                 </td>
                 <td className="px-4 py-3 text-gray-500 text-xs">{task.time}</td>

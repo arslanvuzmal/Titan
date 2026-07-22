@@ -1,8 +1,7 @@
 "use client";
 
 import React from 'react';
-import { UserButton } from "@clerk/nextjs";
-import { Menu, Bell } from 'lucide-react';
+import { Menu, Bell, User } from 'lucide-react';
 
 interface TopNavbarProps {
   sidebarOpen: boolean;
@@ -35,9 +34,9 @@ export default function TopNavbar({ sidebarOpen, setSidebarOpen }: TopNavbarProp
           </span>
         </button>
 
-        {/* User Profile via Clerk */}
-        <div className="flex items-center bg-[#367fa9] rounded-full p-[2px]">
-          <UserButton afterSignOutUrl="/sign-in" />
+        {/* User Avatar */}
+        <div className="flex items-center bg-[#367fa9] rounded-full p-1.5">
+          <User className="h-5 w-5" />
         </div>
       </div>
     </header>
