@@ -6,6 +6,7 @@ from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 
+
 class AuditLogger:
     """
     Handles immutable logging of all tool executions for compliance and debugging.
@@ -18,11 +19,11 @@ class AuditLogger:
         """
         redacted = deepcopy(params)
         sensitive_keys = ["password", "secret", "token", "key", "authorization"]
-        
+
         for k in redacted.keys():
             if any(s in k.lower() for s in sensitive_keys):
                 redacted[k] = "[REDACTED]"
-                
+
         return json.dumps(redacted)
 
     @staticmethod
@@ -32,15 +33,17 @@ class AuditLogger:
         tool_name: str,
         parameters: Dict[str, Any],
         outcome: str,
-        error_message: str = None
+        error_message: str = None,
     ):
         """
         Writes the audit trail to the database.
         """
         db = await anext(get_db())
         safe_params = AuditLogger._redact_sensitive_params(parameters)
-        
-        logger.info(f"AUDIT LOG | Org: {organization_id} | Task: {task_id} | Tool: {tool_name} | Outcome: {outcome}")
+
+        logger.info(
+            f"AUDIT LOG | Org: {organization_id} | Task: {task_id} | Tool: {tool_name} | Outcome: {outcome}"
+        )
 
         # Assuming an AuditLog table in Prisma
         # fallback to raw query for architectural completeness
@@ -48,7 +51,7 @@ class AuditLogger:
         INSERT INTO "AuditLog" ("organizationId", "taskId", "actionType", parameters, outcome, "errorMessage")
         VALUES ($1, $2, $3, $4::jsonb, $5, $6)
         """
-        
+
         try:
             await db.execute_raw(
                 query,
@@ -57,7 +60,7 @@ class AuditLogger:
                 tool_name,
                 safe_params,
                 outcome,
-                error_message
+                error_message,
             )
         except Exception as e:
             logger.error(f"CRITICAL: Failed to write to audit log: {str(e)}")

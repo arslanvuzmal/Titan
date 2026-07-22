@@ -12,7 +12,7 @@ provider = TracerProvider()
 otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
 if otlp_endpoint:
     # Use OTLP exporter if configured (requires opentelemetry-exporter-otlp)
-    pass 
+    pass
 else:
     # Fallback to console
     processor = BatchSpanProcessor(ConsoleSpanExporter())
@@ -20,6 +20,7 @@ else:
 
 trace.set_tracer_provider(provider)
 tracer = trace.get_tracer(__name__)
+
 
 @contextmanager
 def LLMTracer(model_name: str, temperature: float = 0.7):

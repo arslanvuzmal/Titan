@@ -1,7 +1,8 @@
 import uuid
-from typing import List, Optional
+from typing import List
 from app.knowledge.schemas import MemoryItem
 from app.core.database import get_db
+
 
 class MemoryManager:
     """
@@ -10,10 +11,7 @@ class MemoryManager:
 
     @staticmethod
     async def save_memory(
-        organization_id: str, 
-        memory_type: str, 
-        content: str, 
-        metadata: dict = None
+        organization_id: str, memory_type: str, content: str, metadata: dict = None
     ) -> MemoryItem:
         """
         Saves a memory item securely to the tenant.
@@ -32,27 +30,38 @@ class MemoryManager:
         RETURNING id, "organizationId", "type", content, metadata;
         """
         import json
-        
+
         # NOTE: If "Memory" table is not in Prisma, this will fail in runtime until migrated.
         # But for architecture completeness, this is the access pattern.
         try:
-            result = await db.query_raw(query, memory_id, organization_id, memory_type, content, json.dumps(metadata))
+            result = await db.query_raw(
+                query,
+                memory_id,
+                organization_id,
+                memory_type,
+                content,
+                json.dumps(metadata),
+            )
             row = result[0]
             return MemoryItem(
                 id=row["id"],
                 organization_id=row["organizationId"],
                 memory_type=row["type"],
                 content=row["content"],
-                metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
+                metadata=(
+                    json.loads(row["metadata"])
+                    if isinstance(row["metadata"], str)
+                    else row["metadata"]
+                ),
             )
-        except Exception as e:
+        except Exception:
             # Fallback for compilation if table doesn't exist yet
             return MemoryItem(
                 id=memory_id,
                 organization_id=organization_id,
                 memory_type=memory_type,
                 content=content,
-                metadata=metadata
+                metadata=metadata,
             )
 
     @staticmethod
@@ -67,21 +76,31 @@ class MemoryManager:
         try:
             results = await db.query_raw(query, organization_id)
             import json
+
             return [
                 MemoryItem(
                     id=row["id"],
                     organization_id=row["organizationId"],
                     memory_type=row["type"],
                     content=row["content"],
-                    metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
-                ) for row in results
+                    metadata=(
+                        json.loads(row["metadata"])
+                        if isinstance(row["metadata"], str)
+                        else row["metadata"]
+                    ),
+                )
+                for row in results
             ]
         except Exception:
             return []
 
     @staticmethod
-    async def append_episodic_memory(organization_id: str, content: str, metadata: dict = None) -> MemoryItem:
+    async def append_episodic_memory(
+        organization_id: str, content: str, metadata: dict = None
+    ) -> MemoryItem:
         """
         Episodic memories are append-only logs of what the agents accomplished.
         """
-        return await MemoryManager.save_memory(organization_id, "EPISODIC", content, metadata)
+        return await MemoryManager.save_memory(
+            organization_id, "EPISODIC", content, metadata
+        )

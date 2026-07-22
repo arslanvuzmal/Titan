@@ -1,7 +1,7 @@
-import asyncio
 import json
 from typing import Dict, Any
 from fastapi import WebSocket
+
 
 class ConnectionManager:
     def __init__(self):
@@ -41,6 +41,7 @@ class ConnectionManager:
                 except Exception:
                     # If sending fails, client disconnected abruptly
                     pass
+
 
 # Global singleton
 manager = ConnectionManager()

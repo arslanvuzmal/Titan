@@ -1,13 +1,15 @@
 from langchain_core.callbacks import BaseCallbackHandler
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 from .tracer import tracer
+
 
 class TITANTracingCallback(BaseCallbackHandler):
     """
     A custom LangChain/LangGraph callback handler that creates OpenTelemetry spans
     for every LangGraph node execution.
     """
+
     def __init__(self):
         super().__init__()
         # We need to map LangChain run_ids to OTel spans
@@ -21,7 +23,13 @@ class TITANTracingCallback(BaseCallbackHandler):
         return str_val
 
     def on_chain_start(
-        self, serialized: Dict[str, Any], inputs: Dict[str, Any], *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        serialized: Dict[str, Any],
+        inputs: Dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         span_name = serialized.get("name", "langgraph_node")
         span = tracer.start_span(span_name)
@@ -29,7 +37,12 @@ class TITANTracingCallback(BaseCallbackHandler):
         self.span_map[run_id] = span
 
     def on_chain_end(
-        self, outputs: Dict[str, Any], *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        outputs: Dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         if run_id in self.span_map:
             span = self.span_map[run_id]
@@ -38,7 +51,12 @@ class TITANTracingCallback(BaseCallbackHandler):
             del self.span_map[run_id]
 
     def on_chain_error(
-        self, error: Exception, *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        error: Exception,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         if run_id in self.span_map:
             span = self.span_map[run_id]
@@ -48,7 +66,13 @@ class TITANTracingCallback(BaseCallbackHandler):
             del self.span_map[run_id]
 
     def on_tool_start(
-        self, serialized: Dict[str, Any], input_str: str, *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        serialized: Dict[str, Any],
+        input_str: str,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         tool_name = serialized.get("name", "unknown_tool")
         span = tracer.start_span(f"tool:{tool_name}")
@@ -56,7 +80,12 @@ class TITANTracingCallback(BaseCallbackHandler):
         self.span_map[run_id] = span
 
     def on_tool_end(
-        self, output: str, *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        output: str,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         if run_id in self.span_map:
             span = self.span_map[run_id]
@@ -65,7 +94,12 @@ class TITANTracingCallback(BaseCallbackHandler):
             del self.span_map[run_id]
 
     def on_tool_error(
-        self, error: Exception, *, run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
+        self,
+        error: Exception,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
     ) -> Any:
         if run_id in self.span_map:
             span = self.span_map[run_id]

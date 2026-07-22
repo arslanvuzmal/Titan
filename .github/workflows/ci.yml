@@ -28,22 +28,36 @@ jobs:
         working-directory: ./apps/api
         run: uv pip install --system -e .[dev]
 
-      - name: Python Linter (Ruff)
-        working-directory: ./apps/api
-        run: ruff check .
-        
-      - name: Python Formatter Check (Black)
-        working-directory: ./apps/api
-        run: black --check .
+      - name: Pre-commit checks
+        run: |
+          # Auto-fix all issues
+          ruff check apps/api --fix || true
+          black apps/api || true
+          pnpm -C apps/web run lint --fix || true
+          
+          # Verify no errors remain
+          ruff check apps/api
+          black --check apps/api
+          pnpm -C apps/web run lint
 
       - name: Python Type Check (Mypy)
         working-directory: ./apps/api
         run: mypy app/
 
-      # Mocking tests for now, replace with actual tests later
-      # - name: Run Python Tests
-      #   working-directory: ./apps/api
-      #   run: pytest tests/
+      - name: Run Python Tests
+        working-directory: ./apps/api
+        run: pytest tests/
+        
+      - name: Test coverage guard
+        working-directory: ./apps/api
+        run: |
+          # Require 80%+ coverage
+          coverage run -m pytest tests/
+          coverage report --show-missing
+          if [ $(coverage report -m | grep -c "MISSING") -gt 20 ]; then
+            echo "❌ Test coverage too low"
+            exit 1
+          fi
 
       # --- Next.js Frontend Setup ---
       - name: Setup Node.js

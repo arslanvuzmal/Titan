@@ -1,4 +1,3 @@
-from typing import Dict, Any, Literal
 import logging
 from langgraph.graph import StateGraph, END
 from app.agents.schemas import TitanAgentState
@@ -7,13 +6,14 @@ from app.agents.specialized.research_agent import ResearchAgent
 
 logger = logging.getLogger(__name__)
 
+
 async def router_node(state: TitanAgentState) -> TitanAgentState:
     """
     Analyzes the event type to determine the appropriate specialized agent.
     """
     event_type = state["event"].get("event_type", "")
     logger.info(f"Router analyzing event: {event_type}")
-    
+
     # Simple routing logic based on event type.
     # In a more advanced setup, this could be an LLM call itself (semantic routing).
     if "lead" in event_type or "sales" in event_type:
@@ -22,9 +22,10 @@ async def router_node(state: TitanAgentState) -> TitanAgentState:
         state["current_step"] = "route_to_research"
     else:
         state["current_step"] = "end"
-        
+
     state["agent_history"].append(f"Routed to {state['current_step']}")
     return state
+
 
 async def planner_node(state: TitanAgentState) -> TitanAgentState:
     """
@@ -33,6 +34,7 @@ async def planner_node(state: TitanAgentState) -> TitanAgentState:
     """
     logger.info("Planner passing through.")
     return state
+
 
 async def verifier_node(state: TitanAgentState) -> TitanAgentState:
     """
@@ -47,6 +49,7 @@ async def verifier_node(state: TitanAgentState) -> TitanAgentState:
         #    state["is_complete"] = True
     return state
 
+
 async def action_gate_node(state: TitanAgentState) -> TitanAgentState:
     """
     Evaluates generated actions. If any require approval, pauses the graph.
@@ -56,12 +59,14 @@ async def action_gate_node(state: TitanAgentState) -> TitanAgentState:
             logger.info("Action requires approval. Yielding to HITL.")
             state["current_step"] = "PENDING_APPROVAL"
             return state
-            
+
     # If no approval needed, mark complete (Phase 7 Action Engine will pick it up)
     state["is_complete"] = True
     return state
 
+
 # --- Conditional Edges ---
+
 
 def decide_next_agent(state: TitanAgentState) -> str:
     """Determines which node to execute next based on the router."""
@@ -71,6 +76,7 @@ def decide_next_agent(state: TitanAgentState) -> str:
         return "research_agent"
     return "end"
 
+
 def check_verification(state: TitanAgentState) -> str:
     """Checks if we need to retry or move to the action gate."""
     if state.get("error_state"):
@@ -78,6 +84,7 @@ def check_verification(state: TitanAgentState) -> str:
         # For this skeleton, we just end on error.
         return "end"
     return "action_gate"
+
 
 # --- Build Graph ---
 
@@ -98,11 +105,7 @@ workflow.set_entry_point("router")
 workflow.add_conditional_edges(
     "router",
     decide_next_agent,
-    {
-        "sales_agent": "sales_agent",
-        "research_agent": "research_agent",
-        "end": END
-    }
+    {"sales_agent": "sales_agent", "research_agent": "research_agent", "end": END},
 )
 
 # After specialized agents, go to verifier
@@ -111,12 +114,7 @@ workflow.add_edge("research_agent", "verifier")
 
 # Verifier decides if we proceed to Action Gate or End (on error)
 workflow.add_conditional_edges(
-    "verifier",
-    check_verification,
-    {
-        "action_gate": "action_gate",
-        "end": END
-    }
+    "verifier", check_verification, {"action_gate": "action_gate", "end": END}
 )
 
 workflow.add_edge("action_gate", END)

@@ -9,16 +9,15 @@ export interface TraceStep {
   step_number: number;
   step_name: string;
   status: StepStatus;
-  payload?: any;
+  payload?: unknown;
 }
 
 interface ExecutionTraceViewerProps {
   taskId: string;
-  organizationId: string;
   token: string;
 }
 
-export default function ExecutionTraceViewer({ taskId, organizationId, token }: ExecutionTraceViewerProps) {
+export default function ExecutionTraceViewer({ taskId, token }: ExecutionTraceViewerProps) {
   const [steps, setSteps] = useState<TraceStep[]>(
     Array.from({ length: 16 }, (_, i) => ({
       step_number: i + 1,

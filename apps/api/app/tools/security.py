@@ -2,16 +2,19 @@ from dataclasses import dataclass, field
 from typing import Dict
 import os
 
+
 @dataclass
 class ToolContext:
     """
     Context passed to a tool during execution.
     Holds tenant identifiers and dynamically injected secrets.
     """
+
     organization_id: str
     user_id: str
     task_id: str
     secrets: Dict[str, str] = field(default_factory=dict)
+
 
 def inject_secrets(tool_name: str) -> Dict[str, str]:
     """
@@ -21,7 +24,7 @@ def inject_secrets(tool_name: str) -> Dict[str, str]:
     Here we fetch from the environment securely.
     """
     secrets = {}
-    
+
     if tool_name == "send_email":
         # Required for SendGrid/SMTP
         secrets["SENDGRID_API_KEY"] = os.getenv("SENDGRID_API_KEY", "")
@@ -31,5 +34,5 @@ def inject_secrets(tool_name: str) -> Dict[str, str]:
     elif tool_name == "search_web":
         # Required for Serper/Tavily
         secrets["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY", "")
-        
+
     return secrets

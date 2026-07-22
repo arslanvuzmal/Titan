@@ -1,15 +1,16 @@
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from typing import Dict, List
-import json
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class ConnectionManager:
     """
     Manages active WebSocket connections for real-time dashboard updates.
     Connections are partitioned by organization_id to ensure tenant isolation.
     """
+
     def __init__(self):
         # organization_id -> list of active connections
         self.active_connections: Dict[str, List[WebSocket]] = {}
@@ -42,9 +43,10 @@ class ConnectionManager:
                     await connection.send_json(message)
                 except Exception:
                     disconnected.append(connection)
-            
+
             # Clean up dropped connections
             for conn in disconnected:
                 self.disconnect(conn, organization_id)
+
 
 manager = ConnectionManager()

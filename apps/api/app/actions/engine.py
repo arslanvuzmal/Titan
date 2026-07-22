@@ -10,10 +10,12 @@ from app.actions.audit import AuditLogger
 
 logger = logging.getLogger(__name__)
 
+
 class RiskLevel(str, Enum):
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
+
 
 class ActionEngine:
     """
@@ -28,7 +30,6 @@ class ActionEngine:
         """
         high_risk_tools = ["send_email", "execute_sql_query", "delete_record"]
         medium_risk_tools = ["update_crm", "create_deal"]
-        low_risk_tools = ["search_web", "query_knowledge_base", "read_document"]
 
         if action_request.tool_name in high_risk_tools:
             return RiskLevel.HIGH
@@ -37,7 +38,11 @@ class ActionEngine:
         return RiskLevel.LOW
 
     @staticmethod
-    async def execute_action(action_request: ActionRequest, context: ToolContext, agent_name: str = "UnknownAgent") -> ToolResult:
+    async def execute_action(
+        action_request: ActionRequest,
+        context: ToolContext,
+        agent_name: str = "UnknownAgent",
+    ) -> ToolResult:
         """
         The main entrypoint for executing an agent's requested action safely.
         """
@@ -75,7 +80,7 @@ class ActionEngine:
         # 5. Execution
         try:
             result = await tool.execute(validated_params, context)
-            
+
             # 6. Audit Logging (Redacted)
             redacted_params = PIIRedactor.redact_dict(action_request.arguments)
             await AuditLogger.log_action(
@@ -84,15 +89,15 @@ class ActionEngine:
                 tool_name=tool.name,
                 parameters=redacted_params,
                 outcome=result.status,
-                error_message=result.message if result.status == "FAILED" else None
+                error_message=result.message if result.status == "FAILED" else None,
             )
-            
+
             return result
-            
+
         except Exception as e:
             error_msg = f"Unhandled Exception during execution of {tool.name}: {str(e)}"
             logger.exception(error_msg)
-            
+
             redacted_params = PIIRedactor.redact_dict(action_request.arguments)
             await AuditLogger.log_action(
                 organization_id=context.organization_id,
@@ -100,6 +105,6 @@ class ActionEngine:
                 tool_name=tool.name,
                 parameters=redacted_params,
                 outcome="FAILED",
-                error_message=error_msg
+                error_message=error_msg,
             )
             return ToolResult(status="FAILED", message=error_msg)

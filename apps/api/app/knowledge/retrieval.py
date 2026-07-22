@@ -1,11 +1,12 @@
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict
 from app.knowledge.schemas import RetrievedContext
 from app.knowledge.vector_store import VectorStoreManager
 from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
+
 
 class RetrievalEngine:
     """
@@ -13,7 +14,9 @@ class RetrievalEngine:
     """
 
     @staticmethod
-    def _compute_rrf(keyword_results: List[Dict], vector_results: List[Dict], k: int = 60) -> List[Dict]:
+    def _compute_rrf(
+        keyword_results: List[Dict], vector_results: List[Dict], k: int = 60
+    ) -> List[Dict]:
         """
         Implements Reciprocal Rank Fusion.
         RRF_score = 1 / (k + rank)
@@ -25,14 +28,18 @@ class RetrievalEngine:
         for rank, row in enumerate(keyword_results):
             chunk_id = row["id"]
             chunks_map[chunk_id] = row
-            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (1.0 / (k + rank + 1))
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (
+                1.0 / (k + rank + 1)
+            )
 
         # Process Vector Results
         for rank, row in enumerate(vector_results):
             chunk_id = row["id"]
             if chunk_id not in chunks_map:
                 chunks_map[chunk_id] = row
-            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (1.0 / (k + rank + 1))
+            rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0.0) + (
+                1.0 / (k + rank + 1)
+            )
 
         # Sort combined results by RRF score
         sorted_results = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
@@ -46,7 +53,9 @@ class RetrievalEngine:
         return final_fused
 
     @staticmethod
-    async def retrieve_context(query: str, organization_id: str, top_k: int = 5) -> List[RetrievedContext]:
+    async def retrieve_context(
+        query: str, organization_id: str, top_k: int = 5
+    ) -> List[RetrievedContext]:
         """
         Performs the full hybrid retrieval pipeline.
         CRITICAL: Every query strictly filters by organization_id.
@@ -68,7 +77,7 @@ class RetrievalEngine:
         # 2. Vector Search (pgvector cosine similarity <=>)
         embedding_vector = await VectorStoreManager.generate_embedding(query)
         vector_str = f"[{','.join(map(str, embedding_vector))}]"
-        
+
         vector_query = """
         SELECT id, "documentId", text, metadata,
                1 - (embedding <=> $1::vector) as score
@@ -86,15 +95,23 @@ class RetrievalEngine:
         # Return only the requested top_k
         output = []
         for row in fused_results[:top_k]:
-            output.append(RetrievedContext(
-                chunk_id=row["id"],
-                document_id=row["documentId"],
-                text=row["text"],
-                score=row["rrf_score"],
-                # Prisma query_raw returns JSONB as dict or string depending on driver, 
-                # ensure we parse it if it's a string.
-                metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"]
-            ))
+            output.append(
+                RetrievedContext(
+                    chunk_id=row["id"],
+                    document_id=row["documentId"],
+                    text=row["text"],
+                    score=row["rrf_score"],
+                    # Prisma query_raw returns JSONB as dict or string depending on driver,
+                    # ensure we parse it if it's a string.
+                    metadata=(
+                        json.loads(row["metadata"])
+                        if isinstance(row["metadata"], str)
+                        else row["metadata"]
+                    ),
+                )
+            )
 
-        logger.info(f"Retrieved {len(output)} chunks using Hybrid Search for org {organization_id}")
+        logger.info(
+            f"Retrieved {len(output)} chunks using Hybrid Search for org {organization_id}"
+        )
         return output

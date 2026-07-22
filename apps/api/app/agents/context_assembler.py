@@ -1,11 +1,12 @@
 from typing import Dict, Any
 
+
 class ContextAssembler:
     """
     Responsible for fetching and structuring the strict, delimited prompt context
     for an agent. Enforces tenant isolation by always filtering by organization_id.
     """
-    
+
     @staticmethod
     async def fetch_business_memory(organization_id: str) -> str:
         # Mocking database retrieval
@@ -23,17 +24,21 @@ class ContextAssembler:
         return "Internal Doc: We offer a 10% discount on annual enterprise plans."
 
     @staticmethod
-    async def assemble(organization_id: str, event_payload: Dict[str, Any], system_instructions: str) -> str:
+    async def assemble(
+        organization_id: str, event_payload: Dict[str, Any], system_instructions: str
+    ) -> str:
         """
         Assembles the final prompt string with strict delimiters to prevent prompt injection.
         """
         biz_context = await ContextAssembler.fetch_business_memory(organization_id)
-        
+
         # If there's a specific lead mentioned in the event
         lead_id = event_payload.get("lead_id")
-        epi_context = await ContextAssembler.fetch_episodic_memory(organization_id, lead_id)
-        
-        # Simple string assembly. 
+        epi_context = await ContextAssembler.fetch_episodic_memory(
+            organization_id, lead_id
+        )
+
+        # Simple string assembly.
         # For LangChain, this might be returned as a SystemMessage and HumanMessage.
         prompt = f"""
 <system_instructions>

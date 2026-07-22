@@ -3,11 +3,21 @@
 import React, { useState } from 'react';
 import { Activity, Cpu, CheckCircle, Clock, Zap, X, ChevronRight } from 'lucide-react';
 
+interface Trace {
+  id: string;
+  name: string;
+  status: 'success' | 'failed';
+  latency: string;
+  tokens: number;
+  cost: string;
+  time: string;
+}
+
 export default function AIOpsDashboard() {
-  const [selectedTrace, setSelectedTrace] = useState<any | null>(null);
+  const [selectedTrace, setSelectedTrace] = useState<Trace | null>(null);
 
   // Mock data for the live traces table
-  const mockTraces = [
+  const mockTraces: Trace[] = [
     { id: "tr_1abc", name: "SalesPipelineWorkflow", status: "success", latency: "1.2s", tokens: 450, cost: "$0.004", time: "Just now" },
     { id: "tr_2xyz", name: "Generate Outreach Email", status: "success", latency: "3.4s", tokens: 1200, cost: "$0.012", time: "2m ago" },
     { id: "tr_3def", name: "HubSpot: Update Deal", status: "success", latency: "0.4s", tokens: 0, cost: "$0.000", time: "5m ago" },

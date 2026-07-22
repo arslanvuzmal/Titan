@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 from app.agents.schemas import ActionRequest
 
+
 def test_action_request_valid():
     """
     Ensures a valid ActionRequest passes schema validation.
@@ -9,10 +10,11 @@ def test_action_request_valid():
     req = ActionRequest(
         tool_name="send_email",
         arguments={"to_email": "elon@x.com", "subject": "Test", "body": "Msg"},
-        requires_approval=True
+        requires_approval=True,
     )
     assert req.tool_name == "send_email"
     assert req.requires_approval is True
+
 
 def test_action_request_invalid_type():
     """
@@ -22,11 +24,12 @@ def test_action_request_invalid_type():
         ActionRequest(
             tool_name="send_email",
             arguments={"to_email": "elon@x.com"},
-            requires_approval="YES"  # Invalid, should be bool
+            requires_approval="DEFINITELY_NOT_A_BOOLEAN",  # Invalid, should be bool
         )
-    
+
     # Assert that the error correctly identifies the field and type mismatch
     assert "Input should be a valid boolean" in str(exc.value)
+
 
 def test_action_request_missing_field():
     """
@@ -34,8 +37,7 @@ def test_action_request_missing_field():
     """
     with pytest.raises(ValidationError) as exc:
         ActionRequest(
-            arguments={"to_email": "elon@x.com"},
-            requires_approval=True
-        ) # Missing tool_name
-        
+            arguments={"to_email": "elon@x.com"}, requires_approval=True
+        )  # Missing tool_name
+
     assert "Field required" in str(exc.value)
