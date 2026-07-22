@@ -44,9 +44,7 @@ jobs:
       - name: Lint FastAPI
         working-directory: ./apps/api
         run: |
-          uv pip compile pyproject.toml -o requirements.txt
-          pip install -r requirements.txt
-          pip install ruff black mypy
+          uv pip install --system -e .[dev]
           ruff check app/
           black --check app/
           mypy app/
@@ -81,7 +79,8 @@ jobs:
       - name: Build and push API image
         uses: docker/build-push-action@v5
         with:
-          context: ./apps/api
+          context: .
+          file: ./apps/api/Dockerfile
           push: true
           tags: ${{ steps.meta-api.outputs.tags }}
           labels: ${{ steps.meta-api.outputs.labels }}

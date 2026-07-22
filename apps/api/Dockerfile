@@ -9,12 +9,16 @@ RUN pip install --no-cache-dir uv==0.1.20
 WORKDIR /build
 
 # Copy dependency files
-COPY pyproject.toml uv.lock ./
+COPY apps/api/pyproject.toml apps/api/uv.lock ./apps/api/
+COPY packages/contracts/ ./packages/contracts/
+
+WORKDIR /build/apps/api
 
 # Export requirements using uv and install into a virtual environment
 RUN uv pip compile pyproject.toml -o requirements.txt && \
     python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir -e ../../packages/contracts && \
     /opt/venv/bin/pip install --no-cache-dir uvicorn[standard] gunicorn
 
 # ---------------------------------------
@@ -34,7 +38,7 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application source code
-COPY app/ ./app/
+COPY apps/api/app/ ./app/
 
 # Set ownership to the non-root user
 RUN chown -R titan:titan /app
