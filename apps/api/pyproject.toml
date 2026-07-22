@@ -15,7 +15,11 @@ dependencies = [
     "titan-contracts",
     "langchain",
     "langgraph",
-    "temporalio"
+    "temporalio",
+    "cryptography",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "prometheus-client"
 ]
 
 [project.optional-dependencies]
