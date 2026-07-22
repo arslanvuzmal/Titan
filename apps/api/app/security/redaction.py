@@ -39,7 +39,7 @@ class PIIRedactor:
     @classmethod
     def redact_dict(cls, data: Dict[str, Any]) -> Dict[str, Any]:
         """Recursively redacts PII from a dictionary payload."""
-        redacted_data = {}
+        redacted_data: Dict[str, Any] = {}
         for k, v in data.items():
             if isinstance(v, str):
                 redacted_data[k] = cls.redact_string(v)

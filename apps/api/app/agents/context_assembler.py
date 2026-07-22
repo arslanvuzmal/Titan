@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class ContextAssembler:
@@ -14,7 +14,7 @@ class ContextAssembler:
         return "Company Goal: Increase enterprise sales by 20% this quarter. Tone: Professional but approachable."
 
     @staticmethod
-    async def fetch_episodic_memory(organization_id: str, lead_id: str = None) -> str:
+    async def fetch_episodic_memory(organization_id: str, lead_id: Optional[str] = None) -> str:
         # Mocking retrieval of past interactions
         return "Previous interaction: The lead attended a webinar on AI automation last week."
 
