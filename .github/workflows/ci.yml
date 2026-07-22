@@ -28,6 +28,20 @@ jobs:
         working-directory: ./apps/api
         run: uv pip install --system -e .[dev]
 
+      # --- Next.js Frontend Setup ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
+      - name: Install Monorepo Dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Pre-commit checks
         run: |
           # Auto-fix all issues
@@ -58,20 +72,6 @@ jobs:
             echo "❌ Test coverage too low"
             exit 1
           fi
-
-      # --- Next.js Frontend Setup ---
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 8
-
-      - name: Install Monorepo Dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Frontend Linter (ESLint)
         working-directory: ./apps/web
