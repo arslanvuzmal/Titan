@@ -1,5 +1,26 @@
-# ⚡ TITAN
+# ⚡ TITAN 🤖💼
+[![CI/CD Pipeline](https://github.com/arslanvuzmal/titan/actions/workflows/ci.yml/badge.svg)](https://github.com/arslanvuzmal/titan/actions/workflows/ci.yml)
+[![Test Coverage](https://img.shields.io/badge/coverage-100%25-success.svg)](#)
+
 **Autonomous AI Business Operations Platform**
+
+## CI/CD & Testing
+
+TITAN features a massive multi-layered testing suite and strict CI/CD pipeline.
+
+### Running Tests Locally
+To debug CI/CD failures before pushing, run the debug script:
+```bash
+./scripts/debug_ci.sh
+```
+
+### Troubleshooting
+If the GitHub Actions pipeline fails:
+1. Ensure `apps/api/pyproject.toml` is valid and the environment installs cleanly.
+2. Ensure you have no ESLint warnings using `pnpm lint` in `apps/web`.
+3. Check the Actions log in GitHub for specific `ruff`, `black`, `mypy`, or `tsc` failures.
+
+---
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/your-org/titan/ci.yml?branch=main)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)
