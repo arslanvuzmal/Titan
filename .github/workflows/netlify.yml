@@ -29,7 +29,7 @@ jobs:
         working-directory: apps/web
 
       - name: Deploy to Netlify
-        run: npx netlify-cli deploy --prod --build --context production
+        run: npx netlify-cli deploy --prod --build
         working-directory: apps/web
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
