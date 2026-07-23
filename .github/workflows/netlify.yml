@@ -32,4 +32,4 @@ jobs:
 
       - name: Deploy to Netlify
         working-directory: apps/web
-        run: npx netlify-cli deploy --prod --dir=out --auth=${{ secrets.NETLIFY_AUTH_TOKEN }} --site=${{ secrets.NETLIFY_SITE_ID }}
+        run: npx netlify-cli deploy --prod --no-build --dir=out --auth=${{ secrets.NETLIFY_AUTH_TOKEN }} --site=${{ secrets.NETLIFY_SITE_ID }}
