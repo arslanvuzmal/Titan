@@ -1,0 +1,9 @@
+{
+  "projects": [
+    {
+      "path": "apps/web",
+      "name": "titan-web",
+      "framework": "nextjs"
+    }
+  ]
+}
