@@ -6,6 +6,9 @@ node_modules/
 .next/
 dist/
 .turbo/
+.netlify/
+**/.netlify/
+out/
 
 # Environment variables
 .env
@@ -16,6 +19,9 @@ dist/
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
+.coverage
+htmlcov/
 
 # IDE
 .vscode/

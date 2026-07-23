@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { Activity, Server, Cpu, Database, AlertCircle, ShieldCheck } from 'lucide-react';
+import { Activity, Server, Cpu, AlertCircle, ShieldCheck } from 'lucide-react';
 import StatCard from '@/components/dashboard/StatCard';
 import TaskTrendChart from '@/components/dashboard/TaskTrendChart';
 import RecentTasksTable from '@/components/dashboard/RecentTasksTable';
