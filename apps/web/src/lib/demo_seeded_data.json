@@ -1,0 +1,4773 @@
+{
+  "organizations": [
+    {
+      "id": "org-acme",
+      "name": "Acme Corporation",
+      "segment": "Enterprise - Tech",
+      "plan": "Enterprise Scale",
+      "users_count": 8
+    },
+    {
+      "id": "org-global",
+      "name": "Global Retail Inc",
+      "segment": "Mid-Market - Retail",
+      "plan": "Professional",
+      "users_count": 6
+    },
+    {
+      "id": "org-startup",
+      "name": "StartupXYZ",
+      "segment": "Small - SaaS",
+      "plan": "Growth",
+      "users_count": 4
+    }
+  ],
+  "users": [
+    {
+      "id": "usr-org-acme-1",
+      "org_id": "org-acme",
+      "name": "User 1 (Acme)",
+      "email": "user1@acmecorporation.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-1"
+    },
+    {
+      "id": "usr-org-acme-2",
+      "org_id": "org-acme",
+      "name": "User 2 (Acme)",
+      "email": "user2@acmecorporation.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-2"
+    },
+    {
+      "id": "usr-org-acme-3",
+      "org_id": "org-acme",
+      "name": "User 3 (Acme)",
+      "email": "user3@acmecorporation.com",
+      "role": "AI Engineer",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-3"
+    },
+    {
+      "id": "usr-org-acme-4",
+      "org_id": "org-acme",
+      "name": "User 4 (Acme)",
+      "email": "user4@acmecorporation.com",
+      "role": "Sales Ops Manager",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-4"
+    },
+    {
+      "id": "usr-org-acme-5",
+      "org_id": "org-acme",
+      "name": "User 5 (Acme)",
+      "email": "user5@acmecorporation.com",
+      "role": "Sales Ops Manager",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-5"
+    },
+    {
+      "id": "usr-org-acme-6",
+      "org_id": "org-acme",
+      "name": "User 6 (Acme)",
+      "email": "user6@acmecorporation.com",
+      "role": "Sales Ops Manager",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-6"
+    },
+    {
+      "id": "usr-org-acme-7",
+      "org_id": "org-acme",
+      "name": "User 7 (Acme)",
+      "email": "user7@acmecorporation.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-7"
+    },
+    {
+      "id": "usr-org-acme-8",
+      "org_id": "org-acme",
+      "name": "User 8 (Acme)",
+      "email": "user8@acmecorporation.com",
+      "role": "Executive",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-acme-8"
+    },
+    {
+      "id": "usr-org-global-1",
+      "org_id": "org-global",
+      "name": "User 1 (Global)",
+      "email": "user1@globalretailinc.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-1"
+    },
+    {
+      "id": "usr-org-global-2",
+      "org_id": "org-global",
+      "name": "User 2 (Global)",
+      "email": "user2@globalretailinc.com",
+      "role": "Executive",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-2"
+    },
+    {
+      "id": "usr-org-global-3",
+      "org_id": "org-global",
+      "name": "User 3 (Global)",
+      "email": "user3@globalretailinc.com",
+      "role": "Support Lead",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-3"
+    },
+    {
+      "id": "usr-org-global-4",
+      "org_id": "org-global",
+      "name": "User 4 (Global)",
+      "email": "user4@globalretailinc.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-4"
+    },
+    {
+      "id": "usr-org-global-5",
+      "org_id": "org-global",
+      "name": "User 5 (Global)",
+      "email": "user5@globalretailinc.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-5"
+    },
+    {
+      "id": "usr-org-global-6",
+      "org_id": "org-global",
+      "name": "User 6 (Global)",
+      "email": "user6@globalretailinc.com",
+      "role": "Admin",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-global-6"
+    },
+    {
+      "id": "usr-org-startup-1",
+      "org_id": "org-startup",
+      "name": "User 1 (StartupXYZ)",
+      "email": "user1@startupxyz.com",
+      "role": "Sales Ops Manager",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-startup-1"
+    },
+    {
+      "id": "usr-org-startup-2",
+      "org_id": "org-startup",
+      "name": "User 2 (StartupXYZ)",
+      "email": "user2@startupxyz.com",
+      "role": "Sales Ops Manager",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-startup-2"
+    },
+    {
+      "id": "usr-org-startup-3",
+      "org_id": "org-startup",
+      "name": "User 3 (StartupXYZ)",
+      "email": "user3@startupxyz.com",
+      "role": "Executive",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-startup-3"
+    },
+    {
+      "id": "usr-org-startup-4",
+      "org_id": "org-startup",
+      "name": "User 4 (StartupXYZ)",
+      "email": "user4@startupxyz.com",
+      "role": "Executive",
+      "avatar": "https://api.dicebear.com/7.x/avataaars/svg?seed=org-startup-4"
+    }
+  ],
+  "leads": [
+    {
+      "id": "lead-001",
+      "company": "Client Enterprise 1",
+      "contact_name": "Executive 1",
+      "contact_email": "exec1@client1.com",
+      "industry": "EdTech",
+      "score": 60,
+      "stage": "Closed Won",
+      "deal_value": 5000,
+      "source": "Webinar",
+      "created_at": "2026-06-26T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-002",
+      "company": "Client Enterprise 2",
+      "contact_name": "Executive 2",
+      "contact_email": "exec2@client2.com",
+      "industry": "Cybersecurity",
+      "score": 92,
+      "stage": "Qualified",
+      "deal_value": 12000,
+      "source": "Organic Search",
+      "created_at": "2026-06-04T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-003",
+      "company": "Client Enterprise 3",
+      "contact_name": "Executive 3",
+      "contact_email": "exec3@client3.com",
+      "industry": "EdTech",
+      "score": 55,
+      "stage": "Proposal",
+      "deal_value": 320000,
+      "source": "Referral",
+      "created_at": "2026-07-05T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-004",
+      "company": "Client Enterprise 4",
+      "contact_name": "Executive 4",
+      "contact_email": "exec4@client4.com",
+      "industry": "E-Commerce",
+      "score": 62,
+      "stage": "New",
+      "deal_value": 12000,
+      "source": "Organic Search",
+      "created_at": "2026-06-28T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-005",
+      "company": "Client Enterprise 5",
+      "contact_name": "Executive 5",
+      "contact_email": "exec5@client5.com",
+      "industry": "E-Commerce",
+      "score": 80,
+      "stage": "Negotiation",
+      "deal_value": 5000,
+      "source": "Referral",
+      "created_at": "2026-06-01T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-006",
+      "company": "Client Enterprise 6",
+      "contact_name": "Executive 6",
+      "contact_email": "exec6@client6.com",
+      "industry": "Cybersecurity",
+      "score": 93,
+      "stage": "New",
+      "deal_value": 5000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-17T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-007",
+      "company": "Client Enterprise 7",
+      "contact_name": "Executive 7",
+      "contact_email": "exec7@client7.com",
+      "industry": "EdTech",
+      "score": 72,
+      "stage": "Negotiation",
+      "deal_value": 85000,
+      "source": "Referral",
+      "created_at": "2026-06-16T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-008",
+      "company": "Client Enterprise 8",
+      "contact_name": "Executive 8",
+      "contact_email": "exec8@client8.com",
+      "industry": "Fintech",
+      "score": 43,
+      "stage": "Closed Won",
+      "deal_value": 12000,
+      "source": "Paid Campaign",
+      "created_at": "2026-06-03T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-009",
+      "company": "Client Enterprise 9",
+      "contact_name": "Executive 9",
+      "contact_email": "exec9@client9.com",
+      "industry": "Healthcare",
+      "score": 45,
+      "stage": "New",
+      "deal_value": 25000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-05T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-010",
+      "company": "Client Enterprise 10",
+      "contact_name": "Executive 10",
+      "contact_email": "exec10@client10.com",
+      "industry": "Healthcare",
+      "score": 81,
+      "stage": "Qualified",
+      "deal_value": 48000,
+      "source": "Referral",
+      "created_at": "2026-07-09T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-011",
+      "company": "Client Enterprise 11",
+      "contact_name": "Executive 11",
+      "contact_email": "exec11@client11.com",
+      "industry": "EdTech",
+      "score": 69,
+      "stage": "Closed Won",
+      "deal_value": 150000,
+      "source": "Organic Search",
+      "created_at": "2026-06-14T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-012",
+      "company": "Client Enterprise 12",
+      "contact_name": "Executive 12",
+      "contact_email": "exec12@client12.com",
+      "industry": "Cybersecurity",
+      "score": 56,
+      "stage": "Closed Won",
+      "deal_value": 150000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-12T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-013",
+      "company": "Client Enterprise 13",
+      "contact_name": "Executive 13",
+      "contact_email": "exec13@client13.com",
+      "industry": "E-Commerce",
+      "score": 83,
+      "stage": "Closed Won",
+      "deal_value": 48000,
+      "source": "Webinar",
+      "created_at": "2026-07-08T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-014",
+      "company": "Client Enterprise 14",
+      "contact_name": "Executive 14",
+      "contact_email": "exec14@client14.com",
+      "industry": "Fintech",
+      "score": 76,
+      "stage": "Contacted",
+      "deal_value": 150000,
+      "source": "Organic Search",
+      "created_at": "2026-06-01T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-015",
+      "company": "Client Enterprise 15",
+      "contact_name": "Executive 15",
+      "contact_email": "exec15@client15.com",
+      "industry": "E-Commerce",
+      "score": 86,
+      "stage": "New",
+      "deal_value": 25000,
+      "source": "Paid Campaign",
+      "created_at": "2026-05-25T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-016",
+      "company": "Client Enterprise 16",
+      "contact_name": "Executive 16",
+      "contact_email": "exec16@client16.com",
+      "industry": "Healthcare",
+      "score": 75,
+      "stage": "Closed Won",
+      "deal_value": 85000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-27T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-017",
+      "company": "Client Enterprise 17",
+      "contact_name": "Executive 17",
+      "contact_email": "exec17@client17.com",
+      "industry": "Healthcare",
+      "score": 93,
+      "stage": "Qualified",
+      "deal_value": 150000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-07T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-018",
+      "company": "Client Enterprise 18",
+      "contact_name": "Executive 18",
+      "contact_email": "exec18@client18.com",
+      "industry": "EdTech",
+      "score": 68,
+      "stage": "Negotiation",
+      "deal_value": 150000,
+      "source": "Direct Outbound",
+      "created_at": "2026-05-26T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-019",
+      "company": "Client Enterprise 19",
+      "contact_name": "Executive 19",
+      "contact_email": "exec19@client19.com",
+      "industry": "E-Commerce",
+      "score": 86,
+      "stage": "Contacted",
+      "deal_value": 85000,
+      "source": "Paid Campaign",
+      "created_at": "2026-06-20T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-020",
+      "company": "Client Enterprise 20",
+      "contact_name": "Executive 20",
+      "contact_email": "exec20@client20.com",
+      "industry": "Fintech",
+      "score": 46,
+      "stage": "New",
+      "deal_value": 48000,
+      "source": "Paid Campaign",
+      "created_at": "2026-06-12T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-021",
+      "company": "Client Enterprise 21",
+      "contact_name": "Executive 21",
+      "contact_email": "exec21@client21.com",
+      "industry": "Cybersecurity",
+      "score": 89,
+      "stage": "New",
+      "deal_value": 12000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-28T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-022",
+      "company": "Client Enterprise 22",
+      "contact_name": "Executive 22",
+      "contact_email": "exec22@client22.com",
+      "industry": "Cybersecurity",
+      "score": 94,
+      "stage": "Qualified",
+      "deal_value": 85000,
+      "source": "Webinar",
+      "created_at": "2026-05-28T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-023",
+      "company": "Client Enterprise 23",
+      "contact_name": "Executive 23",
+      "contact_email": "exec23@client23.com",
+      "industry": "EdTech",
+      "score": 49,
+      "stage": "Negotiation",
+      "deal_value": 5000,
+      "source": "Referral",
+      "created_at": "2026-06-03T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-024",
+      "company": "Client Enterprise 24",
+      "contact_name": "Executive 24",
+      "contact_email": "exec24@client24.com",
+      "industry": "Fintech",
+      "score": 78,
+      "stage": "Qualified",
+      "deal_value": 150000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-12T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-025",
+      "company": "Client Enterprise 25",
+      "contact_name": "Executive 25",
+      "contact_email": "exec25@client25.com",
+      "industry": "EdTech",
+      "score": 35,
+      "stage": "Closed Won",
+      "deal_value": 48000,
+      "source": "Referral",
+      "created_at": "2026-06-20T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-026",
+      "company": "Client Enterprise 26",
+      "contact_name": "Executive 26",
+      "contact_email": "exec26@client26.com",
+      "industry": "Cybersecurity",
+      "score": 57,
+      "stage": "New",
+      "deal_value": 320000,
+      "source": "Referral",
+      "created_at": "2026-05-30T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-027",
+      "company": "Client Enterprise 27",
+      "contact_name": "Executive 27",
+      "contact_email": "exec27@client27.com",
+      "industry": "Healthcare",
+      "score": 60,
+      "stage": "Qualified",
+      "deal_value": 150000,
+      "source": "Paid Campaign",
+      "created_at": "2026-06-18T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-028",
+      "company": "Client Enterprise 28",
+      "contact_name": "Executive 28",
+      "contact_email": "exec28@client28.com",
+      "industry": "Cybersecurity",
+      "score": 35,
+      "stage": "Qualified",
+      "deal_value": 320000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-21T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-029",
+      "company": "Client Enterprise 29",
+      "contact_name": "Executive 29",
+      "contact_email": "exec29@client29.com",
+      "industry": "E-Commerce",
+      "score": 81,
+      "stage": "Contacted",
+      "deal_value": 5000,
+      "source": "Organic Search",
+      "created_at": "2026-07-07T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-030",
+      "company": "Client Enterprise 30",
+      "contact_name": "Executive 30",
+      "contact_email": "exec30@client30.com",
+      "industry": "Fintech",
+      "score": 45,
+      "stage": "Closed Won",
+      "deal_value": 85000,
+      "source": "Direct Outbound",
+      "created_at": "2026-05-31T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-031",
+      "company": "Client Enterprise 31",
+      "contact_name": "Executive 31",
+      "contact_email": "exec31@client31.com",
+      "industry": "Healthcare",
+      "score": 51,
+      "stage": "Closed Won",
+      "deal_value": 5000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-17T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-032",
+      "company": "Client Enterprise 32",
+      "contact_name": "Executive 32",
+      "contact_email": "exec32@client32.com",
+      "industry": "Cybersecurity",
+      "score": 68,
+      "stage": "Negotiation",
+      "deal_value": 12000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-09T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-033",
+      "company": "Client Enterprise 33",
+      "contact_name": "Executive 33",
+      "contact_email": "exec33@client33.com",
+      "industry": "EdTech",
+      "score": 60,
+      "stage": "Qualified",
+      "deal_value": 85000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-10T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-034",
+      "company": "Client Enterprise 34",
+      "contact_name": "Executive 34",
+      "contact_email": "exec34@client34.com",
+      "industry": "Logistics",
+      "score": 82,
+      "stage": "Negotiation",
+      "deal_value": 150000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-15T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-035",
+      "company": "Client Enterprise 35",
+      "contact_name": "Executive 35",
+      "contact_email": "exec35@client35.com",
+      "industry": "Fintech",
+      "score": 63,
+      "stage": "Qualified",
+      "deal_value": 12000,
+      "source": "Organic Search",
+      "created_at": "2026-06-15T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-036",
+      "company": "Client Enterprise 36",
+      "contact_name": "Executive 36",
+      "contact_email": "exec36@client36.com",
+      "industry": "Cybersecurity",
+      "score": 64,
+      "stage": "Contacted",
+      "deal_value": 85000,
+      "source": "Organic Search",
+      "created_at": "2026-07-18T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-037",
+      "company": "Client Enterprise 37",
+      "contact_name": "Executive 37",
+      "contact_email": "exec37@client37.com",
+      "industry": "Healthcare",
+      "score": 42,
+      "stage": "New",
+      "deal_value": 150000,
+      "source": "Organic Search",
+      "created_at": "2026-05-28T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-038",
+      "company": "Client Enterprise 38",
+      "contact_name": "Executive 38",
+      "contact_email": "exec38@client38.com",
+      "industry": "Cybersecurity",
+      "score": 44,
+      "stage": "Contacted",
+      "deal_value": 25000,
+      "source": "Referral",
+      "created_at": "2026-06-10T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-039",
+      "company": "Client Enterprise 39",
+      "contact_name": "Executive 39",
+      "contact_email": "exec39@client39.com",
+      "industry": "Cybersecurity",
+      "score": 62,
+      "stage": "Contacted",
+      "deal_value": 48000,
+      "source": "Webinar",
+      "created_at": "2026-06-16T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-040",
+      "company": "Client Enterprise 40",
+      "contact_name": "Executive 40",
+      "contact_email": "exec40@client40.com",
+      "industry": "Logistics",
+      "score": 66,
+      "stage": "Proposal",
+      "deal_value": 48000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-16T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-041",
+      "company": "Client Enterprise 41",
+      "contact_name": "Executive 41",
+      "contact_email": "exec41@client41.com",
+      "industry": "E-Commerce",
+      "score": 90,
+      "stage": "Proposal",
+      "deal_value": 5000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-23T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-042",
+      "company": "Client Enterprise 42",
+      "contact_name": "Executive 42",
+      "contact_email": "exec42@client42.com",
+      "industry": "EdTech",
+      "score": 41,
+      "stage": "Closed Won",
+      "deal_value": 320000,
+      "source": "Organic Search",
+      "created_at": "2026-07-19T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-043",
+      "company": "Client Enterprise 43",
+      "contact_name": "Executive 43",
+      "contact_email": "exec43@client43.com",
+      "industry": "Fintech",
+      "score": 78,
+      "stage": "Contacted",
+      "deal_value": 48000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-10T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-044",
+      "company": "Client Enterprise 44",
+      "contact_name": "Executive 44",
+      "contact_email": "exec44@client44.com",
+      "industry": "Healthcare",
+      "score": 92,
+      "stage": "Proposal",
+      "deal_value": 85000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-05T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-045",
+      "company": "Client Enterprise 45",
+      "contact_name": "Executive 45",
+      "contact_email": "exec45@client45.com",
+      "industry": "Fintech",
+      "score": 66,
+      "stage": "Proposal",
+      "deal_value": 48000,
+      "source": "Webinar",
+      "created_at": "2026-07-16T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-046",
+      "company": "Client Enterprise 46",
+      "contact_name": "Executive 46",
+      "contact_email": "exec46@client46.com",
+      "industry": "Fintech",
+      "score": 36,
+      "stage": "Contacted",
+      "deal_value": 5000,
+      "source": "Paid Campaign",
+      "created_at": "2026-06-26T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-047",
+      "company": "Client Enterprise 47",
+      "contact_name": "Executive 47",
+      "contact_email": "exec47@client47.com",
+      "industry": "Healthcare",
+      "score": 96,
+      "stage": "Proposal",
+      "deal_value": 48000,
+      "source": "Organic Search",
+      "created_at": "2026-07-12T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-048",
+      "company": "Client Enterprise 48",
+      "contact_name": "Executive 48",
+      "contact_email": "exec48@client48.com",
+      "industry": "Logistics",
+      "score": 35,
+      "stage": "Qualified",
+      "deal_value": 48000,
+      "source": "Direct Outbound",
+      "created_at": "2026-07-04T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-049",
+      "company": "Client Enterprise 49",
+      "contact_name": "Executive 49",
+      "contact_email": "exec49@client49.com",
+      "industry": "Healthcare",
+      "score": 97,
+      "stage": "Contacted",
+      "deal_value": 48000,
+      "source": "Referral",
+      "created_at": "2026-07-09T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-050",
+      "company": "Client Enterprise 50",
+      "contact_name": "Executive 50",
+      "contact_email": "exec50@client50.com",
+      "industry": "EdTech",
+      "score": 42,
+      "stage": "Qualified",
+      "deal_value": 5000,
+      "source": "Organic Search",
+      "created_at": "2026-07-19T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-051",
+      "company": "Client Enterprise 51",
+      "contact_name": "Executive 51",
+      "contact_email": "exec51@client51.com",
+      "industry": "Cybersecurity",
+      "score": 96,
+      "stage": "Negotiation",
+      "deal_value": 85000,
+      "source": "Paid Campaign",
+      "created_at": "2026-07-19T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-052",
+      "company": "Client Enterprise 52",
+      "contact_name": "Executive 52",
+      "contact_email": "exec52@client52.com",
+      "industry": "Healthcare",
+      "score": 45,
+      "stage": "New",
+      "deal_value": 85000,
+      "source": "Webinar",
+      "created_at": "2026-07-18T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-053",
+      "company": "Client Enterprise 53",
+      "contact_name": "Executive 53",
+      "contact_email": "exec53@client53.com",
+      "industry": "Logistics",
+      "score": 65,
+      "stage": "New",
+      "deal_value": 150000,
+      "source": "Webinar",
+      "created_at": "2026-07-07T08:25:12.357978+00:00"
+    },
+    {
+      "id": "lead-054",
+      "company": "Client Enterprise 54",
+      "contact_name": "Executive 54",
+      "contact_email": "exec54@client54.com",
+      "industry": "Cybersecurity",
+      "score": 40,
+      "stage": "New",
+      "deal_value": 85000,
+      "source": "Direct Outbound",
+      "created_at": "2026-06-10T08:25:12.357978+00:00"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "TSK-1001",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #1",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 2591,
+      "cost_usd": 0.0518,
+      "duration_ms": 5983,
+      "timestamp": "2026-07-20T14:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1002",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #2",
+      "status": "FAILED",
+      "tokens_used": 3383,
+      "cost_usd": 0.0677,
+      "duration_ms": 5947,
+      "timestamp": "2026-07-20T19:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1003",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #3",
+      "status": "RUNNING",
+      "tokens_used": 986,
+      "cost_usd": 0.0197,
+      "duration_ms": 11804,
+      "timestamp": "2026-07-16T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1004",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #4",
+      "status": "RUNNING",
+      "tokens_used": 1745,
+      "cost_usd": 0.0349,
+      "duration_ms": 13118,
+      "timestamp": "2026-07-22T14:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1005",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #5",
+      "status": "RUNNING",
+      "tokens_used": 2994,
+      "cost_usd": 0.0599,
+      "duration_ms": 10024,
+      "timestamp": "2026-07-22T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1006",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #6",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 1323,
+      "cost_usd": 0.0265,
+      "duration_ms": 9088,
+      "timestamp": "2026-07-20T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1007",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #7",
+      "status": "COMPLETED",
+      "tokens_used": 4058,
+      "cost_usd": 0.0812,
+      "duration_ms": 1927,
+      "timestamp": "2026-07-20T18:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1008",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #8",
+      "status": "COMPLETED",
+      "tokens_used": 1096,
+      "cost_usd": 0.0219,
+      "duration_ms": 7979,
+      "timestamp": "2026-07-17T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1009",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #9",
+      "status": "COMPLETED",
+      "tokens_used": 2955,
+      "cost_usd": 0.0591,
+      "duration_ms": 14023,
+      "timestamp": "2026-07-16T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1010",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #10",
+      "status": "COMPLETED",
+      "tokens_used": 3185,
+      "cost_usd": 0.0637,
+      "duration_ms": 14187,
+      "timestamp": "2026-07-17T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1011",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #11",
+      "status": "FAILED",
+      "tokens_used": 874,
+      "cost_usd": 0.0175,
+      "duration_ms": 3000,
+      "timestamp": "2026-07-20T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1012",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #12",
+      "status": "COMPLETED",
+      "tokens_used": 3490,
+      "cost_usd": 0.0698,
+      "duration_ms": 9864,
+      "timestamp": "2026-07-21T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1013",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #13",
+      "status": "COMPLETED",
+      "tokens_used": 2927,
+      "cost_usd": 0.0585,
+      "duration_ms": 4250,
+      "timestamp": "2026-07-19T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1014",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #14",
+      "status": "FAILED",
+      "tokens_used": 3047,
+      "cost_usd": 0.0609,
+      "duration_ms": 5125,
+      "timestamp": "2026-07-17T23:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1015",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #15",
+      "status": "COMPLETED",
+      "tokens_used": 4158,
+      "cost_usd": 0.0832,
+      "duration_ms": 1632,
+      "timestamp": "2026-07-22T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1016",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #16",
+      "status": "RUNNING",
+      "tokens_used": 3847,
+      "cost_usd": 0.0769,
+      "duration_ms": 5333,
+      "timestamp": "2026-07-22T21:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1017",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #17",
+      "status": "COMPLETED",
+      "tokens_used": 3608,
+      "cost_usd": 0.0722,
+      "duration_ms": 2943,
+      "timestamp": "2026-07-16T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1018",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #18",
+      "status": "COMPLETED",
+      "tokens_used": 3486,
+      "cost_usd": 0.0697,
+      "duration_ms": 8039,
+      "timestamp": "2026-07-17T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1019",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #19",
+      "status": "RUNNING",
+      "tokens_used": 2747,
+      "cost_usd": 0.0549,
+      "duration_ms": 958,
+      "timestamp": "2026-07-22T04:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1020",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #20",
+      "status": "FAILED",
+      "tokens_used": 4152,
+      "cost_usd": 0.083,
+      "duration_ms": 3242,
+      "timestamp": "2026-07-17T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1021",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #21",
+      "status": "COMPLETED",
+      "tokens_used": 2835,
+      "cost_usd": 0.0567,
+      "duration_ms": 9852,
+      "timestamp": "2026-07-21T19:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1022",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #22",
+      "status": "COMPLETED",
+      "tokens_used": 621,
+      "cost_usd": 0.0124,
+      "duration_ms": 5850,
+      "timestamp": "2026-07-19T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1023",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #23",
+      "status": "COMPLETED",
+      "tokens_used": 1310,
+      "cost_usd": 0.0262,
+      "duration_ms": 11974,
+      "timestamp": "2026-07-20T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1024",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #24",
+      "status": "COMPLETED",
+      "tokens_used": 1898,
+      "cost_usd": 0.038,
+      "duration_ms": 13581,
+      "timestamp": "2026-07-17T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1025",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #25",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3519,
+      "cost_usd": 0.0704,
+      "duration_ms": 3332,
+      "timestamp": "2026-07-20T20:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1026",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #26",
+      "status": "COMPLETED",
+      "tokens_used": 4060,
+      "cost_usd": 0.0812,
+      "duration_ms": 7555,
+      "timestamp": "2026-07-23T02:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1027",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #27",
+      "status": "FAILED",
+      "tokens_used": 1810,
+      "cost_usd": 0.0362,
+      "duration_ms": 13618,
+      "timestamp": "2026-07-18T23:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1028",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #28",
+      "status": "FAILED",
+      "tokens_used": 3770,
+      "cost_usd": 0.0754,
+      "duration_ms": 4865,
+      "timestamp": "2026-07-20T12:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1029",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #29",
+      "status": "FAILED",
+      "tokens_used": 892,
+      "cost_usd": 0.0178,
+      "duration_ms": 7067,
+      "timestamp": "2026-07-22T23:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1030",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #30",
+      "status": "COMPLETED",
+      "tokens_used": 1267,
+      "cost_usd": 0.0253,
+      "duration_ms": 14178,
+      "timestamp": "2026-07-18T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1031",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #31",
+      "status": "COMPLETED",
+      "tokens_used": 3810,
+      "cost_usd": 0.0762,
+      "duration_ms": 13830,
+      "timestamp": "2026-07-20T22:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1032",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #32",
+      "status": "COMPLETED",
+      "tokens_used": 3153,
+      "cost_usd": 0.0631,
+      "duration_ms": 3964,
+      "timestamp": "2026-07-19T02:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1033",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #33",
+      "status": "COMPLETED",
+      "tokens_used": 3990,
+      "cost_usd": 0.0798,
+      "duration_ms": 1937,
+      "timestamp": "2026-07-20T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1034",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #34",
+      "status": "FAILED",
+      "tokens_used": 2536,
+      "cost_usd": 0.0507,
+      "duration_ms": 7348,
+      "timestamp": "2026-07-17T15:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1035",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #35",
+      "status": "COMPLETED",
+      "tokens_used": 922,
+      "cost_usd": 0.0184,
+      "duration_ms": 5079,
+      "timestamp": "2026-07-21T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1036",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #36",
+      "status": "COMPLETED",
+      "tokens_used": 606,
+      "cost_usd": 0.0121,
+      "duration_ms": 2576,
+      "timestamp": "2026-07-17T00:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1037",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #37",
+      "status": "COMPLETED",
+      "tokens_used": 3434,
+      "cost_usd": 0.0687,
+      "duration_ms": 13684,
+      "timestamp": "2026-07-20T00:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1038",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #38",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 2544,
+      "cost_usd": 0.0509,
+      "duration_ms": 2694,
+      "timestamp": "2026-07-19T06:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1039",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #39",
+      "status": "COMPLETED",
+      "tokens_used": 1493,
+      "cost_usd": 0.0299,
+      "duration_ms": 1527,
+      "timestamp": "2026-07-18T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1040",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #40",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3753,
+      "cost_usd": 0.0751,
+      "duration_ms": 9621,
+      "timestamp": "2026-07-21T06:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1041",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #41",
+      "status": "RUNNING",
+      "tokens_used": 736,
+      "cost_usd": 0.0147,
+      "duration_ms": 11682,
+      "timestamp": "2026-07-19T20:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1042",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #42",
+      "status": "COMPLETED",
+      "tokens_used": 3167,
+      "cost_usd": 0.0633,
+      "duration_ms": 2841,
+      "timestamp": "2026-07-20T04:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1043",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #43",
+      "status": "COMPLETED",
+      "tokens_used": 3181,
+      "cost_usd": 0.0636,
+      "duration_ms": 7491,
+      "timestamp": "2026-07-19T21:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1044",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #44",
+      "status": "FAILED",
+      "tokens_used": 1661,
+      "cost_usd": 0.0332,
+      "duration_ms": 9883,
+      "timestamp": "2026-07-22T00:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1045",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #45",
+      "status": "RUNNING",
+      "tokens_used": 3173,
+      "cost_usd": 0.0635,
+      "duration_ms": 7011,
+      "timestamp": "2026-07-21T12:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1046",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #46",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 1682,
+      "cost_usd": 0.0336,
+      "duration_ms": 7453,
+      "timestamp": "2026-07-17T12:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1047",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #47",
+      "status": "COMPLETED",
+      "tokens_used": 1625,
+      "cost_usd": 0.0325,
+      "duration_ms": 4243,
+      "timestamp": "2026-07-18T18:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1048",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #48",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3131,
+      "cost_usd": 0.0626,
+      "duration_ms": 6079,
+      "timestamp": "2026-07-18T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1049",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #49",
+      "status": "RUNNING",
+      "tokens_used": 3217,
+      "cost_usd": 0.0643,
+      "duration_ms": 4301,
+      "timestamp": "2026-07-17T22:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1050",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #50",
+      "status": "FAILED",
+      "tokens_used": 1145,
+      "cost_usd": 0.0229,
+      "duration_ms": 11594,
+      "timestamp": "2026-07-22T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1051",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #51",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3169,
+      "cost_usd": 0.0634,
+      "duration_ms": 11170,
+      "timestamp": "2026-07-16T18:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1052",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #52",
+      "status": "COMPLETED",
+      "tokens_used": 3802,
+      "cost_usd": 0.076,
+      "duration_ms": 13106,
+      "timestamp": "2026-07-20T20:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1053",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #53",
+      "status": "COMPLETED",
+      "tokens_used": 1370,
+      "cost_usd": 0.0274,
+      "duration_ms": 14014,
+      "timestamp": "2026-07-21T06:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1054",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #54",
+      "status": "COMPLETED",
+      "tokens_used": 639,
+      "cost_usd": 0.0128,
+      "duration_ms": 4811,
+      "timestamp": "2026-07-18T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1055",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #55",
+      "status": "COMPLETED",
+      "tokens_used": 2315,
+      "cost_usd": 0.0463,
+      "duration_ms": 7590,
+      "timestamp": "2026-07-16T15:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1056",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #56",
+      "status": "COMPLETED",
+      "tokens_used": 3392,
+      "cost_usd": 0.0678,
+      "duration_ms": 12209,
+      "timestamp": "2026-07-19T06:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1057",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #57",
+      "status": "RUNNING",
+      "tokens_used": 1449,
+      "cost_usd": 0.029,
+      "duration_ms": 3217,
+      "timestamp": "2026-07-16T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1058",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #58",
+      "status": "COMPLETED",
+      "tokens_used": 4106,
+      "cost_usd": 0.0821,
+      "duration_ms": 13103,
+      "timestamp": "2026-07-22T05:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1059",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #59",
+      "status": "COMPLETED",
+      "tokens_used": 1170,
+      "cost_usd": 0.0234,
+      "duration_ms": 13974,
+      "timestamp": "2026-07-17T20:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1060",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #60",
+      "status": "COMPLETED",
+      "tokens_used": 2733,
+      "cost_usd": 0.0547,
+      "duration_ms": 4882,
+      "timestamp": "2026-07-22T01:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1061",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #61",
+      "status": "COMPLETED",
+      "tokens_used": 3732,
+      "cost_usd": 0.0746,
+      "duration_ms": 8412,
+      "timestamp": "2026-07-17T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1062",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #62",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 1749,
+      "cost_usd": 0.035,
+      "duration_ms": 13174,
+      "timestamp": "2026-07-18T15:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1063",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #63",
+      "status": "FAILED",
+      "tokens_used": 4103,
+      "cost_usd": 0.0821,
+      "duration_ms": 9070,
+      "timestamp": "2026-07-18T19:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1064",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #64",
+      "status": "RUNNING",
+      "tokens_used": 4124,
+      "cost_usd": 0.0825,
+      "duration_ms": 3407,
+      "timestamp": "2026-07-18T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1065",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #65",
+      "status": "COMPLETED",
+      "tokens_used": 3529,
+      "cost_usd": 0.0706,
+      "duration_ms": 4850,
+      "timestamp": "2026-07-16T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1066",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #66",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 2434,
+      "cost_usd": 0.0487,
+      "duration_ms": 11068,
+      "timestamp": "2026-07-20T19:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1067",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #67",
+      "status": "RUNNING",
+      "tokens_used": 767,
+      "cost_usd": 0.0153,
+      "duration_ms": 12490,
+      "timestamp": "2026-07-20T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1068",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #68",
+      "status": "COMPLETED",
+      "tokens_used": 1825,
+      "cost_usd": 0.0365,
+      "duration_ms": 6038,
+      "timestamp": "2026-07-17T14:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1069",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #69",
+      "status": "COMPLETED",
+      "tokens_used": 1067,
+      "cost_usd": 0.0213,
+      "duration_ms": 4588,
+      "timestamp": "2026-07-19T06:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1070",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #70",
+      "status": "COMPLETED",
+      "tokens_used": 3343,
+      "cost_usd": 0.0669,
+      "duration_ms": 4305,
+      "timestamp": "2026-07-22T16:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1071",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #71",
+      "status": "RUNNING",
+      "tokens_used": 1805,
+      "cost_usd": 0.0361,
+      "duration_ms": 9690,
+      "timestamp": "2026-07-18T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1072",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #72",
+      "status": "COMPLETED",
+      "tokens_used": 1297,
+      "cost_usd": 0.0259,
+      "duration_ms": 14446,
+      "timestamp": "2026-07-18T21:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1073",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #73",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3298,
+      "cost_usd": 0.066,
+      "duration_ms": 1120,
+      "timestamp": "2026-07-17T05:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1074",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #74",
+      "status": "RUNNING",
+      "tokens_used": 474,
+      "cost_usd": 0.0095,
+      "duration_ms": 6563,
+      "timestamp": "2026-07-20T04:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1075",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #75",
+      "status": "RUNNING",
+      "tokens_used": 2654,
+      "cost_usd": 0.0531,
+      "duration_ms": 13047,
+      "timestamp": "2026-07-17T13:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1076",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #76",
+      "status": "COMPLETED",
+      "tokens_used": 2449,
+      "cost_usd": 0.049,
+      "duration_ms": 4395,
+      "timestamp": "2026-07-20T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1077",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #77",
+      "status": "RUNNING",
+      "tokens_used": 568,
+      "cost_usd": 0.0114,
+      "duration_ms": 7171,
+      "timestamp": "2026-07-19T18:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1078",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #78",
+      "status": "FAILED",
+      "tokens_used": 3719,
+      "cost_usd": 0.0744,
+      "duration_ms": 7424,
+      "timestamp": "2026-07-21T14:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1079",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #79",
+      "status": "COMPLETED",
+      "tokens_used": 2998,
+      "cost_usd": 0.06,
+      "duration_ms": 9551,
+      "timestamp": "2026-07-23T02:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1080",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #80",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 2761,
+      "cost_usd": 0.0552,
+      "duration_ms": 11662,
+      "timestamp": "2026-07-23T02:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1081",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #81",
+      "status": "FAILED",
+      "tokens_used": 2205,
+      "cost_usd": 0.0441,
+      "duration_ms": 3023,
+      "timestamp": "2026-07-18T10:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1082",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #82",
+      "status": "COMPLETED",
+      "tokens_used": 1515,
+      "cost_usd": 0.0303,
+      "duration_ms": 7011,
+      "timestamp": "2026-07-19T21:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1083",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #83",
+      "status": "RUNNING",
+      "tokens_used": 1788,
+      "cost_usd": 0.0358,
+      "duration_ms": 6329,
+      "timestamp": "2026-07-19T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1084",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #84",
+      "status": "RUNNING",
+      "tokens_used": 1483,
+      "cost_usd": 0.0297,
+      "duration_ms": 14479,
+      "timestamp": "2026-07-22T12:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1085",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #85",
+      "status": "COMPLETED",
+      "tokens_used": 3518,
+      "cost_usd": 0.0704,
+      "duration_ms": 9637,
+      "timestamp": "2026-07-22T19:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1086",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #86",
+      "status": "COMPLETED",
+      "tokens_used": 3112,
+      "cost_usd": 0.0622,
+      "duration_ms": 1924,
+      "timestamp": "2026-07-16T10:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1087",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #87",
+      "status": "COMPLETED",
+      "tokens_used": 1462,
+      "cost_usd": 0.0292,
+      "duration_ms": 4066,
+      "timestamp": "2026-07-23T03:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1088",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #88",
+      "status": "COMPLETED",
+      "tokens_used": 1427,
+      "cost_usd": 0.0285,
+      "duration_ms": 2868,
+      "timestamp": "2026-07-18T07:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1089",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #89",
+      "status": "COMPLETED",
+      "tokens_used": 2760,
+      "cost_usd": 0.0552,
+      "duration_ms": 4371,
+      "timestamp": "2026-07-18T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1090",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #90",
+      "status": "COMPLETED",
+      "tokens_used": 3591,
+      "cost_usd": 0.0718,
+      "duration_ms": 6843,
+      "timestamp": "2026-07-21T14:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1091",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #91",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3513,
+      "cost_usd": 0.0703,
+      "duration_ms": 12569,
+      "timestamp": "2026-07-22T03:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1092",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #92",
+      "status": "COMPLETED",
+      "tokens_used": 892,
+      "cost_usd": 0.0178,
+      "duration_ms": 10281,
+      "timestamp": "2026-07-23T02:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1093",
+      "agent": "SupportAgent",
+      "title": "Execute SupportAgent routine #93",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3224,
+      "cost_usd": 0.0645,
+      "duration_ms": 6949,
+      "timestamp": "2026-07-19T03:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1094",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #94",
+      "status": "COMPLETED",
+      "tokens_used": 761,
+      "cost_usd": 0.0152,
+      "duration_ms": 10500,
+      "timestamp": "2026-07-16T16:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1095",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #95",
+      "status": "COMPLETED",
+      "tokens_used": 3305,
+      "cost_usd": 0.0661,
+      "duration_ms": 13456,
+      "timestamp": "2026-07-20T03:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1096",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #96",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3749,
+      "cost_usd": 0.075,
+      "duration_ms": 2783,
+      "timestamp": "2026-07-17T08:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1097",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #97",
+      "status": "COMPLETED",
+      "tokens_used": 2632,
+      "cost_usd": 0.0526,
+      "duration_ms": 7818,
+      "timestamp": "2026-07-19T10:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1098",
+      "agent": "SalesSDR",
+      "title": "Execute SalesSDR routine #98",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3102,
+      "cost_usd": 0.062,
+      "duration_ms": 6390,
+      "timestamp": "2026-07-23T05:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1099",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #99",
+      "status": "RUNNING",
+      "tokens_used": 882,
+      "cost_usd": 0.0176,
+      "duration_ms": 7902,
+      "timestamp": "2026-07-19T12:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1100",
+      "agent": "AuditBot",
+      "title": "Execute AuditBot routine #100",
+      "status": "RUNNING",
+      "tokens_used": 3347,
+      "cost_usd": 0.0669,
+      "duration_ms": 3306,
+      "timestamp": "2026-07-18T17:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1101",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #101",
+      "status": "FAILED",
+      "tokens_used": 2587,
+      "cost_usd": 0.0517,
+      "duration_ms": 11457,
+      "timestamp": "2026-07-20T11:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1102",
+      "agent": "RiskClassifier",
+      "title": "Execute RiskClassifier routine #102",
+      "status": "PENDING_APPROVAL",
+      "tokens_used": 3622,
+      "cost_usd": 0.0724,
+      "duration_ms": 8721,
+      "timestamp": "2026-07-18T09:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1103",
+      "agent": "BIEngineer",
+      "title": "Execute BIEngineer routine #103",
+      "status": "FAILED",
+      "tokens_used": 2876,
+      "cost_usd": 0.0575,
+      "duration_ms": 5197,
+      "timestamp": "2026-07-19T22:25:12.358976+00:00"
+    },
+    {
+      "id": "TSK-1104",
+      "agent": "ResearchBot",
+      "title": "Execute ResearchBot routine #104",
+      "status": "COMPLETED",
+      "tokens_used": 1592,
+      "cost_usd": 0.0318,
+      "duration_ms": 8185,
+      "timestamp": "2026-07-20T18:25:12.358976+00:00"
+    }
+  ],
+  "emails": [
+    {
+      "id": "eml-001",
+      "to": "contact1@prospect.com",
+      "subject": "Automated AI Follow-up #1 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T04:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-002",
+      "to": "contact2@prospect.com",
+      "subject": "Automated AI Follow-up #2 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T03:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-003",
+      "to": "contact3@prospect.com",
+      "subject": "Automated AI Follow-up #3 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T18:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-004",
+      "to": "contact4@prospect.com",
+      "subject": "Automated AI Follow-up #4 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T10:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-005",
+      "to": "contact5@prospect.com",
+      "subject": "Automated AI Follow-up #5 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T19:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-006",
+      "to": "contact6@prospect.com",
+      "subject": "Automated AI Follow-up #6 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T19:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-007",
+      "to": "contact7@prospect.com",
+      "subject": "Automated AI Follow-up #7 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T08:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-008",
+      "to": "contact8@prospect.com",
+      "subject": "Automated AI Follow-up #8 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T11:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-009",
+      "to": "contact9@prospect.com",
+      "subject": "Automated AI Follow-up #9 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T07:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-010",
+      "to": "contact10@prospect.com",
+      "subject": "Automated AI Follow-up #10 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T12:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-011",
+      "to": "contact11@prospect.com",
+      "subject": "Automated AI Follow-up #11 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T15:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-012",
+      "to": "contact12@prospect.com",
+      "subject": "Automated AI Follow-up #12 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T11:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-013",
+      "to": "contact13@prospect.com",
+      "subject": "Automated AI Follow-up #13 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T04:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-014",
+      "to": "contact14@prospect.com",
+      "subject": "Automated AI Follow-up #14 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T18:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-015",
+      "to": "contact15@prospect.com",
+      "subject": "Automated AI Follow-up #15 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T08:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-016",
+      "to": "contact16@prospect.com",
+      "subject": "Automated AI Follow-up #16 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T14:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-017",
+      "to": "contact17@prospect.com",
+      "subject": "Automated AI Follow-up #17 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T03:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-018",
+      "to": "contact18@prospect.com",
+      "subject": "Automated AI Follow-up #18 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-10T22:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-019",
+      "to": "contact19@prospect.com",
+      "subject": "Automated AI Follow-up #19 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T05:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-020",
+      "to": "contact20@prospect.com",
+      "subject": "Automated AI Follow-up #20 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T06:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-021",
+      "to": "contact21@prospect.com",
+      "subject": "Automated AI Follow-up #21 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T19:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-022",
+      "to": "contact22@prospect.com",
+      "subject": "Automated AI Follow-up #22 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T13:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-023",
+      "to": "contact23@prospect.com",
+      "subject": "Automated AI Follow-up #23 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T23:25:12.358976+00:00"
+    },
+    {
+      "id": "eml-024",
+      "to": "contact24@prospect.com",
+      "subject": "Automated AI Follow-up #24 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-025",
+      "to": "contact25@prospect.com",
+      "subject": "Automated AI Follow-up #25 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-026",
+      "to": "contact26@prospect.com",
+      "subject": "Automated AI Follow-up #26 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-027",
+      "to": "contact27@prospect.com",
+      "subject": "Automated AI Follow-up #27 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-028",
+      "to": "contact28@prospect.com",
+      "subject": "Automated AI Follow-up #28 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-029",
+      "to": "contact29@prospect.com",
+      "subject": "Automated AI Follow-up #29 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-030",
+      "to": "contact30@prospect.com",
+      "subject": "Automated AI Follow-up #30 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-031",
+      "to": "contact31@prospect.com",
+      "subject": "Automated AI Follow-up #31 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-032",
+      "to": "contact32@prospect.com",
+      "subject": "Automated AI Follow-up #32 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-033",
+      "to": "contact33@prospect.com",
+      "subject": "Automated AI Follow-up #33 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-034",
+      "to": "contact34@prospect.com",
+      "subject": "Automated AI Follow-up #34 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T22:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-035",
+      "to": "contact35@prospect.com",
+      "subject": "Automated AI Follow-up #35 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-036",
+      "to": "contact36@prospect.com",
+      "subject": "Automated AI Follow-up #36 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-037",
+      "to": "contact37@prospect.com",
+      "subject": "Automated AI Follow-up #37 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-038",
+      "to": "contact38@prospect.com",
+      "subject": "Automated AI Follow-up #38 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-039",
+      "to": "contact39@prospect.com",
+      "subject": "Automated AI Follow-up #39 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-040",
+      "to": "contact40@prospect.com",
+      "subject": "Automated AI Follow-up #40 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-041",
+      "to": "contact41@prospect.com",
+      "subject": "Automated AI Follow-up #41 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T22:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-042",
+      "to": "contact42@prospect.com",
+      "subject": "Automated AI Follow-up #42 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-043",
+      "to": "contact43@prospect.com",
+      "subject": "Automated AI Follow-up #43 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T22:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-044",
+      "to": "contact44@prospect.com",
+      "subject": "Automated AI Follow-up #44 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-045",
+      "to": "contact45@prospect.com",
+      "subject": "Automated AI Follow-up #45 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-046",
+      "to": "contact46@prospect.com",
+      "subject": "Automated AI Follow-up #46 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-047",
+      "to": "contact47@prospect.com",
+      "subject": "Automated AI Follow-up #47 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-048",
+      "to": "contact48@prospect.com",
+      "subject": "Automated AI Follow-up #48 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-049",
+      "to": "contact49@prospect.com",
+      "subject": "Automated AI Follow-up #49 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T12:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-050",
+      "to": "contact50@prospect.com",
+      "subject": "Automated AI Follow-up #50 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-051",
+      "to": "contact51@prospect.com",
+      "subject": "Automated AI Follow-up #51 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T12:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-052",
+      "to": "contact52@prospect.com",
+      "subject": "Automated AI Follow-up #52 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-053",
+      "to": "contact53@prospect.com",
+      "subject": "Automated AI Follow-up #53 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-054",
+      "to": "contact54@prospect.com",
+      "subject": "Automated AI Follow-up #54 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-055",
+      "to": "contact55@prospect.com",
+      "subject": "Automated AI Follow-up #55 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-056",
+      "to": "contact56@prospect.com",
+      "subject": "Automated AI Follow-up #56 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-057",
+      "to": "contact57@prospect.com",
+      "subject": "Automated AI Follow-up #57 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-058",
+      "to": "contact58@prospect.com",
+      "subject": "Automated AI Follow-up #58 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-059",
+      "to": "contact59@prospect.com",
+      "subject": "Automated AI Follow-up #59 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-060",
+      "to": "contact60@prospect.com",
+      "subject": "Automated AI Follow-up #60 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-061",
+      "to": "contact61@prospect.com",
+      "subject": "Automated AI Follow-up #61 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-062",
+      "to": "contact62@prospect.com",
+      "subject": "Automated AI Follow-up #62 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-063",
+      "to": "contact63@prospect.com",
+      "subject": "Automated AI Follow-up #63 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-064",
+      "to": "contact64@prospect.com",
+      "subject": "Automated AI Follow-up #64 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-065",
+      "to": "contact65@prospect.com",
+      "subject": "Automated AI Follow-up #65 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-066",
+      "to": "contact66@prospect.com",
+      "subject": "Automated AI Follow-up #66 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-067",
+      "to": "contact67@prospect.com",
+      "subject": "Automated AI Follow-up #67 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-068",
+      "to": "contact68@prospect.com",
+      "subject": "Automated AI Follow-up #68 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-069",
+      "to": "contact69@prospect.com",
+      "subject": "Automated AI Follow-up #69 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-070",
+      "to": "contact70@prospect.com",
+      "subject": "Automated AI Follow-up #70 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-071",
+      "to": "contact71@prospect.com",
+      "subject": "Automated AI Follow-up #71 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T01:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-072",
+      "to": "contact72@prospect.com",
+      "subject": "Automated AI Follow-up #72 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-073",
+      "to": "contact73@prospect.com",
+      "subject": "Automated AI Follow-up #73 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-074",
+      "to": "contact74@prospect.com",
+      "subject": "Automated AI Follow-up #74 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-075",
+      "to": "contact75@prospect.com",
+      "subject": "Automated AI Follow-up #75 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-076",
+      "to": "contact76@prospect.com",
+      "subject": "Automated AI Follow-up #76 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-077",
+      "to": "contact77@prospect.com",
+      "subject": "Automated AI Follow-up #77 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-078",
+      "to": "contact78@prospect.com",
+      "subject": "Automated AI Follow-up #78 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-079",
+      "to": "contact79@prospect.com",
+      "subject": "Automated AI Follow-up #79 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T10:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-080",
+      "to": "contact80@prospect.com",
+      "subject": "Automated AI Follow-up #80 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-081",
+      "to": "contact81@prospect.com",
+      "subject": "Automated AI Follow-up #81 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T10:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-082",
+      "to": "contact82@prospect.com",
+      "subject": "Automated AI Follow-up #82 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-083",
+      "to": "contact83@prospect.com",
+      "subject": "Automated AI Follow-up #83 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-084",
+      "to": "contact84@prospect.com",
+      "subject": "Automated AI Follow-up #84 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-085",
+      "to": "contact85@prospect.com",
+      "subject": "Automated AI Follow-up #85 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-086",
+      "to": "contact86@prospect.com",
+      "subject": "Automated AI Follow-up #86 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-10T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-087",
+      "to": "contact87@prospect.com",
+      "subject": "Automated AI Follow-up #87 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-088",
+      "to": "contact88@prospect.com",
+      "subject": "Automated AI Follow-up #88 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-089",
+      "to": "contact89@prospect.com",
+      "subject": "Automated AI Follow-up #89 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-090",
+      "to": "contact90@prospect.com",
+      "subject": "Automated AI Follow-up #90 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-091",
+      "to": "contact91@prospect.com",
+      "subject": "Automated AI Follow-up #91 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-092",
+      "to": "contact92@prospect.com",
+      "subject": "Automated AI Follow-up #92 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-093",
+      "to": "contact93@prospect.com",
+      "subject": "Automated AI Follow-up #93 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-094",
+      "to": "contact94@prospect.com",
+      "subject": "Automated AI Follow-up #94 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-095",
+      "to": "contact95@prospect.com",
+      "subject": "Automated AI Follow-up #95 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-096",
+      "to": "contact96@prospect.com",
+      "subject": "Automated AI Follow-up #96 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-097",
+      "to": "contact97@prospect.com",
+      "subject": "Automated AI Follow-up #97 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T10:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-098",
+      "to": "contact98@prospect.com",
+      "subject": "Automated AI Follow-up #98 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-099",
+      "to": "contact99@prospect.com",
+      "subject": "Automated AI Follow-up #99 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-100",
+      "to": "contact100@prospect.com",
+      "subject": "Automated AI Follow-up #100 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T12:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-101",
+      "to": "contact101@prospect.com",
+      "subject": "Automated AI Follow-up #101 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-102",
+      "to": "contact102@prospect.com",
+      "subject": "Automated AI Follow-up #102 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-103",
+      "to": "contact103@prospect.com",
+      "subject": "Automated AI Follow-up #103 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-104",
+      "to": "contact104@prospect.com",
+      "subject": "Automated AI Follow-up #104 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-105",
+      "to": "contact105@prospect.com",
+      "subject": "Automated AI Follow-up #105 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-106",
+      "to": "contact106@prospect.com",
+      "subject": "Automated AI Follow-up #106 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-107",
+      "to": "contact107@prospect.com",
+      "subject": "Automated AI Follow-up #107 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-108",
+      "to": "contact108@prospect.com",
+      "subject": "Automated AI Follow-up #108 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T22:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-109",
+      "to": "contact109@prospect.com",
+      "subject": "Automated AI Follow-up #109 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-110",
+      "to": "contact110@prospect.com",
+      "subject": "Automated AI Follow-up #110 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-111",
+      "to": "contact111@prospect.com",
+      "subject": "Automated AI Follow-up #111 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-112",
+      "to": "contact112@prospect.com",
+      "subject": "Automated AI Follow-up #112 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-113",
+      "to": "contact113@prospect.com",
+      "subject": "Automated AI Follow-up #113 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-114",
+      "to": "contact114@prospect.com",
+      "subject": "Automated AI Follow-up #114 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-115",
+      "to": "contact115@prospect.com",
+      "subject": "Automated AI Follow-up #115 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-116",
+      "to": "contact116@prospect.com",
+      "subject": "Automated AI Follow-up #116 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-117",
+      "to": "contact117@prospect.com",
+      "subject": "Automated AI Follow-up #117 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-118",
+      "to": "contact118@prospect.com",
+      "subject": "Automated AI Follow-up #118 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-119",
+      "to": "contact119@prospect.com",
+      "subject": "Automated AI Follow-up #119 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-120",
+      "to": "contact120@prospect.com",
+      "subject": "Automated AI Follow-up #120 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-121",
+      "to": "contact121@prospect.com",
+      "subject": "Automated AI Follow-up #121 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-122",
+      "to": "contact122@prospect.com",
+      "subject": "Automated AI Follow-up #122 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-123",
+      "to": "contact123@prospect.com",
+      "subject": "Automated AI Follow-up #123 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T12:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-124",
+      "to": "contact124@prospect.com",
+      "subject": "Automated AI Follow-up #124 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-23T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-125",
+      "to": "contact125@prospect.com",
+      "subject": "Automated AI Follow-up #125 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-126",
+      "to": "contact126@prospect.com",
+      "subject": "Automated AI Follow-up #126 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-127",
+      "to": "contact127@prospect.com",
+      "subject": "Automated AI Follow-up #127 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-128",
+      "to": "contact128@prospect.com",
+      "subject": "Automated AI Follow-up #128 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-129",
+      "to": "contact129@prospect.com",
+      "subject": "Automated AI Follow-up #129 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-130",
+      "to": "contact130@prospect.com",
+      "subject": "Automated AI Follow-up #130 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-131",
+      "to": "contact131@prospect.com",
+      "subject": "Automated AI Follow-up #131 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-132",
+      "to": "contact132@prospect.com",
+      "subject": "Automated AI Follow-up #132 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-133",
+      "to": "contact133@prospect.com",
+      "subject": "Automated AI Follow-up #133 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-134",
+      "to": "contact134@prospect.com",
+      "subject": "Automated AI Follow-up #134 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-135",
+      "to": "contact135@prospect.com",
+      "subject": "Automated AI Follow-up #135 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-136",
+      "to": "contact136@prospect.com",
+      "subject": "Automated AI Follow-up #136 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-137",
+      "to": "contact137@prospect.com",
+      "subject": "Automated AI Follow-up #137 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-138",
+      "to": "contact138@prospect.com",
+      "subject": "Automated AI Follow-up #138 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-139",
+      "to": "contact139@prospect.com",
+      "subject": "Automated AI Follow-up #139 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-140",
+      "to": "contact140@prospect.com",
+      "subject": "Automated AI Follow-up #140 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-141",
+      "to": "contact141@prospect.com",
+      "subject": "Automated AI Follow-up #141 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-23T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-142",
+      "to": "contact142@prospect.com",
+      "subject": "Automated AI Follow-up #142 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-143",
+      "to": "contact143@prospect.com",
+      "subject": "Automated AI Follow-up #143 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-144",
+      "to": "contact144@prospect.com",
+      "subject": "Automated AI Follow-up #144 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-145",
+      "to": "contact145@prospect.com",
+      "subject": "Automated AI Follow-up #145 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-146",
+      "to": "contact146@prospect.com",
+      "subject": "Automated AI Follow-up #146 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-147",
+      "to": "contact147@prospect.com",
+      "subject": "Automated AI Follow-up #147 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T13:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-148",
+      "to": "contact148@prospect.com",
+      "subject": "Automated AI Follow-up #148 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-149",
+      "to": "contact149@prospect.com",
+      "subject": "Automated AI Follow-up #149 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-150",
+      "to": "contact150@prospect.com",
+      "subject": "Automated AI Follow-up #150 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-151",
+      "to": "contact151@prospect.com",
+      "subject": "Automated AI Follow-up #151 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-152",
+      "to": "contact152@prospect.com",
+      "subject": "Automated AI Follow-up #152 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T05:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-153",
+      "to": "contact153@prospect.com",
+      "subject": "Automated AI Follow-up #153 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-154",
+      "to": "contact154@prospect.com",
+      "subject": "Automated AI Follow-up #154 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T22:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-155",
+      "to": "contact155@prospect.com",
+      "subject": "Automated AI Follow-up #155 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-156",
+      "to": "contact156@prospect.com",
+      "subject": "Automated AI Follow-up #156 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-157",
+      "to": "contact157@prospect.com",
+      "subject": "Automated AI Follow-up #157 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-158",
+      "to": "contact158@prospect.com",
+      "subject": "Automated AI Follow-up #158 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-159",
+      "to": "contact159@prospect.com",
+      "subject": "Automated AI Follow-up #159 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-160",
+      "to": "contact160@prospect.com",
+      "subject": "Automated AI Follow-up #160 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-161",
+      "to": "contact161@prospect.com",
+      "subject": "Automated AI Follow-up #161 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-162",
+      "to": "contact162@prospect.com",
+      "subject": "Automated AI Follow-up #162 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-163",
+      "to": "contact163@prospect.com",
+      "subject": "Automated AI Follow-up #163 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T04:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-164",
+      "to": "contact164@prospect.com",
+      "subject": "Automated AI Follow-up #164 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-10T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-165",
+      "to": "contact165@prospect.com",
+      "subject": "Automated AI Follow-up #165 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-166",
+      "to": "contact166@prospect.com",
+      "subject": "Automated AI Follow-up #166 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-167",
+      "to": "contact167@prospect.com",
+      "subject": "Automated AI Follow-up #167 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-168",
+      "to": "contact168@prospect.com",
+      "subject": "Automated AI Follow-up #168 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T09:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-169",
+      "to": "contact169@prospect.com",
+      "subject": "Automated AI Follow-up #169 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T16:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-170",
+      "to": "contact170@prospect.com",
+      "subject": "Automated AI Follow-up #170 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T18:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-171",
+      "to": "contact171@prospect.com",
+      "subject": "Automated AI Follow-up #171 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-15T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-172",
+      "to": "contact172@prospect.com",
+      "subject": "Automated AI Follow-up #172 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-173",
+      "to": "contact173@prospect.com",
+      "subject": "Automated AI Follow-up #173 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-174",
+      "to": "contact174@prospect.com",
+      "subject": "Automated AI Follow-up #174 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-175",
+      "to": "contact175@prospect.com",
+      "subject": "Automated AI Follow-up #175 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-176",
+      "to": "contact176@prospect.com",
+      "subject": "Automated AI Follow-up #176 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-177",
+      "to": "contact177@prospect.com",
+      "subject": "Automated AI Follow-up #177 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-178",
+      "to": "contact178@prospect.com",
+      "subject": "Automated AI Follow-up #178 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T01:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-179",
+      "to": "contact179@prospect.com",
+      "subject": "Automated AI Follow-up #179 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-180",
+      "to": "contact180@prospect.com",
+      "subject": "Automated AI Follow-up #180 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T21:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-181",
+      "to": "contact181@prospect.com",
+      "subject": "Automated AI Follow-up #181 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-23T03:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-182",
+      "to": "contact182@prospect.com",
+      "subject": "Automated AI Follow-up #182 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-183",
+      "to": "contact183@prospect.com",
+      "subject": "Automated AI Follow-up #183 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T10:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-184",
+      "to": "contact184@prospect.com",
+      "subject": "Automated AI Follow-up #184 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-18T15:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-185",
+      "to": "contact185@prospect.com",
+      "subject": "Automated AI Follow-up #185 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T23:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-186",
+      "to": "contact186@prospect.com",
+      "subject": "Automated AI Follow-up #186 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T06:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-187",
+      "to": "contact187@prospect.com",
+      "subject": "Automated AI Follow-up #187 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T17:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-188",
+      "to": "contact188@prospect.com",
+      "subject": "Automated AI Follow-up #188 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-22T14:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-189",
+      "to": "contact189@prospect.com",
+      "subject": "Automated AI Follow-up #189 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T12:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-190",
+      "to": "contact190@prospect.com",
+      "subject": "Automated AI Follow-up #190 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-17T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-191",
+      "to": "contact191@prospect.com",
+      "subject": "Automated AI Follow-up #191 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T11:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-192",
+      "to": "contact192@prospect.com",
+      "subject": "Automated AI Follow-up #192 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T01:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-193",
+      "to": "contact193@prospect.com",
+      "subject": "Automated AI Follow-up #193 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-194",
+      "to": "contact194@prospect.com",
+      "subject": "Automated AI Follow-up #194 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-12T00:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-195",
+      "to": "contact195@prospect.com",
+      "subject": "Automated AI Follow-up #195 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-19T19:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-196",
+      "to": "contact196@prospect.com",
+      "subject": "Automated AI Follow-up #196 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T01:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-197",
+      "to": "contact197@prospect.com",
+      "subject": "Automated AI Follow-up #197 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-16T02:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-198",
+      "to": "contact198@prospect.com",
+      "subject": "Automated AI Follow-up #198 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T08:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-199",
+      "to": "contact199@prospect.com",
+      "subject": "Automated AI Follow-up #199 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-20T07:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-200",
+      "to": "contact200@prospect.com",
+      "subject": "Automated AI Follow-up #200 - TITAN OS",
+      "status": "OPENED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-14T20:25:12.359975+00:00"
+    },
+    {
+      "id": "eml-201",
+      "to": "contact201@prospect.com",
+      "subject": "Automated AI Follow-up #201 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-21T09:25:12.360973+00:00"
+    },
+    {
+      "id": "eml-202",
+      "to": "contact202@prospect.com",
+      "subject": "Automated AI Follow-up #202 - TITAN OS",
+      "status": "REPLIED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-23T00:25:12.360973+00:00"
+    },
+    {
+      "id": "eml-203",
+      "to": "contact203@prospect.com",
+      "subject": "Automated AI Follow-up #203 - TITAN OS",
+      "status": "CLICKED",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-11T21:25:12.360973+00:00"
+    },
+    {
+      "id": "eml-204",
+      "to": "contact204@prospect.com",
+      "subject": "Automated AI Follow-up #204 - TITAN OS",
+      "status": "SENT",
+      "agent_id": "SalesSDR",
+      "sent_at": "2026-07-13T15:25:12.360973+00:00"
+    }
+  ],
+  "tickets": [
+    {
+      "id": "TCK-3001",
+      "subject": "System Alert / Query #1",
+      "priority": "High",
+      "status": "Resolved",
+      "created_at": "2026-07-15T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3002",
+      "subject": "System Alert / Query #2",
+      "priority": "Critical",
+      "status": "Resolved",
+      "created_at": "2026-07-12T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3003",
+      "subject": "System Alert / Query #3",
+      "priority": "Low",
+      "status": "Resolved",
+      "created_at": "2026-07-16T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3004",
+      "subject": "System Alert / Query #4",
+      "priority": "Critical",
+      "status": "Open",
+      "created_at": "2026-07-13T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3005",
+      "subject": "System Alert / Query #5",
+      "priority": "Medium",
+      "status": "Resolved",
+      "created_at": "2026-07-21T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3006",
+      "subject": "System Alert / Query #6",
+      "priority": "Critical",
+      "status": "Resolved",
+      "created_at": "2026-07-14T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3007",
+      "subject": "System Alert / Query #7",
+      "priority": "Critical",
+      "status": "Open",
+      "created_at": "2026-07-19T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3008",
+      "subject": "System Alert / Query #8",
+      "priority": "Low",
+      "status": "Open",
+      "created_at": "2026-07-14T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3009",
+      "subject": "System Alert / Query #9",
+      "priority": "Critical",
+      "status": "Open",
+      "created_at": "2026-07-20T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3010",
+      "subject": "System Alert / Query #10",
+      "priority": "Medium",
+      "status": "Resolved",
+      "created_at": "2026-07-19T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3011",
+      "subject": "System Alert / Query #11",
+      "priority": "Critical",
+      "status": "In Progress",
+      "created_at": "2026-07-12T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3012",
+      "subject": "System Alert / Query #12",
+      "priority": "Critical",
+      "status": "Resolved",
+      "created_at": "2026-07-19T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3013",
+      "subject": "System Alert / Query #13",
+      "priority": "Critical",
+      "status": "Resolved",
+      "created_at": "2026-07-20T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3014",
+      "subject": "System Alert / Query #14",
+      "priority": "Critical",
+      "status": "Resolved",
+      "created_at": "2026-07-10T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3015",
+      "subject": "System Alert / Query #15",
+      "priority": "High",
+      "status": "Open",
+      "created_at": "2026-07-12T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3016",
+      "subject": "System Alert / Query #16",
+      "priority": "Medium",
+      "status": "In Progress",
+      "created_at": "2026-07-09T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3017",
+      "subject": "System Alert / Query #17",
+      "priority": "Medium",
+      "status": "In Progress",
+      "created_at": "2026-07-20T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3018",
+      "subject": "System Alert / Query #18",
+      "priority": "High",
+      "status": "Resolved",
+      "created_at": "2026-07-12T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3019",
+      "subject": "System Alert / Query #19",
+      "priority": "Low",
+      "status": "In Progress",
+      "created_at": "2026-07-15T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3020",
+      "subject": "System Alert / Query #20",
+      "priority": "Medium",
+      "status": "Open",
+      "created_at": "2026-07-09T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3021",
+      "subject": "System Alert / Query #21",
+      "priority": "Low",
+      "status": "Resolved",
+      "created_at": "2026-07-17T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3022",
+      "subject": "System Alert / Query #22",
+      "priority": "Low",
+      "status": "Open",
+      "created_at": "2026-07-13T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3023",
+      "subject": "System Alert / Query #23",
+      "priority": "Medium",
+      "status": "Open",
+      "created_at": "2026-07-17T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3024",
+      "subject": "System Alert / Query #24",
+      "priority": "Low",
+      "status": "Resolved",
+      "created_at": "2026-07-17T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3025",
+      "subject": "System Alert / Query #25",
+      "priority": "Medium",
+      "status": "Open",
+      "created_at": "2026-07-13T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3026",
+      "subject": "System Alert / Query #26",
+      "priority": "Medium",
+      "status": "Resolved",
+      "created_at": "2026-07-23T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3027",
+      "subject": "System Alert / Query #27",
+      "priority": "High",
+      "status": "Open",
+      "created_at": "2026-07-19T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3028",
+      "subject": "System Alert / Query #28",
+      "priority": "High",
+      "status": "Open",
+      "created_at": "2026-07-20T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3029",
+      "subject": "System Alert / Query #29",
+      "priority": "Low",
+      "status": "Open",
+      "created_at": "2026-07-23T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3030",
+      "subject": "System Alert / Query #30",
+      "priority": "High",
+      "status": "Open",
+      "created_at": "2026-07-13T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3031",
+      "subject": "System Alert / Query #31",
+      "priority": "Low",
+      "status": "Open",
+      "created_at": "2026-07-15T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3032",
+      "subject": "System Alert / Query #32",
+      "priority": "Low",
+      "status": "Open",
+      "created_at": "2026-07-10T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3033",
+      "subject": "System Alert / Query #33",
+      "priority": "Low",
+      "status": "Resolved",
+      "created_at": "2026-07-21T08:25:12.360973+00:00"
+    },
+    {
+      "id": "TCK-3034",
+      "subject": "System Alert / Query #34",
+      "priority": "Critical",
+      "status": "In Progress",
+      "created_at": "2026-07-12T08:25:12.360973+00:00"
+    }
+  ],
+  "approvals": [
+    {
+      "id": "app-001",
+      "workflow_id": "wf-9408",
+      "agent": "RiskClassifier",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "REJECTED",
+      "timestamp": "2026-07-22T03:25:12.360973+00:00"
+    },
+    {
+      "id": "app-002",
+      "workflow_id": "wf-1710",
+      "agent": "AuditBot",
+      "action": "Update CRM Stage",
+      "risk_level": "CRITICAL",
+      "status": "REJECTED",
+      "timestamp": "2026-07-23T04:25:12.360973+00:00"
+    },
+    {
+      "id": "app-003",
+      "workflow_id": "wf-1996",
+      "agent": "BIEngineer",
+      "action": "Delete Records",
+      "risk_level": "CRITICAL",
+      "status": "REJECTED",
+      "timestamp": "2026-07-22T18:25:12.360973+00:00"
+    },
+    {
+      "id": "app-004",
+      "workflow_id": "wf-9032",
+      "agent": "AuditBot",
+      "action": "Delete Records",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T14:25:12.360973+00:00"
+    },
+    {
+      "id": "app-005",
+      "workflow_id": "wf-3430",
+      "agent": "SalesSDR",
+      "action": "Send Bulk Campaign",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-20T09:25:12.360973+00:00"
+    },
+    {
+      "id": "app-006",
+      "workflow_id": "wf-6327",
+      "agent": "BIEngineer",
+      "action": "Update CRM Stage",
+      "risk_level": "CRITICAL",
+      "status": "REJECTED",
+      "timestamp": "2026-07-21T00:25:12.360973+00:00"
+    },
+    {
+      "id": "app-007",
+      "workflow_id": "wf-2624",
+      "agent": "AuditBot",
+      "action": "Execute Wire Transfer",
+      "risk_level": "MEDIUM",
+      "status": "APPROVED",
+      "timestamp": "2026-07-20T22:25:12.360973+00:00"
+    },
+    {
+      "id": "app-008",
+      "workflow_id": "wf-4743",
+      "agent": "BIEngineer",
+      "action": "Update CRM Stage",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-21T02:25:12.360973+00:00"
+    },
+    {
+      "id": "app-009",
+      "workflow_id": "wf-2557",
+      "agent": "SupportAgent",
+      "action": "Delete Records",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-21T23:25:12.360973+00:00"
+    },
+    {
+      "id": "app-010",
+      "workflow_id": "wf-7132",
+      "agent": "ResearchBot",
+      "action": "Delete Records",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-22T21:25:12.360973+00:00"
+    },
+    {
+      "id": "app-011",
+      "workflow_id": "wf-2527",
+      "agent": "BIEngineer",
+      "action": "Execute Wire Transfer",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-20T08:25:12.360973+00:00"
+    },
+    {
+      "id": "app-012",
+      "workflow_id": "wf-1982",
+      "agent": "RiskClassifier",
+      "action": "Update CRM Stage",
+      "risk_level": "LOW",
+      "status": "APPROVED",
+      "timestamp": "2026-07-21T10:25:12.360973+00:00"
+    },
+    {
+      "id": "app-013",
+      "workflow_id": "wf-7929",
+      "agent": "AuditBot",
+      "action": "Execute Wire Transfer",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-21T16:25:12.360973+00:00"
+    },
+    {
+      "id": "app-014",
+      "workflow_id": "wf-6761",
+      "agent": "SalesSDR",
+      "action": "Send Bulk Campaign",
+      "risk_level": "MEDIUM",
+      "status": "REJECTED",
+      "timestamp": "2026-07-20T18:25:12.360973+00:00"
+    },
+    {
+      "id": "app-015",
+      "workflow_id": "wf-4674",
+      "agent": "SalesSDR",
+      "action": "Update CRM Stage",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T20:25:12.360973+00:00"
+    },
+    {
+      "id": "app-016",
+      "workflow_id": "wf-4705",
+      "agent": "BIEngineer",
+      "action": "Execute Wire Transfer",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-22T08:25:12.360973+00:00"
+    },
+    {
+      "id": "app-017",
+      "workflow_id": "wf-5477",
+      "agent": "AuditBot",
+      "action": "Update CRM Stage",
+      "risk_level": "HIGH",
+      "status": "APPROVED",
+      "timestamp": "2026-07-23T07:25:12.360973+00:00"
+    },
+    {
+      "id": "app-018",
+      "workflow_id": "wf-3972",
+      "agent": "ResearchBot",
+      "action": "Delete Records",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-23T04:25:12.360973+00:00"
+    },
+    {
+      "id": "app-019",
+      "workflow_id": "wf-2503",
+      "agent": "AuditBot",
+      "action": "Send Bulk Campaign",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-20T21:25:12.360973+00:00"
+    },
+    {
+      "id": "app-020",
+      "workflow_id": "wf-6585",
+      "agent": "ResearchBot",
+      "action": "Update CRM Stage",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-21T14:25:12.360973+00:00"
+    },
+    {
+      "id": "app-021",
+      "workflow_id": "wf-2391",
+      "agent": "SalesSDR",
+      "action": "Send Bulk Campaign",
+      "risk_level": "MEDIUM",
+      "status": "REJECTED",
+      "timestamp": "2026-07-23T01:25:12.360973+00:00"
+    },
+    {
+      "id": "app-022",
+      "workflow_id": "wf-2336",
+      "agent": "SupportAgent",
+      "action": "Delete Records",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-20T23:25:12.360973+00:00"
+    },
+    {
+      "id": "app-023",
+      "workflow_id": "wf-7785",
+      "agent": "SupportAgent",
+      "action": "Send Bulk Campaign",
+      "risk_level": "LOW",
+      "status": "APPROVED",
+      "timestamp": "2026-07-21T00:25:12.360973+00:00"
+    },
+    {
+      "id": "app-024",
+      "workflow_id": "wf-2816",
+      "agent": "SupportAgent",
+      "action": "Delete Records",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-22T03:25:12.360973+00:00"
+    },
+    {
+      "id": "app-025",
+      "workflow_id": "wf-7475",
+      "agent": "RiskClassifier",
+      "action": "Execute Wire Transfer",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T17:25:12.360973+00:00"
+    },
+    {
+      "id": "app-026",
+      "workflow_id": "wf-4460",
+      "agent": "ResearchBot",
+      "action": "Update CRM Stage",
+      "risk_level": "HIGH",
+      "status": "APPROVED",
+      "timestamp": "2026-07-22T16:25:12.360973+00:00"
+    },
+    {
+      "id": "app-027",
+      "workflow_id": "wf-1126",
+      "agent": "BIEngineer",
+      "action": "Delete Records",
+      "risk_level": "MEDIUM",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T07:25:12.360973+00:00"
+    },
+    {
+      "id": "app-028",
+      "workflow_id": "wf-9725",
+      "agent": "AuditBot",
+      "action": "Send Bulk Campaign",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T05:25:12.360973+00:00"
+    },
+    {
+      "id": "app-029",
+      "workflow_id": "wf-1693",
+      "agent": "BIEngineer",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T15:25:12.360973+00:00"
+    },
+    {
+      "id": "app-030",
+      "workflow_id": "wf-8033",
+      "agent": "RiskClassifier",
+      "action": "Delete Records",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-22T17:25:12.360973+00:00"
+    },
+    {
+      "id": "app-031",
+      "workflow_id": "wf-7636",
+      "agent": "SalesSDR",
+      "action": "Update CRM Stage",
+      "risk_level": "MEDIUM",
+      "status": "REJECTED",
+      "timestamp": "2026-07-20T21:25:12.360973+00:00"
+    },
+    {
+      "id": "app-032",
+      "workflow_id": "wf-6928",
+      "agent": "SalesSDR",
+      "action": "Delete Records",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T00:25:12.360973+00:00"
+    },
+    {
+      "id": "app-033",
+      "workflow_id": "wf-7560",
+      "agent": "RiskClassifier",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-21T12:25:12.360973+00:00"
+    },
+    {
+      "id": "app-034",
+      "workflow_id": "wf-4630",
+      "agent": "SupportAgent",
+      "action": "Send Bulk Campaign",
+      "risk_level": "LOW",
+      "status": "REJECTED",
+      "timestamp": "2026-07-22T17:25:12.360973+00:00"
+    },
+    {
+      "id": "app-035",
+      "workflow_id": "wf-9693",
+      "agent": "RiskClassifier",
+      "action": "Send Bulk Campaign",
+      "risk_level": "HIGH",
+      "status": "APPROVED",
+      "timestamp": "2026-07-22T13:25:12.360973+00:00"
+    },
+    {
+      "id": "app-036",
+      "workflow_id": "wf-4871",
+      "agent": "SalesSDR",
+      "action": "Send Bulk Campaign",
+      "risk_level": "HIGH",
+      "status": "PENDING",
+      "timestamp": "2026-07-22T09:25:12.360973+00:00"
+    },
+    {
+      "id": "app-037",
+      "workflow_id": "wf-3504",
+      "agent": "AuditBot",
+      "action": "Execute Wire Transfer",
+      "risk_level": "MEDIUM",
+      "status": "REJECTED",
+      "timestamp": "2026-07-20T16:25:12.360973+00:00"
+    },
+    {
+      "id": "app-038",
+      "workflow_id": "wf-8601",
+      "agent": "RiskClassifier",
+      "action": "Delete Records",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-21T15:25:12.360973+00:00"
+    },
+    {
+      "id": "app-039",
+      "workflow_id": "wf-3473",
+      "agent": "BIEngineer",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-21T17:25:12.360973+00:00"
+    },
+    {
+      "id": "app-040",
+      "workflow_id": "wf-5500",
+      "agent": "RiskClassifier",
+      "action": "Execute Wire Transfer",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-22T22:25:12.360973+00:00"
+    },
+    {
+      "id": "app-041",
+      "workflow_id": "wf-6085",
+      "agent": "BIEngineer",
+      "action": "Delete Records",
+      "risk_level": "LOW",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T08:25:12.360973+00:00"
+    },
+    {
+      "id": "app-042",
+      "workflow_id": "wf-5703",
+      "agent": "SalesSDR",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "APPROVED",
+      "timestamp": "2026-07-20T09:25:12.360973+00:00"
+    },
+    {
+      "id": "app-043",
+      "workflow_id": "wf-1672",
+      "agent": "BIEngineer",
+      "action": "Send Bulk Campaign",
+      "risk_level": "HIGH",
+      "status": "REJECTED",
+      "timestamp": "2026-07-20T19:25:12.360973+00:00"
+    },
+    {
+      "id": "app-044",
+      "workflow_id": "wf-9214",
+      "agent": "ResearchBot",
+      "action": "Execute Wire Transfer",
+      "risk_level": "CRITICAL",
+      "status": "PENDING",
+      "timestamp": "2026-07-21T12:25:12.360973+00:00"
+    }
+  ],
+  "metrics_history": [
+    {
+      "date": "2026-04-24",
+      "revenue": 11190,
+      "leads_converted": 21,
+      "tasks_executed": 450,
+      "csat_score": 4.58
+    },
+    {
+      "date": "2026-04-25",
+      "revenue": 12679,
+      "leads_converted": 19,
+      "tasks_executed": 344,
+      "csat_score": 4.74
+    },
+    {
+      "date": "2026-04-26",
+      "revenue": 15795,
+      "leads_converted": 10,
+      "tasks_executed": 306,
+      "csat_score": 4.67
+    },
+    {
+      "date": "2026-04-27",
+      "revenue": 13267,
+      "leads_converted": 17,
+      "tasks_executed": 329,
+      "csat_score": 4.85
+    },
+    {
+      "date": "2026-04-28",
+      "revenue": 15997,
+      "leads_converted": 6,
+      "tasks_executed": 443,
+      "csat_score": 4.79
+    },
+    {
+      "date": "2026-04-29",
+      "revenue": 11789,
+      "leads_converted": 15,
+      "tasks_executed": 168,
+      "csat_score": 4.75
+    },
+    {
+      "date": "2026-04-30",
+      "revenue": 14566,
+      "leads_converted": 14,
+      "tasks_executed": 249,
+      "csat_score": 4.83
+    },
+    {
+      "date": "2026-05-01",
+      "revenue": 16487,
+      "leads_converted": 9,
+      "tasks_executed": 290,
+      "csat_score": 4.54
+    },
+    {
+      "date": "2026-05-02",
+      "revenue": 12858,
+      "leads_converted": 16,
+      "tasks_executed": 278,
+      "csat_score": 4.94
+    },
+    {
+      "date": "2026-05-03",
+      "revenue": 15060,
+      "leads_converted": 9,
+      "tasks_executed": 424,
+      "csat_score": 4.82
+    },
+    {
+      "date": "2026-05-04",
+      "revenue": 12694,
+      "leads_converted": 14,
+      "tasks_executed": 406,
+      "csat_score": 4.67
+    },
+    {
+      "date": "2026-05-05",
+      "revenue": 14840,
+      "leads_converted": 9,
+      "tasks_executed": 389,
+      "csat_score": 4.54
+    },
+    {
+      "date": "2026-05-06",
+      "revenue": 15768,
+      "leads_converted": 21,
+      "tasks_executed": 305,
+      "csat_score": 4.51
+    },
+    {
+      "date": "2026-05-07",
+      "revenue": 14980,
+      "leads_converted": 10,
+      "tasks_executed": 229,
+      "csat_score": 4.65
+    },
+    {
+      "date": "2026-05-08",
+      "revenue": 16583,
+      "leads_converted": 11,
+      "tasks_executed": 235,
+      "csat_score": 4.95
+    },
+    {
+      "date": "2026-05-09",
+      "revenue": 14019,
+      "leads_converted": 7,
+      "tasks_executed": 271,
+      "csat_score": 4.88
+    },
+    {
+      "date": "2026-05-10",
+      "revenue": 13728,
+      "leads_converted": 21,
+      "tasks_executed": 396,
+      "csat_score": 4.88
+    },
+    {
+      "date": "2026-05-11",
+      "revenue": 17363,
+      "leads_converted": 6,
+      "tasks_executed": 292,
+      "csat_score": 4.89
+    },
+    {
+      "date": "2026-05-12",
+      "revenue": 14273,
+      "leads_converted": 24,
+      "tasks_executed": 312,
+      "csat_score": 4.57
+    },
+    {
+      "date": "2026-05-13",
+      "revenue": 14831,
+      "leads_converted": 24,
+      "tasks_executed": 204,
+      "csat_score": 4.82
+    },
+    {
+      "date": "2026-05-14",
+      "revenue": 13857,
+      "leads_converted": 18,
+      "tasks_executed": 306,
+      "csat_score": 4.8
+    },
+    {
+      "date": "2026-05-15",
+      "revenue": 15595,
+      "leads_converted": 19,
+      "tasks_executed": 432,
+      "csat_score": 4.63
+    },
+    {
+      "date": "2026-05-16",
+      "revenue": 17477,
+      "leads_converted": 12,
+      "tasks_executed": 393,
+      "csat_score": 4.61
+    },
+    {
+      "date": "2026-05-17",
+      "revenue": 17792,
+      "leads_converted": 11,
+      "tasks_executed": 308,
+      "csat_score": 4.81
+    },
+    {
+      "date": "2026-05-18",
+      "revenue": 18772,
+      "leads_converted": 19,
+      "tasks_executed": 356,
+      "csat_score": 4.85
+    },
+    {
+      "date": "2026-05-19",
+      "revenue": 17378,
+      "leads_converted": 21,
+      "tasks_executed": 390,
+      "csat_score": 4.69
+    },
+    {
+      "date": "2026-05-20",
+      "revenue": 15727,
+      "leads_converted": 11,
+      "tasks_executed": 429,
+      "csat_score": 4.56
+    },
+    {
+      "date": "2026-05-21",
+      "revenue": 16598,
+      "leads_converted": 6,
+      "tasks_executed": 448,
+      "csat_score": 4.72
+    },
+    {
+      "date": "2026-05-22",
+      "revenue": 17740,
+      "leads_converted": 22,
+      "tasks_executed": 172,
+      "csat_score": 4.82
+    },
+    {
+      "date": "2026-05-23",
+      "revenue": 19076,
+      "leads_converted": 8,
+      "tasks_executed": 265,
+      "csat_score": 4.54
+    },
+    {
+      "date": "2026-05-24",
+      "revenue": 16313,
+      "leads_converted": 13,
+      "tasks_executed": 350,
+      "csat_score": 4.91
+    },
+    {
+      "date": "2026-05-25",
+      "revenue": 16357,
+      "leads_converted": 18,
+      "tasks_executed": 166,
+      "csat_score": 4.93
+    },
+    {
+      "date": "2026-05-26",
+      "revenue": 17118,
+      "leads_converted": 19,
+      "tasks_executed": 298,
+      "csat_score": 4.92
+    },
+    {
+      "date": "2026-05-27",
+      "revenue": 18848,
+      "leads_converted": 6,
+      "tasks_executed": 322,
+      "csat_score": 4.73
+    },
+    {
+      "date": "2026-05-28",
+      "revenue": 17531,
+      "leads_converted": 17,
+      "tasks_executed": 161,
+      "csat_score": 4.67
+    },
+    {
+      "date": "2026-05-29",
+      "revenue": 15980,
+      "leads_converted": 15,
+      "tasks_executed": 170,
+      "csat_score": 4.88
+    },
+    {
+      "date": "2026-05-30",
+      "revenue": 18646,
+      "leads_converted": 9,
+      "tasks_executed": 190,
+      "csat_score": 4.52
+    },
+    {
+      "date": "2026-05-31",
+      "revenue": 19920,
+      "leads_converted": 9,
+      "tasks_executed": 360,
+      "csat_score": 4.7
+    },
+    {
+      "date": "2026-06-01",
+      "revenue": 16243,
+      "leads_converted": 7,
+      "tasks_executed": 129,
+      "csat_score": 4.62
+    },
+    {
+      "date": "2026-06-02",
+      "revenue": 17574,
+      "leads_converted": 22,
+      "tasks_executed": 431,
+      "csat_score": 4.74
+    },
+    {
+      "date": "2026-06-03",
+      "revenue": 17410,
+      "leads_converted": 14,
+      "tasks_executed": 241,
+      "csat_score": 4.64
+    },
+    {
+      "date": "2026-06-04",
+      "revenue": 17041,
+      "leads_converted": 12,
+      "tasks_executed": 334,
+      "csat_score": 4.79
+    },
+    {
+      "date": "2026-06-05",
+      "revenue": 20544,
+      "leads_converted": 7,
+      "tasks_executed": 176,
+      "csat_score": 4.88
+    },
+    {
+      "date": "2026-06-06",
+      "revenue": 21044,
+      "leads_converted": 24,
+      "tasks_executed": 394,
+      "csat_score": 4.51
+    },
+    {
+      "date": "2026-06-07",
+      "revenue": 21321,
+      "leads_converted": 23,
+      "tasks_executed": 243,
+      "csat_score": 4.82
+    },
+    {
+      "date": "2026-06-08",
+      "revenue": 19636,
+      "leads_converted": 18,
+      "tasks_executed": 120,
+      "csat_score": 4.78
+    },
+    {
+      "date": "2026-06-09",
+      "revenue": 19370,
+      "leads_converted": 23,
+      "tasks_executed": 333,
+      "csat_score": 4.58
+    },
+    {
+      "date": "2026-06-10",
+      "revenue": 18251,
+      "leads_converted": 21,
+      "tasks_executed": 304,
+      "csat_score": 4.53
+    },
+    {
+      "date": "2026-06-11",
+      "revenue": 22009,
+      "leads_converted": 22,
+      "tasks_executed": 379,
+      "csat_score": 4.85
+    },
+    {
+      "date": "2026-06-12",
+      "revenue": 22008,
+      "leads_converted": 22,
+      "tasks_executed": 130,
+      "csat_score": 4.68
+    },
+    {
+      "date": "2026-06-13",
+      "revenue": 21851,
+      "leads_converted": 6,
+      "tasks_executed": 445,
+      "csat_score": 4.67
+    },
+    {
+      "date": "2026-06-14",
+      "revenue": 21208,
+      "leads_converted": 13,
+      "tasks_executed": 128,
+      "csat_score": 4.66
+    },
+    {
+      "date": "2026-06-15",
+      "revenue": 18853,
+      "leads_converted": 16,
+      "tasks_executed": 243,
+      "csat_score": 4.83
+    },
+    {
+      "date": "2026-06-16",
+      "revenue": 19299,
+      "leads_converted": 23,
+      "tasks_executed": 290,
+      "csat_score": 4.56
+    },
+    {
+      "date": "2026-06-17",
+      "revenue": 21486,
+      "leads_converted": 22,
+      "tasks_executed": 293,
+      "csat_score": 4.87
+    },
+    {
+      "date": "2026-06-18",
+      "revenue": 20184,
+      "leads_converted": 19,
+      "tasks_executed": 365,
+      "csat_score": 4.78
+    },
+    {
+      "date": "2026-06-19",
+      "revenue": 20004,
+      "leads_converted": 7,
+      "tasks_executed": 354,
+      "csat_score": 4.52
+    },
+    {
+      "date": "2026-06-20",
+      "revenue": 20701,
+      "leads_converted": 6,
+      "tasks_executed": 222,
+      "csat_score": 4.9
+    },
+    {
+      "date": "2026-06-21",
+      "revenue": 21785,
+      "leads_converted": 14,
+      "tasks_executed": 383,
+      "csat_score": 4.68
+    },
+    {
+      "date": "2026-06-22",
+      "revenue": 23798,
+      "leads_converted": 20,
+      "tasks_executed": 249,
+      "csat_score": 4.52
+    },
+    {
+      "date": "2026-06-23",
+      "revenue": 21065,
+      "leads_converted": 14,
+      "tasks_executed": 302,
+      "csat_score": 4.89
+    },
+    {
+      "date": "2026-06-24",
+      "revenue": 20041,
+      "leads_converted": 25,
+      "tasks_executed": 289,
+      "csat_score": 4.62
+    },
+    {
+      "date": "2026-06-25",
+      "revenue": 22814,
+      "leads_converted": 18,
+      "tasks_executed": 324,
+      "csat_score": 4.83
+    },
+    {
+      "date": "2026-06-26",
+      "revenue": 23117,
+      "leads_converted": 15,
+      "tasks_executed": 215,
+      "csat_score": 4.72
+    },
+    {
+      "date": "2026-06-27",
+      "revenue": 24175,
+      "leads_converted": 16,
+      "tasks_executed": 385,
+      "csat_score": 4.62
+    },
+    {
+      "date": "2026-06-28",
+      "revenue": 20926,
+      "leads_converted": 18,
+      "tasks_executed": 160,
+      "csat_score": 4.69
+    },
+    {
+      "date": "2026-06-29",
+      "revenue": 21878,
+      "leads_converted": 22,
+      "tasks_executed": 270,
+      "csat_score": 4.64
+    },
+    {
+      "date": "2026-06-30",
+      "revenue": 21205,
+      "leads_converted": 15,
+      "tasks_executed": 271,
+      "csat_score": 4.64
+    },
+    {
+      "date": "2026-07-01",
+      "revenue": 25636,
+      "leads_converted": 18,
+      "tasks_executed": 205,
+      "csat_score": 4.81
+    },
+    {
+      "date": "2026-07-02",
+      "revenue": 23729,
+      "leads_converted": 19,
+      "tasks_executed": 141,
+      "csat_score": 4.83
+    },
+    {
+      "date": "2026-07-03",
+      "revenue": 23888,
+      "leads_converted": 24,
+      "tasks_executed": 342,
+      "csat_score": 4.62
+    },
+    {
+      "date": "2026-07-04",
+      "revenue": 21619,
+      "leads_converted": 7,
+      "tasks_executed": 446,
+      "csat_score": 4.68
+    },
+    {
+      "date": "2026-07-05",
+      "revenue": 25503,
+      "leads_converted": 10,
+      "tasks_executed": 135,
+      "csat_score": 4.56
+    },
+    {
+      "date": "2026-07-06",
+      "revenue": 26427,
+      "leads_converted": 19,
+      "tasks_executed": 137,
+      "csat_score": 4.56
+    },
+    {
+      "date": "2026-07-07",
+      "revenue": 23533,
+      "leads_converted": 25,
+      "tasks_executed": 307,
+      "csat_score": 4.66
+    },
+    {
+      "date": "2026-07-08",
+      "revenue": 26396,
+      "leads_converted": 6,
+      "tasks_executed": 429,
+      "csat_score": 4.57
+    },
+    {
+      "date": "2026-07-09",
+      "revenue": 25585,
+      "leads_converted": 16,
+      "tasks_executed": 310,
+      "csat_score": 4.7
+    },
+    {
+      "date": "2026-07-10",
+      "revenue": 22679,
+      "leads_converted": 23,
+      "tasks_executed": 190,
+      "csat_score": 4.74
+    },
+    {
+      "date": "2026-07-11",
+      "revenue": 25460,
+      "leads_converted": 15,
+      "tasks_executed": 262,
+      "csat_score": 4.61
+    },
+    {
+      "date": "2026-07-12",
+      "revenue": 23279,
+      "leads_converted": 5,
+      "tasks_executed": 215,
+      "csat_score": 4.72
+    },
+    {
+      "date": "2026-07-13",
+      "revenue": 25670,
+      "leads_converted": 22,
+      "tasks_executed": 180,
+      "csat_score": 4.62
+    },
+    {
+      "date": "2026-07-14",
+      "revenue": 24782,
+      "leads_converted": 19,
+      "tasks_executed": 229,
+      "csat_score": 4.95
+    },
+    {
+      "date": "2026-07-15",
+      "revenue": 25139,
+      "leads_converted": 20,
+      "tasks_executed": 222,
+      "csat_score": 4.56
+    },
+    {
+      "date": "2026-07-16",
+      "revenue": 23556,
+      "leads_converted": 19,
+      "tasks_executed": 208,
+      "csat_score": 4.9
+    },
+    {
+      "date": "2026-07-17",
+      "revenue": 26746,
+      "leads_converted": 7,
+      "tasks_executed": 283,
+      "csat_score": 4.8
+    },
+    {
+      "date": "2026-07-18",
+      "revenue": 23781,
+      "leads_converted": 22,
+      "tasks_executed": 397,
+      "csat_score": 4.63
+    },
+    {
+      "date": "2026-07-19",
+      "revenue": 25857,
+      "leads_converted": 10,
+      "tasks_executed": 446,
+      "csat_score": 4.58
+    },
+    {
+      "date": "2026-07-20",
+      "revenue": 26511,
+      "leads_converted": 21,
+      "tasks_executed": 234,
+      "csat_score": 4.55
+    },
+    {
+      "date": "2026-07-21",
+      "revenue": 25346,
+      "leads_converted": 9,
+      "tasks_executed": 241,
+      "csat_score": 4.86
+    },
+    {
+      "date": "2026-07-22",
+      "revenue": 24065,
+      "leads_converted": 16,
+      "tasks_executed": 403,
+      "csat_score": 4.76
+    }
+  ],
+  "summary": {
+    "total_revenue_usd": 1761520,
+    "total_leads": 54,
+    "total_tasks": 104,
+    "seeded_at": "2026-07-23T08:25:12.361974+00:00"
+  }
+}
