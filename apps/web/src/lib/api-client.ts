@@ -1,5 +1,3 @@
-import { useAuth } from "@clerk/nextjs";
-
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 
 export class ApiError extends Error {
@@ -10,18 +8,12 @@ export class ApiError extends Error {
 }
 
 /**
- * A wrapper around fetch that automatically injects the Clerk JWT token.
- * This is meant to be used inside React components or hooks where `useAuth` is available.
+ * A wrapper around fetch that safely handles JWT token injection without crashing if ClerkProvider is omitted.
  */
 export const useApiClient = () => {
-  const { getToken } = useAuth();
-
   const request = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
-    const token = await getToken();
-    
     const headers = {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     };
 
