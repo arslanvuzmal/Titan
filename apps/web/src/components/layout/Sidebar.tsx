@@ -10,7 +10,9 @@ import {
   CheckSquare, 
   Book, 
   Link as LinkIcon, 
-  ShieldCheck 
+  ShieldCheck,
+  BarChart3,
+  Settings
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -26,6 +28,8 @@ const navItems = [
   { name: 'Knowledge Base', href: '/dashboard/knowledge', icon: Book },
   { name: 'Integrations', href: '/dashboard/integrations', icon: LinkIcon },
   { name: 'Audit Logs', href: '/dashboard/audit', icon: ShieldCheck },
+  { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
 ];
 
 export default function Sidebar({ isOpen }: SidebarProps) {
@@ -53,6 +57,7 @@ export default function Sidebar({ isOpen }: SidebarProps) {
               <li key={item.name}>
                 <Link 
                   href={item.href}
+                  prefetch={true}
                   className={`flex items-center px-4 py-3 border-l-[3px] transition-colors ${
                     isActive 
                       ? 'bg-[#1e282c] border-[#3c8dbc] text-white' 
