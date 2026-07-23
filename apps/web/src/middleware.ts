@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Portfolio demo: pass all requests through without auth
-export default function middleware(req: NextRequest) {
+// Portfolio demo: pass all requests through without authentication.
+// In production, replace this with Clerk or your auth provider's middleware.
+export default function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
