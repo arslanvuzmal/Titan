@@ -24,12 +24,13 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Install Monorepo Dependencies
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Build Web Application
-        run: pnpm --filter titan-web build
+      - name: Install Dependencies
+        run: pnpm install
+        working-directory: apps/web
 
       - name: Deploy to Netlify
+        run: npx netlify-cli deploy --prod --build --context production
         working-directory: apps/web
-        run: npx netlify-cli deploy --prod --auth=${{ secrets.NETLIFY_AUTH_TOKEN }} --site=${{ secrets.NETLIFY_SITE_ID }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
