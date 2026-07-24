@@ -1,9 +1,7 @@
 {
-  "projects": [
-    {
-      "path": "apps/web",
-      "name": "titan-web",
-      "framework": "nextjs"
-    }
-  ]
+  "buildCommand": "pnpm build",
+  "outputDirectory": ".next",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "regions": ["iad1"]
 }

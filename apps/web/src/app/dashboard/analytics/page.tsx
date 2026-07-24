@@ -2,73 +2,48 @@
 
 import React from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { BarChart3, TrendingUp, DollarSign, Users } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-
-const analyticsData = [
-  { day: 'Mon', conversion: 18, revenue: 14200 },
-  { day: 'Tue', conversion: 24, revenue: 18900 },
-  { day: 'Wed', conversion: 31, revenue: 24500 },
-  { day: 'Thu', conversion: 28, revenue: 21000 },
-  { day: 'Fri', conversion: 35, revenue: 29800 },
-  { day: 'Sat', conversion: 20, revenue: 15400 },
-  { day: 'Sun', conversion: 22, revenue: 17200 },
-];
+import { BarChart3, TrendingUp, DollarSign, Zap } from 'lucide-react';
 
 export default function AnalyticsPage() {
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 text-gray-800">
-        <div className="flex items-center justify-between border-b pb-4">
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-              <BarChart3 className="w-6 h-6 mr-2 text-[#3c8dbc]" />
-              Enterprise Pipeline Analytics
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center">
+              <BarChart3 className="w-6 h-6 mr-2 text-blue-600" />
+              Pipeline Velocity & Agent ROI Analytics
             </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Deep-dive metrics into lead conversion velocity, agent efficiency, and ROI.
-            </p>
+            <p className="text-xs text-slate-500 mt-1">Quantify business impact, pipeline conversions, and token efficiency</p>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase">Weekly Velocity</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">$141,000 ARR</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs space-y-2">
+            <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase">
+              <span>Pipeline Value Generated</span>
+              <DollarSign className="w-4 h-4 text-emerald-600" />
             </div>
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><DollarSign className="w-6 h-6" /></div>
+            <p className="text-3xl font-extrabold text-slate-900">$1,450,000</p>
+            <p className="text-xs text-emerald-600 font-medium">+18.4% vs last month</p>
           </div>
-          <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase">Conversion Rate</p>
-              <h3 className="text-2xl font-bold text-blue-600 mt-1">28.4%</h3>
-            </div>
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><TrendingUp className="w-6 h-6" /></div>
-          </div>
-          <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase">Total Qualified</p>
-              <h3 className="text-2xl font-bold text-purple-600 mt-1">178 Deals</h3>
-            </div>
-            <div className="p-3 bg-purple-50 text-purple-600 rounded-lg"><Users className="w-6 h-6" /></div>
-          </div>
-        </div>
 
-        <div className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm space-y-4">
-          <h3 className="text-base font-bold text-gray-900">Weekly Performance Breakdown</h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={analyticsData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-                <XAxis dataKey="day" tick={{ fontSize: 12 }} stroke="#888" />
-                <YAxis yAxisId="left" tick={{ fontSize: 12 }} stroke="#888" />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} stroke="#00a65a" />
-                <Tooltip contentStyle={{ fontSize: 12 }} />
-                <Line yAxisId="left" type="monotone" dataKey="revenue" stroke="#3c8dbc" strokeWidth={2.5} name="Revenue ($)" />
-                <Line yAxisId="right" type="monotone" dataKey="conversion" stroke="#00a65a" strokeWidth={2} name="Conversions" />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs space-y-2">
+            <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase">
+              <span>Hours Saved via AI Agents</span>
+              <Zap className="w-4 h-4 text-amber-500" />
+            </div>
+            <p className="text-3xl font-extrabold text-slate-900">1,240 hrs</p>
+            <p className="text-xs text-blue-600 font-medium">Equivalent to 7.5 FTEs</p>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-xs space-y-2">
+            <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase">
+              <span>Token Cost Efficiency</span>
+              <TrendingUp className="w-4 h-4 text-blue-500" />
+            </div>
+            <p className="text-3xl font-extrabold text-slate-900">$0.0042</p>
+            <p className="text-xs text-emerald-600 font-medium">Per qualified lead generated</p>
           </div>
         </div>
       </div>

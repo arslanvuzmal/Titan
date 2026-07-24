@@ -2,55 +2,49 @@
 
 import React from 'react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { Link as LinkIcon, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
-
-const integrations = [
-  { id: 'int-1', name: 'Temporal.io Cluster', category: 'Workflow Engine', status: 'Connected', latency: '18ms', iconColor: 'text-purple-600' },
-  { id: 'int-2', name: 'OpenAI GPT-4o API', category: 'LLM Provider', status: 'Connected', latency: '320ms', iconColor: 'text-green-600' },
-  { id: 'int-3', name: 'PostgreSQL Database', category: 'Primary Storage', status: 'Connected', latency: '4ms', iconColor: 'text-blue-600' },
-  { id: 'int-4', name: 'Qdrant Vector DB', category: 'Embeddings', status: 'Connected', latency: '12ms', iconColor: 'text-indigo-600' },
-  { id: 'int-5', name: 'HubSpot CRM Webhook', category: 'CRM Sync', status: 'Connected', latency: '85ms', iconColor: 'text-orange-600' },
-  { id: 'int-6', name: 'SendGrid Email API', category: 'Communications', status: 'Connected', latency: '110ms', iconColor: 'text-[#3c8dbc]' },
-];
+import { Plug, CheckCircle2, RefreshCw } from 'lucide-react';
 
 export default function IntegrationsPage() {
+  const integrations = [
+    { name: 'Temporal Cloud', category: 'Orchestration Engine', status: 'Connected', ping: '12ms', color: 'border-purple-500' },
+    { name: 'OpenAI API (GPT-4o)', category: 'LLM Reasoning Provider', status: 'Connected', ping: '145ms', color: 'border-emerald-500' },
+    { name: 'Qdrant Vector DB', category: 'Vector Database', status: 'Connected', ping: '8ms', color: 'border-blue-500' },
+    { name: 'PostgreSQL 16', category: 'Relational Database', status: 'Connected', ping: '3ms', color: 'border-indigo-500' },
+    { name: 'SendGrid Email API', category: 'Outreach & Messaging', status: 'Connected', ping: '65ms', color: 'border-amber-500' },
+    { name: 'Slack Webhook', category: 'Alerts & Governance', status: 'Connected', ping: '32ms', color: 'border-pink-500' },
+  ];
+
   return (
     <DashboardLayout>
-      <div className="p-6 space-y-6 text-gray-800">
-        <div className="flex items-center justify-between border-b pb-4">
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200/80">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-              <LinkIcon className="w-6 h-6 mr-2 text-[#3c8dbc]" />
-              Enterprise Integrations & Connectors
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center">
+              <Plug className="w-6 h-6 mr-2 text-blue-600" />
+              Integrations & Connected Infrastructure
             </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Active connections powering TITAN OS agents, storage engines, and communications.
-            </p>
+            <p className="text-xs text-slate-500 mt-1">Live status check across external LLM APIs, vector stores, and Temporal workers</p>
           </div>
-          <span className="bg-emerald-100 text-emerald-800 text-xs font-semibold px-3 py-1 rounded-full border border-emerald-200 flex items-center">
-            <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> All Systems Nominal
-          </span>
+          <button className="px-3.5 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs flex items-center">
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-slate-500" /> Test Connections
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {integrations.map(item => (
-            <div key={item.id} className="bg-white p-5 rounded-lg border border-gray-200 shadow-sm space-y-3 hover:border-[#3c8dbc] transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{item.category}</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-green-100 text-green-700 border border-green-200 flex items-center">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1 animate-pulse" />
-                  {item.status}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {integrations.map((item) => (
+            <div key={item.name} className={`bg-white p-5 rounded-xl border-l-4 ${item.color} border-y border-r border-slate-200/80 shadow-xs space-y-3`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">{item.name}</h3>
+                  <p className="text-xs text-slate-500">{item.category}</p>
+                </div>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 className="w-3 h-3 mr-1" /> {item.status}
                 </span>
               </div>
-              <h3 className={`font-bold text-lg text-gray-900 flex items-center ${item.iconColor}`}>
-                <Zap className="w-5 h-5 mr-2" />
-                {item.name}
-              </h3>
-              <div className="pt-2 border-t flex justify-between text-xs text-gray-500">
-                <span>Latency: <b>{item.latency}</b></span>
-                <span className="flex items-center text-emerald-600 font-semibold">
-                  <ShieldCheck className="w-3.5 h-3.5 mr-1" /> Health 100%
-                </span>
+              <div className="pt-3 border-t border-slate-100 flex justify-between text-xs text-slate-500">
+                <span>Health Ping: <b className="text-slate-700 font-mono">{item.ping}</b></span>
+                <span className="text-emerald-600 font-medium">Active</span>
               </div>
             </div>
           ))}
