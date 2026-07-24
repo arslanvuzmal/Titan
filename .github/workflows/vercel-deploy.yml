@@ -29,7 +29,8 @@ jobs:
       - name: Build Next.js app
         run: pnpm --filter titan-web build
         
-      - name: Deploy to Vercel
+      - name: Deploy to Vercel CLI
+        if: ${{ secrets.VERCEL_TOKEN != '' }}
         uses: amondnet/vercel-action@v20
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
