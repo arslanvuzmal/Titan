@@ -1,113 +1,99 @@
+"""Shared test fixtures.
+
+Integration tests run against a **real** PostgreSQL, not a mock. The primitives
+Titan depends on for safety -- ``ON CONFLICT DO UPDATE ... WHERE``,
+``FOR UPDATE SKIP LOCKED``, partial unique indexes, row-level security, and
+BEFORE UPDATE triggers -- have no faithful in-memory equivalent, so exercising
+them against SQLite would prove nothing about production behaviour.
+
+Point ``TITAN_TEST_DATABASE_URL`` at a disposable database. Tests that need one
+skip cleanly when it is absent, so the pure-logic suite still runs anywhere.
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+from collections.abc import AsyncIterator
+
 import pytest
 import pytest_asyncio
-import respx
-import sys
-from unittest.mock import MagicMock
-from httpx import Response
-from temporalio.testing import WorkflowEnvironment
+from titan.runtime import configure_event_loop
 
-# Mock Prisma to avoid generation errors in CI
-sys.modules["prisma"] = MagicMock()
+configure_event_loop()
 
-# Pytest Asyncio Configuration
-pytest_plugins = ("pytest_asyncio",)
+TEST_DB_URL = os.getenv(
+    "TITAN_TEST_DATABASE_URL",
+    "postgresql+psycopg://titan:titan_dev_password@localhost:5439/titan",
+)
 
-
-@pytest.fixture(scope="session")
-def anyio_backend():
-    return "asyncio"
+# Point the settings singleton at the test database before anything imports it.
+os.environ.setdefault("TITAN_DATABASE_URL", TEST_DB_URL)
+os.environ.setdefault("TITAN_ENVIRONMENT", "test")
 
 
 @pytest_asyncio.fixture(scope="session")
-async def temporal_client():
-    """
-    Spins up an ephemeral, in-memory Temporal test server.
-    This guarantees 100% deterministic workflow execution without needing Docker.
-    """
-    async with await WorkflowEnvironment.start_local() as env:
-        yield env.client
+async def database_available() -> bool:
+    """True when the integration database is reachable and migrated."""
+    from sqlalchemy import text
+    from titan.db.session import get_engine
+
+    try:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1 FROM workspaces LIMIT 1"))
+        return True
+    except Exception:
+        return False
 
 
-@pytest.fixture
-def mock_external_apis():
-    """
-    Intercepts all outbound HTTP traffic via httpx and returns mocked responses.
-    Prevents tests from making real network calls.
-    """
-    with respx.mock(assert_all_called=False) as respx_mock:
-        # Mock SendGrid
-        respx_mock.post("https://api.sendgrid.com/v3/mail/send").mock(
-            return_value=Response(202, json={"status": "accepted"})
-        )
+@pytest_asyncio.fixture
+async def db_session(database_available: bool) -> AsyncIterator:
+    """An unscoped session on the test database."""
+    if not database_available:
+        pytest.skip("integration database unavailable (set TITAN_TEST_DATABASE_URL)")
+    from titan.db.session import get_sessionmaker
 
-        # Mock HubSpot Search
-        respx_mock.post("https://api.hubapi.com/crm/v3/objects/contacts/search").mock(
-            return_value=Response(200, json={"results": [{"id": "12345"}]})
-        )
-
-        # Mock HubSpot Update
-        respx_mock.patch("https://api.hubapi.com/crm/v3/objects/contacts/12345").mock(
-            return_value=Response(200, json={"id": "12345", "updated": True})
-        )
-
-        # Mock Serper Web Search
-        respx_mock.post("https://google.serper.dev/search").mock(
-            return_value=Response(
-                200,
-                json={"organic": [{"title": "Mock Title", "snippet": "Mock Snippet"}]},
-            )
-        )
-
-        yield respx_mock
+    async with get_sessionmaker()() as session:
+        yield session
+        await session.rollback()
 
 
-@pytest.fixture
-def mock_llm():
-    """
-    A fixture that intercepts LangChain LLM calls.
-    In a real implementation, you would patch `ChatOpenAI.ainvoke` here
-    to return a structured AIMessage with function calls.
-    """
+@pytest_asyncio.fixture
+async def workspace(db_session) -> AsyncIterator[uuid.UUID]:
+    """A fresh workspace; all its rows cascade away on teardown."""
+    from sqlalchemy import delete
+    from titan.db.models import Workspace
 
-    class MockAIMessage:
-        def __init__(self, tool_calls=None, content=""):
-            self.tool_calls = tool_calls or []
-            self.content = content
+    ws = Workspace(
+        name=f"Test WS {uuid.uuid4().hex[:8]}", slug=f"test-{uuid.uuid4().hex[:12]}"
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    ws_id = ws.id
+    try:
+        yield ws_id
+    finally:
+        await db_session.rollback()
+        await db_session.execute(delete(Workspace).where(Workspace.id == ws_id))
+        await db_session.commit()
 
-    class MockModel:
-        def __init__(self, response):
-            self._response = response
 
-        async def ainvoke(self, messages, *args, **kwargs):
-            return self._response
+@pytest_asyncio.fixture
+async def second_workspace(db_session) -> AsyncIterator[uuid.UUID]:
+    """A second tenant, for cross-workspace isolation tests."""
+    from sqlalchemy import delete
+    from titan.db.models import Workspace
 
-    def _create_mock(response_type="valid"):
-        if response_type == "valid":
-            return MockModel(
-                MockAIMessage(
-                    tool_calls=[
-                        {
-                            "name": "send_email",
-                            "args": {
-                                "to_email": "test@test.com",
-                                "subject": "Hi",
-                                "body": "Hello",
-                            },
-                        }
-                    ]
-                )
-            )
-        elif response_type == "invalid_schema":
-            return MockModel(
-                MockAIMessage(
-                    tool_calls=[
-                        {
-                            "name": "send_email",
-                            # Missing required fields
-                            "args": {"body": "Hello"},
-                        }
-                    ]
-                )
-            )
-
-    return _create_mock
+    ws = Workspace(
+        name=f"Other WS {uuid.uuid4().hex[:8]}", slug=f"other-{uuid.uuid4().hex[:12]}"
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    ws_id = ws.id
+    try:
+        yield ws_id
+    finally:
+        await db_session.rollback()
+        await db_session.execute(delete(Workspace).where(Workspace.id == ws_id))
+        await db_session.commit()
