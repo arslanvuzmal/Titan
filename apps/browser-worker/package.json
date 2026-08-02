@@ -1,0 +1,24 @@
+{
+  "name": "titan-browser-worker",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated, credential-free Playwright evidence worker for Titan-OS",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "fixtures": "tsx fixtures/server.ts",
+    "test": "node --test --import tsx test/*.test.ts",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "playwright": "1.49.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
