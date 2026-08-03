@@ -1,6 +1,6 @@
 # Titan-OS — Final Production Verification Report
 
-**Commit:** `ebc5ae9` (Phase 6 added after the first issue of this report)
+**Commit:** `c4cd89a` (Phases 6 and 7 added after the first issue of this report)
 **Branch:** `agent/titan-os-production-hardening`
 **Baseline it replaces:** `b5c74685c9adb6def7ea98439b18a1a3703c95e9` (`main`)
 **Date:** 2026-08-03
@@ -18,10 +18,10 @@ This report distinguishes four things that are easy to conflate:
 | **Not implemented** | Does not exist. Named explicitly rather than omitted. |
 | **Deferred** | Deliberately out of scope, with a reason. |
 
-**This build is not feature-complete against the mission.** Phases 0–6 and the
-operational scaffolding are done. **Phases 7 (durable workflows) and 8 (API
-surface and dashboard) are not.** Section 4 lists exactly what is missing.
-Nothing below claims a capability that was not run.
+**This build is not feature-complete against the mission.** Phases 0–7 and the
+operational scaffolding are done. **Phase 8 (API surface, authentication,
+RBAC enforcement, dashboard) is not.** Section 4 lists exactly what is
+missing. Nothing below claims a capability that was not run.
 
 ---
 
@@ -215,7 +215,7 @@ Stated plainly. None of the following exists in this build.
 | §6.2 | Agent Reach adapter | **Not implemented.** |
 | §9 | Model gateway and provider adapters (NVIDIA/Gemini/OpenRouter/Cloudflare) | **Implemented, not live-verified.** Typed outputs, bounded repair, budget ledger, circuit breaker, channel isolation. The configured model IDs remain **unvalidated placeholders**; run `titan validate-models` against a live key before use. |
 | §9.5 | Cost ledger enforcement, circuit breakers | **In-process only.** The gateway enforces budgets and breakers and records every call; persisting those records to `usage_ledger` is not wired. |
-| §4.2, §27 Phase 7 | Temporal workflows, activities, worker | **Not implemented.** The old non-deterministic workflows were deleted; no replacement exists. Compose runs Temporal but no Titan worker registers. |
+| §4.2 | Temporal workflows, activities, worker | **Implemented; workflow tests NOT executed here.** `LeadResearchWorkflow`, three activities, and a registered worker exist and import cleanly. The 18 workflow tests are written but the Temporal test-server download did not complete in this environment. Three of the eight activities the workflow calls (`crawl_lead_website`, `analyse_evidence`, `score_lead`, `resolve_contact`, `generate_draft`, `queue_message`) are **not yet implemented** -- the workflow references them by name and the worker does not register them, so a real run would fail on the first missing activity. |
 | §12.3 | Message generation from evidence | **Validator only.** Nothing generates a draft; the validator is proven against hand-written drafts. |
 | §13 | Follow-up scheduler | **Not implemented.** `email_sequences`/`sequence_steps` tables exist; no scheduler. |
 | §14 | Inbound reply ingestion and classification | **Schema + stop-on-reply only.** `record_reply()` and the tables exist; no classifier and no inbound route. |
@@ -251,6 +251,9 @@ provider. Specifically:
   credential. **Agent Reach**: no adapter exists.
 - **Email deliverability**: no seed test, no inbox placement measurement, no
   SPF/DKIM/DMARC validation against a real domain.
+- **Workflow execution**: no workflow has ever run. The tests are written and
+  the determinism check passes, but the Temporal test server was never
+  downloaded here.
 - **Deployment**: nothing has been deployed. `docker compose config` validates
   the file; `docker compose up` was **not** run end-to-end, and the images were
   not built in this environment.
@@ -292,7 +295,8 @@ provider. Specifically:
 | Docker stack | Config-validated; **not run end-to-end** |
 | CI pipeline | Written; **not executed** (no push to GitHub in this pass) |
 | Model gateway, Google Places adapter | Implemented, unit-tested; **not live-verified** |
-| Agent Reach, workflows, API surface, dashboard | **Not implemented** |
+| Temporal workflow + worker | Implemented; **workflow tests not executed here**, and six of its activities are stubs-by-name only |
+| Agent Reach, API surface, dashboard | **Not implemented** |
 
 **Overall: a verified safety and delivery substrate, not a shippable product.**
 It is safe to run in `research_only` or `draft_only` mode. It must not be

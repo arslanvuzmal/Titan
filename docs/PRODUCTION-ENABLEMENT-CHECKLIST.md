@@ -11,7 +11,7 @@
 ## 0. STOP — engineering prerequisites before any of this matters
 
 This checklist covers the **external** actions needed to enable production
-outreach. As of commit `a655b59`, several **internal** prerequisites are not yet
+outreach. As of commit `c4cd89a`, several **internal** prerequisites are not yet
 built, and no amount of DNS or credential work will make Titan send until they
 are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
 
@@ -22,8 +22,10 @@ Blocking, in order:
       configured model IDs are placeholders.
 - [x] **Google Places adapter** (§6) — implemented, **not live-verified**.
       Confirm billing SKU expectations against the field masks before a large run.
-- [ ] **Temporal workflows and worker** (§4.2) — not implemented. Without them
-      research and follow-up are not orchestrated or durable.
+- [ ] **Temporal workflows and worker** (§4.2) — the workflow, worker and three
+      activities exist, but **six activities the workflow calls are not yet
+      implemented** (crawl, analyse, score, resolve contact, draft, queue).
+      A real run fails on the first missing activity.
 - [ ] **`/api/v1` surface and RBAC** (§16, §18) — not implemented. There is
       currently no authenticated way to create a campaign or approve a draft.
 - [ ] **Inbound webhook route** — the endpoint referenced in section 1 below
