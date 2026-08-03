@@ -166,7 +166,7 @@ describe('crawler', { concurrency: 1 }, () => {
     assert.ok(result.pages.length >= 0);
   });
 
-  test('refuses a seed url pointing at cloud metadata', async (t) => {
+  test('refuses a seed url pointing at cloud metadata', async () => {
     const result = await runCrawl(request('http://169.254.169.254/latest/meta-data/'));
     assert.equal(result.status, 'blocked');
     assert.match(result.blocked_reason ?? '', /metadata|private|blocked/);

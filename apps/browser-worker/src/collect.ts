@@ -208,7 +208,26 @@ export async function collectPage(
     securityHeaders: SecurityHeaders | null;
   },
 ): Promise<PageEvidence> {
-  const dom = await page.evaluate(`(${DOM_COLLECTOR_SCRIPT})()`);
+  // page.evaluate(<string>) is typed `unknown`, so the result is annotated
+  // with the fields the collector returns. Everything not listed here is
+  // supplied by `base` or `extras` below.
+  type CollectedDom = Omit<
+    PageEvidence,
+    | 'url'
+    | 'final_url'
+    | 'depth'
+    | 'http_status'
+    | 'content_type'
+    | 'console_errors'
+    | 'failed_requests'
+    | 'security_headers'
+    | 'accessibility_violations'
+    | 'performance'
+    | 'captured_at'
+  >;
+  const dom = (await page.evaluate(
+    `(${DOM_COLLECTOR_SCRIPT})()`,
+  )) as CollectedDom;
   return {
     ...base,
     ...dom,
