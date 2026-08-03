@@ -156,12 +156,23 @@ services:
     cap_drop: [ALL]
     restart: unless-stopped
 
-  # NOTE: the Temporal worker service is intentionally absent.
-  # Phase 7 (durable workflows) is NOT implemented in this build -- see
-  # docs/audits/FINAL-PRODUCTION-VERIFICATION.md. The temporal and temporal-ui
-  # services above run so the infrastructure is in place, but no Titan worker
-  # registers against them yet. Declaring a service whose module does not exist
-  # would reproduce exactly the defect this rebuild set out to remove.
+  # Registers LeadResearchWorkflow and its activities on the titan-research
+  # queue. The pre-0.2 repository defined workflows and registered none of them,
+  # so nothing could execute; this service is that missing registration.
+  temporal-worker:
+    build: {context: ., dockerfile: apps/api/Dockerfile}
+    environment: *titan-env
+    command: ["python", "-m", "titan.workers.temporal_worker"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      temporal: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
 
   # The only service holding an email provider credential.
   outbox-worker:
