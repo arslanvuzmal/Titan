@@ -11,7 +11,7 @@
 ## 0. STOP — engineering prerequisites before any of this matters
 
 This checklist covers the **external** actions needed to enable production
-outreach. As of commit `1e4639d`, several **internal** prerequisites are not yet
+outreach. As of commit `a655b59`, several **internal** prerequisites are not yet
 built, and no amount of DNS or credential work will make Titan send until they
 are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
 
@@ -73,10 +73,12 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
   - Obtain API credentials for Agent Reach discovery/enrichment service.
   - Set key as `TITAN_AGENT_REACH_API_KEY`.
 - [ ] **Model Gateway Providers:**
-  - **NVIDIA AI Foundation:** Obtain key (`nvapi-...`) for Nemotron models → set `TITAN_NVIDIA_API_KEY`.
-  - **Google Gemini:** Obtain key for Gemini 1.5 Pro / Flash → set `TITAN_GEMINI_API_KEY`.
+  - **NVIDIA:** Obtain a key (`nvapi-...`) → set `TITAN_NVIDIA_API_KEY`. Confirm
+    the exact model ids with `titan validate-models`; the defaults are placeholders.
+  - **Google Gemini:** Obtain a key → set `TITAN_GEMINI_API_KEY`. Confirm the
+    exact model id with `titan validate-models`; the default in config is a placeholder.
   - **OpenRouter:** Obtain key for fallback model routing → set `TITAN_OPENROUTER_API_KEY`.
-  - **Cloudflare AI Gateway:** Obtain Account ID & Gateway Name for Claude routing → set `TITAN_CLOUDFLARE_GATEWAY_TOKEN`.
+  - **Cloudflare AI Gateway:** Obtain Account ID & Gateway Name for Claude routing → set `TITAN_CLOUDFLARE_API_TOKEN` (plus `TITAN_CLOUDFLARE_ACCOUNT_ID` and `TITAN_CLOUDFLARE_GATEWAY_ID`).
 
 ---
 
@@ -100,11 +102,17 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
 ## 4. Controlled Outreach Enablement Protocol
 
 - [ ] **Seed Campaign Verification:**
-  - Execute initial research-only run (`TITAN_GLOBAL_MODE=research_only`).
+  - Execute an initial research-only run. The effective mode is the *minimum* of
+    the process ceiling (derived from `TITAN_PRODUCTION_SENDING_ENABLED`), the
+    workspace `operating_mode`, and the campaign policy `operating_mode`. Leave
+    the kill switch off and set the campaign to `research_only`.
   - Verify evidence collection, screenshot capture, and finding generation.
 - [ ] **Draft Review:**
   - Switch campaign mode to `approval_required`.
   - Verify drafts in approval queue UI. Confirm all claims link to verified evidence.
 - [ ] **Controlled Autopilot Activation:**
-  - Ensure all preflight conditions pass in `titan.policy.send_authorization.verify_send_authorization()`.
+  - Ensure all gates pass. Process level: `python -m titan.cli preflight`.
+    Per message: `titan.policy.engine.evaluate_send()` must return an allowed
+    decision, which it does only when every workspace, campaign, sender,
+    contact, evidence, suppression and quota gate passes.
   - Enable workspace sending flag via owner API call.
