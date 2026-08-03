@@ -186,7 +186,9 @@ def extract_contacts_from_pages(
     someone else's and is recorded as ineligible rather than silently used.
     """
     out: dict[str, DiscoveredContact] = {}
-    org_domain = (organization_domain or "").lower().lstrip("www.")
+    # removeprefix, not lstrip: lstrip("www.") strips any leading w/./ characters,
+    # so "wombat.test" would become "ombat.test" and never match itself.
+    org_domain = (organization_domain or "").lower().removeprefix("www.")
 
     for page in pages:
         for raw in page.visible_emails:

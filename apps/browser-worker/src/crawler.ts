@@ -126,7 +126,7 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
   let context: BrowserContext | null = null;
 
   try {
-    browser = await chromium.launch({
+    const launchOptions: any = {
       args: [
         '--disable-dev-shm-usage',
         '--no-zygote',
@@ -136,7 +136,11 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
         '--disable-sync',
         '--disable-extensions',
       ],
-    });
+    };
+    if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    }
+    browser = await chromium.launch(launchOptions);
     context = await browser.newContext({
       userAgent: req.user_agent,
       viewport: DESKTOP,

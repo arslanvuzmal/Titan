@@ -12,29 +12,32 @@ import type { PageEvidence, SecurityHeaders } from './contract.js';
 
 const MAX_TEXT = 20000;
 
-/** Serialised into the page; keep it dependency-free. */
-export const collectDom = () => {
-  const cap = <T>(arr: T[], n: number): T[] => arr.slice(0, n);
-  const txt = (el: Element | null): string | null =>
-    el ? (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 300) || null : null;
+/**
+ * Pure string script evaluated inside the untrusted page DOM context.
+ * Kept as a string so tsx/esbuild name-mangling never injects __name helpers.
+ */
+const DOM_COLLECTOR_SCRIPT = `() => {
+  const cap = (arr, n) => arr.slice(0, n);
+  const txt = (el) =>
+    el ? (el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 300) || null : null;
 
-  const cssPath = (el: Element): string => {
-    if (el.id) return `#${CSS.escape(el.id)}`;
-    const parts: string[] = [];
-    let node: Element | null = el;
+  const cssPath = (el) => {
+    if (el.id) return '#' + CSS.escape(el.id);
+    const parts = [];
+    let node = el;
     let depth = 0;
     while (node && node.nodeType === 1 && depth < 5) {
       let part = node.tagName.toLowerCase();
       const testId = node.getAttribute('data-testid');
       if (testId) {
-        part += `[data-testid="${testId}"]`;
+        part += '[data-testid="' + testId + '"]';
         parts.unshift(part);
         break;
       }
-      const parent: Element | null = node.parentElement;
+      const parent = node.parentElement;
       if (parent) {
-        const sibs = Array.from(parent.children).filter((c) => c.tagName === node!.tagName);
-        if (sibs.length > 1) part += `:nth-of-type(${sibs.indexOf(node) + 1})`;
+        const sibs = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+        if (sibs.length > 1) part += ':nth-of-type(' + (sibs.indexOf(node) + 1) + ')';
       }
       parts.unshift(part);
       node = parent;
@@ -43,39 +46,35 @@ export const collectDom = () => {
     return parts.join(' > ');
   };
 
-  const isVisible = (el: Element): boolean => {
-    const r = (el as HTMLElement).getBoundingClientRect();
+  const isVisible = (el) => {
+    const r = el.getBoundingClientRect();
     const s = window.getComputedStyle(el);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
   };
 
   const origin = window.location.origin;
-  const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
-
+  const anchors = Array.from(document.querySelectorAll('a[href]'));
   const hrefs = anchors
     .map((a) => a.href)
     .filter((h) => h.startsWith('http://') || h.startsWith('https://'));
 
   const bookingPattern =
-    /(calendly|cal\.com|acuity|squareup\/appointments|setmore|booksy|opentable|resy|simplybook|youcanbook|appointlet|book|schedule|reserve|appointment)/i;
+    /(calendly|cal\\.com|acuity|squareup\\/appointments|setmore|booksy|opentable|resy|simplybook|youcanbook|appointlet|book|schedule|reserve|appointment)/i;
   const contactPattern = /(contact|get-in-touch|enquir|inquir|quote|consultation)/i;
   const socialPattern =
-    /(facebook\.com|instagram\.com|linkedin\.com|x\.com|twitter\.com|youtube\.com|tiktok\.com|yelp\.com)/i;
-  const reviewPattern = /(yelp\.com|trustpilot|google\.[a-z.]+\/maps|reviews)/i;
+    /(facebook\\.com|instagram\\.com|linkedin\\.com|x\\.com|twitter\\.com|youtube\\.com|tiktok\\.com|yelp\\.com)/i;
+  const reviewPattern = /(yelp\\.com|trustpilot|google\\.[a-z.]+\\/maps|reviews)/i;
 
-  const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+  const bodyText = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
 
-  // Emails/phones are read from RENDERED TEXT and mailto/tel links only. They
-  // are first-party published contact details, which is exactly the provenance
-  // that makes them eligible; nothing here guesses an address.
   const mailtos = anchors
     .filter((a) => a.protocol === 'mailto:')
     .map((a) => a.href.replace(/^mailto:/i, '').split('?')[0].trim().toLowerCase());
-  const textEmails = (bodyText.match(/[\w.+-]+@[\w-]+\.[\w.-]{2,}/g) || []).map((e) =>
+  const textEmails = (bodyText.match(/[\\w.+-]+@[\\w-]+\\.[\\w.-]{2,}/g) || []).map((e) =>
     e.toLowerCase(),
   );
   const tels = anchors.filter((a) => a.protocol === 'tel:').map((a) => a.href.replace(/^tel:/i, ''));
-  const textPhones = bodyText.match(/(\+?\d[\d\s().-]{7,}\d)/g) || [];
+  const textPhones = bodyText.match(/(\\+?\\d[\\d\\s().-]{7,}\\d)/g) || [];
 
   const images = Array.from(document.images);
   const structured = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
@@ -89,8 +88,8 @@ export const collectDom = () => {
       }
     });
 
-  const tech: string[] = [];
-  const w = window as unknown as Record<string, unknown>;
+  const tech = [];
+  const w = window;
   if (w.wp || document.querySelector('link[href*="wp-content"]')) tech.push('wordpress');
   if (w.Shopify) tech.push('shopify');
   if (document.querySelector('[data-wf-page]')) tech.push('webflow');
@@ -112,14 +111,14 @@ export const collectDom = () => {
     /(book|schedule|contact|call|get started|free|consultation|quote|enquire|inquire|sign up|join|apply|request|order|buy|shop|reserve)/i;
   const ctas = cap(
     anchors
-      .concat(Array.from(document.querySelectorAll('button')) as unknown as HTMLAnchorElement[])
+      .concat(Array.from(document.querySelectorAll('button')))
       .filter((el) => ctaKeywords.test(el.textContent || ''))
       .filter((el) => isVisible(el)),
     30,
   ).map((el) => ({
     selector: cssPath(el),
     text: txt(el),
-    href: (el as HTMLAnchorElement).href || null,
+    href: el.href || null,
     is_visible: true,
     target_status: null,
     target_is_empty: null,
@@ -127,7 +126,7 @@ export const collectDom = () => {
 
   const forms = cap(Array.from(document.querySelectorAll('form')), 20).map((f) => {
     const fields = Array.from(f.querySelectorAll('input,select,textarea')).filter(
-      (i) => (i as HTMLInputElement).type !== 'hidden',
+      (i) => i.type !== 'hidden',
     );
     return {
       selector: cssPath(f),
@@ -183,10 +182,10 @@ export const collectDom = () => {
     image_count: images.length,
     has_chat_widget: !!document.querySelector(chatSelectors),
     has_cookie_obstruction: !!document.querySelector(cookieSelectors),
-    text_excerpt: bodyText.slice(0, MAX_TEXT),
-    word_count: bodyText ? bodyText.split(/\s+/).length : 0,
+    text_excerpt: bodyText.slice(0, ${MAX_TEXT}),
+    word_count: bodyText ? bodyText.split(/\\s+/).length : 0,
   };
-};
+}`;
 
 export function readSecurityHeaders(headers: Record<string, string>): SecurityHeaders {
   const get = (k: string) => headers[k] ?? headers[k.toLowerCase()] ?? null;
@@ -209,7 +208,7 @@ export async function collectPage(
     securityHeaders: SecurityHeaders | null;
   },
 ): Promise<PageEvidence> {
-  const dom = await page.evaluate(collectDom);
+  const dom = await page.evaluate(`(${DOM_COLLECTOR_SCRIPT})()`);
   return {
     ...base,
     ...dom,

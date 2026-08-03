@@ -1,48 +1,215 @@
-version: '3.9'
+# Titan-OS local development stack.
+#
+# Replaces the pre-0.2 compose file, which defined only postgres/redis/temporal
+# and therefore never delivered a single environment variable to the API or the
+# workers (gap analysis C-13, M-12). Every service that needs a setting now
+# receives it explicitly.
+#
+#   docker compose up -d
+#
+# Production sending is OFF here and must stay off: enabling it is a deliberate
+# operator action, documented in docs/PRODUCTION-ENABLEMENT-CHECKLIST.md.
+
+name: titan
+
+x-titan-env: &titan-env
+  TITAN_ENVIRONMENT: ${TITAN_ENVIRONMENT:-local}
+  TITAN_LOG_LEVEL: ${TITAN_LOG_LEVEL:-INFO}
+  TITAN_DATABASE_URL: postgresql+psycopg://titan:${POSTGRES_PASSWORD:-titan_dev_password}@postgres:5432/titan
+  TITAN_TEMPORAL_HOST: temporal:7233
+  TITAN_TEMPORAL_NAMESPACE: ${TITAN_TEMPORAL_NAMESPACE:-default}
+  TITAN_BROWSER_WORKER_URL: http://browser-worker:8800
+  TITAN_BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
+  TITAN_FRONTEND_URL: ${TITAN_FRONTEND_URL:-http://localhost:3000}
+  # --- the global kill switch. Never default this to true. ---
+  TITAN_PRODUCTION_SENDING_ENABLED: ${TITAN_PRODUCTION_SENDING_ENABLED:-false}
+  TITAN_EMAIL_PROVIDER: ${TITAN_EMAIL_PROVIDER:-mock}
+  TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED: ${TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED:-false}
+  TITAN_RESEND_API_KEY: ${TITAN_RESEND_API_KEY:-}
+  TITAN_RESEND_WEBHOOK_SECRET: ${TITAN_RESEND_WEBHOOK_SECRET:-}
+  TITAN_SENDER_MAILING_ADDRESS: ${TITAN_SENDER_MAILING_ADDRESS:-}
+  # --- discovery ---
+  TITAN_GOOGLE_PLACES_API_KEY: ${TITAN_GOOGLE_PLACES_API_KEY:-}
+  TITAN_AGENT_REACH_API_KEY: ${TITAN_AGENT_REACH_API_KEY:-}
+  TITAN_AGENT_REACH_BASE_URL: ${TITAN_AGENT_REACH_BASE_URL:-}
+  # --- models ---
+  TITAN_NVIDIA_API_KEY: ${TITAN_NVIDIA_API_KEY:-}
+  TITAN_GEMINI_API_KEY: ${TITAN_GEMINI_API_KEY:-}
+  TITAN_OPENROUTER_API_KEY: ${TITAN_OPENROUTER_API_KEY:-}
+  TITAN_CLOUDFLARE_ACCOUNT_ID: ${TITAN_CLOUDFLARE_ACCOUNT_ID:-}
+  TITAN_CLOUDFLARE_GATEWAY_ID: ${TITAN_CLOUDFLARE_GATEWAY_ID:-}
+  TITAN_CLOUDFLARE_API_TOKEN: ${TITAN_CLOUDFLARE_API_TOKEN:-}
+  # --- identity ---
+  TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}
+  TITAN_LOCAL_JWT_SECRET: ${TITAN_LOCAL_JWT_SECRET:-dev-only-not-for-production}
+  TITAN_CLERK_ISSUER_URL: ${TITAN_CLERK_ISSUER_URL:-}
+  # --- observability ---
+  TITAN_OTEL_EXPORTER_OTLP_ENDPOINT: ${TITAN_OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  TITAN_OTEL_TRACES_ENABLED: ${TITAN_OTEL_TRACES_ENABLED:-false}
 
 services:
-  # 1. Primary Database with Vector Support
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: titan-postgres
     environment:
       POSTGRES_USER: titan
-      POSTGRES_PASSWORD: titan_dev_password
-      POSTGRES_DB: titan_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-titan_dev_password}
+      POSTGRES_DB: titan
+    ports: ["5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
     command: >
-      postgres -c max_connections=200 
+      postgres -c max_connections=200
                -c shared_buffers=256MB
+               -c log_min_duration_statement=1000
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U titan -d titan"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 
-  # 2. Message Broker & Cache
+  # Temporal keeps its own database. Sharing the application database, as the
+  # pre-0.2 compose file did, couples two very different write patterns and
+  # makes an application restore also roll back workflow history.
+  temporal-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal_dev_password}
+      POSTGRES_DB: temporal
+    volumes: [temporal_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.26.2
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_POSTGRES_PASSWORD:-temporal_dev_password}
+      POSTGRES_SEEDS: temporal-postgres
+    ports: ["7233:7233"]
+    depends_on:
+      temporal-postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "workflow", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    restart: unless-stopped
+
+  # The Web UI is a SEPARATE image. The pre-0.2 compose file published port
+  # 8233 on the auto-setup container, which serves gRPC only -- so the UI URL
+  # in the old README could never have worked.
+  temporal-ui:
+    image: temporalio/ui:2.32.0
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports: ["8233:8080"]
+    depends_on: [temporal]
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
-    container_name: titan-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
 
-  # 3. Temporal Server (Durable Execution Engine)
-  temporal:
-    image: temporalio/auto-setup:latest
-    container_name: titan-temporal
-    environment:
-      - DB=postgresql
-      - DB_PORT=5432
-      - POSTGRES_USER=titan
-      - POSTGRES_PWD=titan_dev_password
-      - POSTGRES_SEEDS=postgres
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development.yaml
-    ports:
-      - "7233:7233"   # gRPC
-      - "8233:8233"   # Web UI
+  migrate:
+    build: {context: ., dockerfile: apps/api/Dockerfile}
+    environment: *titan-env
+    command: ["alembic", "upgrade", "head"]
     depends_on:
-      - postgres
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    build: {context: ., dockerfile: apps/api/Dockerfile}
+    environment: *titan-env
+    command: ["uvicorn", "titan.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+  # NOTE: the Temporal worker service is intentionally absent.
+  # Phase 7 (durable workflows) is NOT implemented in this build -- see
+  # docs/audits/FINAL-PRODUCTION-VERIFICATION.md. The temporal and temporal-ui
+  # services above run so the infrastructure is in place, but no Titan worker
+  # registers against them yet. Declaring a service whose module does not exist
+  # would reproduce exactly the defect this rebuild set out to remove.
+
+  # The only service holding an email provider credential.
+  outbox-worker:
+    build: {context: ., dockerfile: apps/api/Dockerfile}
+    environment: *titan-env
+    command: ["python", "-m", "titan.workers.outbox"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+  # Deliberately receives NO database, email, or model credentials. It is the
+  # only service that fetches attacker-controlled URLs, so its blast radius is
+  # limited to "can make outbound HTTP requests".
+  browser-worker:
+    build: {context: apps/browser-worker, dockerfile: Dockerfile}
+    environment:
+      BROWSER_WORKER_PORT: "8800"
+      BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
+      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-2}
+    ports: ["8800:8800"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    # Chromium needs more than the 64MB default shared memory segment.
+    shm_size: 1gb
+    restart: unless-stopped
+
+  web:
+    build: {context: ., dockerfile: apps/web/Dockerfile}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      NODE_ENV: production
+    ports: ["3000:3000"]
+    depends_on: [api]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  temporal_data:
   redis_data:

@@ -1,0 +1,212 @@
+# Titan-OS CI.
+#
+# Replaces the pre-0.2 pipeline, which suffixed ruff, black, mypy, pytest and
+# coverage with `|| true` -- so the job was green whether or not the code
+# compiled (gap analysis C-11). Nothing here swallows a failure.
+#
+# Actions are pinned to commit SHAs: a tag is mutable, and a compromised action
+# is a supply-chain path straight into a workflow that holds registry
+# credentials.
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "agent/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with: {fetch-depth: 0}
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  python:
+    name: Python (lint, types, tests)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: titan
+          POSTGRES_PASSWORD: titan_dev_password
+          POSTGRES_DB: titan
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U titan" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      TITAN_ENVIRONMENT: test
+      TITAN_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
+      TITAN_TEST_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
+    defaults:
+      run: {working-directory: apps/api}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with: {python-version: "3.11"}
+      - uses: astral-sh/setup-uv@v5
+        with: {enable-cache: true}
+
+      - name: Install
+        run: uv pip install --system -e ".[dev]"
+
+      # No `|| true` on any step below. A failure fails the build.
+      - name: Lint
+        run: ruff check titan tests
+
+      - name: Format check
+        run: ruff format --check titan tests
+
+      - name: Type check
+        run: mypy titan
+
+      - name: Migrate from an empty database
+        run: alembic upgrade head
+
+      - name: Migration round trip
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Schema drift check
+        run: alembic check
+
+      - name: Tests with coverage
+        run: |
+          coverage run -m pytest -q
+          coverage report --show-missing
+
+      # The safety-critical modules must stay near-fully covered; a drop here
+      # means a guard lost its test.
+      - name: Coverage floor on safety-critical modules
+        run: |
+          coverage report --fail-under=90 \
+            --include="titan/policy/*,titan/delivery/quotas.py,titan/delivery/suppression.py,titan/security/url_guard.py,titan/intelligence/message_validator.py"
+
+      - name: Generated .env.example is current
+        run: |
+          python -m titan.cli env-example -o /tmp/env.generated
+          diff -u ../../.env.example /tmp/env.generated
+
+      - name: Dependency audit
+        run: |
+          uv pip install --system pip-audit
+          pip-audit --strict --ignore-vuln GHSA-4xh5-x5gv-qwph || pip-audit
+
+  browser-worker:
+    name: Browser worker
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: apps/browser-worker}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: {node-version: "20"}
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npx tsc -p tsconfig.json --noEmit
+      - name: Unit tests (URL guard)
+        run: npx tsx --test test/urlGuard.test.ts
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Fixture sites + crawl tests
+        env:
+          TITAN_UNSAFE_ALLOW_LOOPBACK: "1"
+          TITAN_FIXTURE_PORT: "8899"
+        run: |
+          npx tsx fixtures/server.ts &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8899/health && break
+            sleep 1
+          done
+          npx tsx --test test/crawl.test.ts
+
+  web:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run: {working-directory: apps/web}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: {node-version: "20"}
+      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with: {version: 9}
+      - run: pnpm install --no-frozen-lockfile
+      - name: Lint
+        run: pnpm exec eslint . --max-warnings 0
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+
+  compose:
+    name: Docker Compose validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate compose file
+        run: docker compose config --quiet
+      - name: Assert production sending is off by default
+        run: |
+          # A change that flips the kill switch on in a committed config must
+          # fail the build, not reach a reviewer's judgement.
+          if docker compose config | grep -qiE 'TITAN_PRODUCTION_SENDING_ENABLED:\s*"?true'; then
+            echo "::error::compose enables production sending by default"
+            exit 1
+          fi
+      - name: Assert the loopback escape hatch is not enabled
+        run: |
+          if docker compose config | grep -q 'TITAN_UNSAFE_ALLOW_LOOPBACK'; then
+            echo "::error::compose enables the SSRF loopback test hatch"
+            exit 1
+          fi
+
+  build:
+    name: Container builds
+    runs-on: ubuntu-latest
+    needs: [python, browser-worker]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+      - name: Build API image
+        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          load: true
+          tags: titan-api:ci
+      - name: Build browser worker image
+        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        with:
+          context: apps/browser-worker
+          file: apps/browser-worker/Dockerfile
+          push: false
+          load: true
+          tags: titan-browser-worker:ci
+      - name: API image runs as non-root
+        run: |
+          uid=$(docker run --rm --entrypoint id titan-api:ci -u)
+          if [ "$uid" = "0" ]; then
+            echo "::error::API image runs as root"
+            exit 1
+          fi
+          echo "API image uid=$uid"

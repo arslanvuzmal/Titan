@@ -294,7 +294,7 @@ def score_lead(data: ScoringInput, threshold: int = 70) -> ScoreResult:
         penalty += OUTREACH_RISK_PENALTY
         reasons.append("Outreach risk: " + ", ".join(data.outreach_risk_flags))
 
-    total = int(round(max(0.0, min(100.0, subtotal - penalty))))
+    total = round(max(0.0, min(100.0, subtotal - penalty)))
 
     # ---- hard gates -------------------------------------------------------
     # A lead with nothing evidenced cannot be "qualified" regardless of fit:
