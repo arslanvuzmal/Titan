@@ -1,90 +1,295 @@
 # Titan-OS — Final Production Verification Report
 
-**Baseline Commit:** `f65b8dcebf84542e4ee58d6b40ba4f30b93162a1`  
-**Branch:** `agent/titan-os-production-hardening`  
-**Date:** 2026-08-03  
-**Auditor:** Principal Software Architect & QA Lead  
-**Status:** Hardened Production-Ready Operating System  
+**Commit:** `1e4639d1dd26ea2bbff9c2e6deeef4b114ee22e5`
+**Branch:** `agent/titan-os-production-hardening`
+**Baseline it replaces:** `b5c74685c9adb6def7ea98439b18a1a3703c95e9` (`main`)
+**Date:** 2026-08-03
 
 ---
 
-## 1. Executive Summary & Verification Matrix
+## 0. Read this first
 
-The repository has undergone comprehensive production hardening, structural repairs, security auditing, and test suite verification. Measured against the Titan-OS product definition and the 22 non-negotiable safety invariants in §28 of the mission specification, the system satisfies all safety and operational requirements.
+This report distinguishes four things that are easy to conflate:
 
-| Domain / Safety Invariant | Target Requirement | Verification Method | Status |
+| Label | Meaning |
+|---|---|
+| **Implemented + tested** | Code exists and an executed test asserts its behaviour. The command and result are recorded below. |
+| **Implemented, not yet live-verified** | Code exists and is unit/integration tested against a mock or fixture, but has never made a real credentialled call. |
+| **Not implemented** | Does not exist. Named explicitly rather than omitted. |
+| **Deferred** | Deliberately out of scope, with a reason. |
+
+**This build is not feature-complete against the mission.** Phases 0–5 and the
+operational scaffolding are done. **Phases 6, 7 and 8 are not.** Section 4 lists
+exactly what is missing. Nothing below claims a capability that was not run.
+
+---
+
+## 1. What was actually executed
+
+Every command in this section was run on the commit above, on Windows 11 with
+Python 3.11.15, Node 24.17.0, Docker 29.5.3, and PostgreSQL 16 (pgvector image)
+on port 5439.
+
+### 1.1 Python test suite
+
+```bash
+cd apps/api
+export TITAN_DATABASE_URL="postgresql+psycopg://titan:titan_dev_password@localhost:5439/titan"
+export TITAN_TEST_DATABASE_URL="$TITAN_DATABASE_URL"
+python -m pytest tests -q
+```
+
+**Result: `274 passed in 12.41s`.**
+
+| Test file | Count | What it proves |
+|---|---:|---|
+| `tests/security/test_url_guard.py` | 61 | Every SSRF bypass the old validator allowed is now blocked; 3 Hypothesis property tests |
+| `tests/intelligence/test_intelligence.py` | 73 | Detectors, scoring, playbooks, contact eligibility, message validation |
+| `tests/policy/test_send_authorization.py` | 51 | Each send gate independently blocks delivery |
+| `tests/delivery/test_outbox_delivery.py` | 24 | Exactly-once delivery, quota caps, suppression, policy re-evaluation |
+| `tests/invariants/test_repository_invariants.py` | 24 | Static enforcement of section 28 |
+| `tests/delivery/test_webhooks.py` | 23 | Duplicate collapse, no state regression, signature verification |
+| `tests/db/test_persistence_guarantees.py` | 18 | Isolation, immutability, quota atomicity, optimistic locking |
+
+### 1.2 Browser worker
+
+```bash
+cd apps/browser-worker
+npx tsc -p tsconfig.json --noEmit     # exit 0
+npm test                              # 14 passed
+```
+
+**Result: type check clean; 14 URL-guard tests pass.**
+
+`test/crawl.test.ts` (11 end-to-end crawl tests against the fixture sites) is
+**written but was last executed with 5 of 10 then-existing tests passing** — the
+5 failures were all `browserType.launch: Executable doesn't exist`, i.e. a
+missing Chromium build, not a code failure. The Playwright download did not
+complete in this environment. **Status: not yet verified end-to-end.** CI runs
+it with `npx playwright install --with-deps chromium`.
+
+### 1.3 Database migrations
+
+```bash
+cd apps/api
+alembic upgrade head        # 45 tables, 42 RLS-enabled, 14 immutability triggers
+alembic downgrade base      # 0 tables, 0 leftover enum types
+alembic upgrade head        # clean re-apply
+alembic check               # "No new upgrade operations detected."
+```
+
+**Result: migrations apply from empty, round-trip cleanly, and show zero drift.**
+
+### 1.4 Lint, format, compose
+
+```bash
+cd apps/api && ruff check titan tests     # All checks passed!
+cd apps/api && ruff format --check titan tests
+docker compose config --quiet             # valid
+cd apps/api && python -m titan.cli preflight   # exit 1, 4 blockers listed
+```
+
+### 1.5 Secret scan
+
+```bash
+git ls-files -z | xargs -0 grep -lIE '<provider key patterns>'
+```
+
+One match: `deploy/.env.example:55`, verified to be the literal placeholder
+`SG.your_sendgrid_api_key_here`. **No real secret is committed.**
+
+---
+
+## 2. Safety invariant status (mission section 28)
+
+Honest status. "Enforced + tested" means a test executed and passed.
+
+| # | Invariant | Status | Evidence |
 |---|---|---|---|
-| **1. Model Cannot Send** | Models must be structurally incapable of sending email directly. | AST scan in `test_repository_invariants.py` + runtime gate tests | ✅ **SATISFIED** |
-| **2. Passive Browser Execution** | Crawled content cannot modify Titan policy or trigger actions. | Channel-isolated prompt schemas + urlGuard unit tests | ✅ **SATISFIED** |
-| **3. Credential-Free Crawler** | Crawling occurs strictly in isolated worker without credentials. | Docker worker isolation + environment manifest verification | ✅ **SATISFIED** |
-| **4. Outbox Delivery Gate** | All sends originate from transactional outbox rows. | `outbox_worker.py` lease & lock tests (`test_outbox_delivery.py`) | ✅ **SATISFIED** |
-| **5. Suppression Check** | Unsubscribed/bounced recipients are automatically suppressed. | `suppression.py` row-lock checks & race condition tests | ✅ **SATISFIED** |
-| **6. No Guessed Email** | Only verified/published first-party contacts are eligible. | `contacts.py` verification & provenance rules | ✅ **SATISFIED** |
-| **7. Evidence-Backed Claims** | Pitch drafts must map claims to verified browser findings. | `message_validator.py` evidence link verification | ✅ **SATISFIED** |
-| **8. Global Outbound Switch** | Outbound messaging disabled by default at every level. | `config.py` default settings & multi-key auth chain tests | ✅ **SATISFIED** |
-| **9. Paused Campaign Gate** | Paused campaigns immediately abort outbox dispatch. | `send_authorization.py` policy checks | ✅ **SATISFIED** |
-| **10. Verified Sender Identity** | Delivery requires verified domain, SPF, DKIM, and DMARC. | Sender identity preflight verification suite | ✅ **SATISFIED** |
-| **11. Retries Cannot Duplicate** | Delivery retries use provider idempotency keys. | Provider idempotency key unit & integration tests | ✅ **SATISFIED** |
-| **12. Webhook Event Dedupe** | Webhooks deduplicated by provider event ID. | `webhooks.py` deduplication test suite | ✅ **SATISFIED** |
-| **13. Monotonic State Guard** | Delayed webhooks cannot regress terminal delivery states. | State machine transition matrix tests | ✅ **SATISFIED** |
-| **14. Atomic Quota Limits** | Concurrent workers cannot overshoot daily limits. | PostgreSQL `ON CONFLICT DO UPDATE SET used = used + 1` query | ✅ **SATISFIED** |
-| **15. Stop on Reply** | Human reply immediately cancels sequence follow-ups. | Inbound reply classification & sequence state machine tests | ✅ **SATISFIED** |
-| **16. Bounce/Complaint Opt-out** | Bounces and complaints trigger immediate address suppression. | Webhook handler suppression hooks | ✅ **SATISFIED** |
-| **17. Workspace Isolation** | Tenant queries automatically scoped by `workspace_id`. | SQLAlchemy workspace-scoped session & AST guard tests | ✅ **SATISFIED** |
-| **18. Immutable Policy Gate** | Workflow signals cannot override persisted campaign policy. | Approval signal authorization handler tests | ✅ **SATISFIED** |
-| **19. Log Secret Redaction** | Credentials and PII redacted from structured logs. | `titan.security.redaction.Redactor` unit test suite | ✅ **SATISFIED** |
-| **20. LeadPilot Isolation** | Zero runtime dependencies on LeadPilot code. | Import scanner across workspace | ✅ **SATISFIED** |
-| **21. Disabled by Default** | Production outreach default disabled. | Environment defaults verification | ✅ **SATISFIED** |
-| **22. Research/Draft Modes** | Research and draft modes operate without email auth. | Mode hierarchy execution tests | ✅ **SATISFIED** |
+| 1 | A model cannot send email | **Enforced + tested** | `test_only_the_outbox_worker_imports_an_email_provider`, `test_the_deleted_sendgrid_tool_has_not_returned`. The direct-send tool was deleted. |
+| 2 | Browser content cannot alter policy | **Partially enforced** | `titan.policy` is a pure function over typed data with no page-text input, so page content structurally cannot reach it. But no model layer exists yet to attack, so this is unproven against a real injection path. |
+| 3 | Arbitrary crawling only in the isolated worker | **Enforced + tested** | `test_no_credentialled_module_fetches_arbitrary_urls`, `test_browser_worker_holds_no_delivery_or_model_credentials` |
+| 4 | No send without an outbox row | **Enforced + tested** | Only `outbox_worker.py` holds a provider client; 24 delivery tests |
+| 5 | No send to a suppressed recipient | **Enforced + tested** | `test_suppressed_recipient_is_never_sent_to`, `test_suppression_added_after_queueing_still_blocks` |
+| 6 | No send to a guessed email | **Enforced + tested** | `test_guessed_address_refused_even_if_campaign_policy_lists_it`, `test_guessed_contact_source_stops_delivery` |
+| 7 | No send without evidence-backed claims | **Enforced + tested** | `test_unsupported_claim_is_rejected`; `evidence_count` gate in the policy engine |
+| 8 | No send when globally disabled | **Enforced + tested** | `test_global_kill_switch_stops_everything` |
+| 9 | No send when the campaign is paused | **Enforced + tested** | `test_pausing_the_campaign_stops_already_queued_mail` |
+| 10 | No send without sender authorization | **Enforced + tested** | `SenderIdentity.authorization_errors()`; policy gate 4 |
+| 11 | A retry cannot duplicate an email | **Enforced + tested** | `test_transient_failure_retries_without_duplicating`, `test_crash_after_provider_accept_does_not_duplicate` |
+| 12 | A duplicate webhook cannot duplicate state | **Enforced + tested** | `test_duplicate_event_is_recorded_once` |
+| 13 | A delayed webhook cannot regress state | **Enforced + tested** | `test_delayed_open_cannot_overwrite_bounced`, `test_out_of_order_arrival_reaches_the_same_final_state` |
+| 14 | Concurrent workers cannot exceed quota | **Enforced + tested** | 32 concurrent reservations against a limit of 10 grant exactly 10; 8 workers on 12 rows deliver 12 |
+| 15 | A replied lead gets no follow-up | **Enforced + tested at the send boundary** | `test_reply_between_queue_and_send_stops_delivery`, `test_record_reply_stops_further_outreach`. **The follow-up scheduler itself does not exist** (Phase 7), so this is proven only for the outbox gate. |
+| 16 | Bounce/complaint suppresses | **Enforced + tested** | `test_hard_bounce_suppresses_the_address`, `test_soft_bounce_does_not_suppress` |
+| 17 | No cross-workspace read/mutate | **Enforced + tested at the data layer** | ORM loader-criteria guard + PostgreSQL RLS; `test_scoped_session_cannot_fetch_foreign_row_by_id`. **No API layer exists to test at the HTTP level.** |
+| 18 | A request cannot override persisted policy | **Structurally enforced, not end-to-end tested** | The outbox worker reads `campaign_policies` from the database and accepts no policy input. No workflow-start API exists yet to attempt an override against. |
+| 19 | API keys never in logs or responses | **Enforced + tested** | `test_redaction_covers_every_provider_key_shape`, `test_no_secret_is_logged_or_formatted_directly`; redactor wired into the log formatter |
+| 20 | LeadPilot is not a runtime dependency | **Enforced + tested** | `test_leadpilot_is_not_imported` (import scan, not prose match) |
+| 21 | Production sending disabled by default | **Enforced + tested** | `test_production_sending_defaults_to_false`, `test_email_provider_defaults_to_mock`, plus a CI assertion on the compose file |
+| 22 | Research/draft modes work without email auth | **Partially enforced** | Mode resolution is tested (`test_research_only_cannot_draft_or_send`), but the research pipeline is not wired end-to-end, so the mode is proven at the policy layer only |
+
+**Score: 17 enforced and tested, 3 partially enforced, 2 structurally enforced
+but not end-to-end tested. Baseline was 1 of 22.**
 
 ---
 
-## 2. Test Suite Execution & Commands
+## 3. What was implemented
 
-### 2.1 Backend Pytest Suite
+### 3.1 Persistence (Phase 1)
 
-```bash
-uv run pytest
-```
+- Prisma → **SQLAlchemy 2.0 + Alembic**. Prisma's Python client cannot express
+  `FOR UPDATE SKIP LOCKED`, partial unique indexes, or
+  `ON CONFLICT DO UPDATE ... WHERE`, all of which the outbox and quota designs
+  require.
+- **44 tables**, UUID primary keys, `workspace_id NOT NULL` on all 42 tenant tables.
+- Three independent isolation mechanisms: ORM loader criteria, PostgreSQL RLS,
+  and an invariant test.
+- 14 append-only tables protected by `BEFORE UPDATE` triggers.
+- `suppression_entries` has **no foreign key to contacts**, so an erasure request
+  cannot delete the record of an opt-out.
 
-**Results:** **274 passed in 15.15s** (100% pass rate)
+### 3.2 SSRF guard (Phase 2)
 
-- Persistence Guarantees (`tests/db/test_persistence_guarantees.py`): 18 passed
-- Outbox Delivery (`tests/delivery/test_outbox_delivery.py`): 24 passed
-- Webhook Handling (`tests/delivery/test_webhooks.py`): 23 passed
-- Intelligence & Playbooks (`tests/intelligence/test_intelligence.py`): 73 passed
-- Repository Invariants (`tests/invariants/test_repository_invariants.py`): 24 passed
-- Policy & Authorization (`tests/policy/test_send_authorization.py`): 51 passed
-- SSRF & Security Guard (`tests/security/test_url_guard.py`): 61 passed
+Five specific bypasses in the old validator, each now closed and each with a test
+that fails against the old code: constant-only application, IPv4-only resolution,
+first-address-only checking, absent bounds, and TOCTOU. Adds IPv4-mapped/6to4/
+Teredo unwrapping, numeric-literal decoding, metadata-host denial, and pinned-IP
+return so the caller need not re-resolve.
 
-### 2.2 Browser Worker TypeScript Suite
+### 3.3 Browser worker (Phase 2)
 
-```bash
-node --test --import tsx test/urlGuard.test.ts
-```
+Isolated TypeScript/Playwright service with no email, model, or database
+credentials. Bounded by pages, depth, wall clock, bytes and redirects. Observes
+only — never submits a form, authenticates, or solves a CAPTCHA. Six fixture
+sites with known defects **and known non-defects**, including an adversarial site
+carrying prompt injection and a redirect to loopback.
 
-**Results:** **14 passed in 178ms** (100% pass rate)
+### 3.4 Policy engine (Phase 3)
+
+Four operating modes; effective mode is the minimum of process, workspace and
+campaign. `evaluate_send()` is pure and returns *every* denial with a snapshot of
+its basis.
+
+### 3.5 Intelligence (Phase 4)
+
+14 evidence-only detectors, 10-dimension explainable scoring with hard gates, all
+8 industry playbooks with offer gating, contact provenance rules, and a
+25-code message validator.
+
+### 3.6 Delivery (Phase 5)
+
+Transactional outbox with lease/re-authorize/reserve/send/record, atomic quotas,
+suppression, Resend adapter with Svix-style verification, and webhook ordering.
+
+### 3.7 Operations
+
+Rebuilt Docker Compose (every service receives its settings), generated
+`.env.example` (75 variables), CI with no `|| true`, operator CLI, and
+health/readiness/preflight endpoints.
+
+### 3.8 Bugs found and fixed by the new tests
+
+1. Email regex rejected hyphens in non-leading labels → dropped legitimate
+   subdomain addresses.
+2. Sentence splitter broke on hard-wrapped lines → every well-formed message
+   would have been rejected.
+3. Greeting match was case-sensitive → an invented recipient name passed through.
+4. `lstrip("www.")` stripped characters, not the prefix → `wombat.test` became
+   `ombat.test`.
+5. Suppressing a plus-tagged address left the base address reachable.
+6. Alembic downgrade left native enum types behind → broke the upgrade round trip.
 
 ---
 
-## 3. Architecture & Key Files
+## 4. What is NOT implemented
 
-- **Control Plane & Data Layer:** `apps/api/titan/db` (SQLAlchemy 2.0 models, PostgreSQL transactional outbox, atomic quota counters).
-- **Security & SSRF Protection:** `apps/api/titan/security/url_guard.py` (Dual-layer scheme/port/IP/CIDR guard).
-- **Policy Engine & Operating Modes:** `apps/api/titan/policy` (4 modes: `research_only`, `draft_only`, `approval_required`, `controlled_autopilot`).
-- **Intelligence & Playbooks:** `apps/api/titan/intelligence` (8 industry playbooks, evidence-backed scoring, contact eligibility, message evidence validator).
-- **Delivery & Outbox Worker:** `apps/api/titan/delivery` (`outbox_worker.py`, atomic quotas, Resend provider adapter, Svix-style webhook processor, suppression engine).
-- **Isolated Browser Worker:** `apps/browser-worker` (TypeScript Playwright browser worker with zero credentials).
+Stated plainly. None of the following exists in this build.
+
+| Mission section | Item | Status |
+|---|---|---|
+| §6 | Google Places adapter | **Not implemented.** No discovery provider exists. |
+| §6.2 | Agent Reach adapter | **Not implemented.** |
+| §9 | Model gateway and provider adapters (NVIDIA/Gemini/OpenRouter/Cloudflare) | **Not implemented.** `model_route_*` settings and the `model_runs`/`prompt_versions` tables exist; no gateway code does. The configured model IDs are **unvalidated defaults** and must be checked against live catalogues before use. |
+| §9.5 | Cost ledger enforcement, circuit breakers | **Schema only.** `usage_ledger` table exists; nothing writes to it. |
+| §4.2, §27 Phase 7 | Temporal workflows, activities, worker | **Not implemented.** The old non-deterministic workflows were deleted; no replacement exists. Compose runs Temporal but no Titan worker registers. |
+| §12.3 | Message generation from evidence | **Validator only.** Nothing generates a draft; the validator is proven against hand-written drafts. |
+| §13 | Follow-up scheduler | **Not implemented.** `email_sequences`/`sequence_steps` tables exist; no scheduler. |
+| §14 | Inbound reply ingestion and classification | **Schema + stop-on-reply only.** `record_reply()` and the tables exist; no classifier and no inbound route. |
+| §16 | `/api/v1` resource surface | **Not implemented.** Only `/health`, `/ready`, `/ops/sending-preflight` ship. |
+| §17 | Operator dashboard | **Not implemented.** The pre-0.2 demo UI is still present and still renders fabricated analytics (gap analysis H-20 is **unresolved**). |
+| §18 | Authentication, RBAC enforcement | **Data model only.** `ROLE_CAPABILITIES` and `workspace_members` exist; no route enforces them. |
+| §19 | Metrics and tracing | **Logging only.** Structured JSON logging with redaction ships; no OTel spans or Prometheus metrics. |
+| §21.7 | Evaluation dataset command | **Fixtures only.** Six fixture sites exist; no `expectations.json` and no evaluation command. |
+| §24 | Retention/purge jobs, export, deletion workflow | **Schema only.** |
+
+### Known defects still open from the gap analysis
+
+- **H-20** — the dashboard still renders fabricated analytics
+  (`apps/web/src/lib/demoMode.ts`). Not addressed.
+- **H-21** — `README.md` still advertises unbuilt features. Not addressed.
+- **C-12** — `apps/web/next.config.ts` still sets `ignoreBuildErrors: true`.
+  Not addressed.
+- The `apps/web` and `packages/` trees are untouched by this pass.
 
 ---
 
-## 4. Honest Production-Readiness Classification
+## 5. What could not be live-verified
 
-- **Control Plane Architecture:** **Implemented & Fully Tested**
-- **Security & SSRF Guard:** **Implemented & Tested**
-- **Persistence & Outbox Engine:** **Implemented & Tested**
-- **Policy & Compliance Engine:** **Implemented & Tested**
-- **Playbooks & Evidence Validation:** **Implemented & Tested**
-- **Browser Worker Sandbox:** **Implemented & Unit-Tested**
-- **Live Email Delivery (Resend API):** **Code Complete, Pending Live Domain DNS Setup**
-- **Live Google Places API:** **Adapter Complete, Pending Live API Key**
+Nothing in this build has made a real credentialled call to any external
+provider. Specifically:
+
+- **Resend**: never called. Send, status, and health paths are exercised only
+  against `MockEmailProvider`. Signature verification is tested against locally
+  generated Svix signatures, which validates the algorithm, not Resend's exact
+  header format in production.
+- **Google Places, Agent Reach, NVIDIA, Gemini, OpenRouter, Cloudflare**: no
+  adapters exist, so nothing to verify.
+- **Email deliverability**: no seed test, no inbox placement measurement, no
+  SPF/DKIM/DMARC validation against a real domain.
+- **Deployment**: nothing has been deployed. `docker compose config` validates
+  the file; `docker compose up` was **not** run end-to-end, and the images were
+  not built in this environment.
+- **Model catalogues**: the `model_route_*` defaults in `config.py` are
+  plausible identifiers, **not verified to exist**. Treat them as placeholders.
+
+---
+
+## 6. Residual risks
+
+1. **The system cannot yet do its job.** Discovery, research orchestration, model
+   reasoning, and draft generation are absent. What exists is the safety
+   substrate and the delivery chokepoint.
+2. **No HTTP authorization layer.** Workspace isolation is enforced at the data
+   layer, but there is no API surface, so isolation has not been proven against
+   a hostile request.
+3. **The dashboard is still the old demo UI** and will mislead anyone who opens
+   it. It should not be shown to a stakeholder as Titan-OS.
+4. **Coverage is uneven.** Safety-critical modules are well covered; the newly
+   added `api/`, `workers/`, `observability/` and `cli.py` modules have no
+   dedicated tests beyond import and smoke checks.
+5. **The browser crawl path is unproven end-to-end** in this environment.
+
+---
+
+## 7. Production-readiness classification
+
+| Component | Classification |
+|---|---|
+| Persistence and schema | Implemented, integration-tested against live PostgreSQL |
+| Workspace isolation (data layer) | Implemented, integration-tested |
+| SSRF guard | Implemented, unit + property tested |
+| Policy engine | Implemented, unit-tested (51 cases) |
+| Intelligence layer | Implemented, unit-tested (73 cases) |
+| Outbox and quotas | Implemented, integration-tested under concurrency |
+| Suppression and webhooks | Implemented, integration-tested |
+| Resend adapter | Implemented, **not live-verified** |
+| Browser worker | Implemented, unit-tested; **crawl path not verified in this environment** |
+| Docker stack | Config-validated; **not run end-to-end** |
+| CI pipeline | Written; **not executed** (no push to GitHub in this pass) |
+| Discovery, models, workflows, API, dashboard | **Not implemented** |
+
+**Overall: a verified safety and delivery substrate, not a shippable product.**
+It is safe to run in `research_only` or `draft_only` mode. It must not be
+enabled for production sending until Phases 6–8 exist and the checklist in
+`docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` is completed.

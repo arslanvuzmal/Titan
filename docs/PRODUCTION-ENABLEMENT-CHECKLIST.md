@@ -8,6 +8,39 @@
 
 ---
 
+## 0. STOP — engineering prerequisites before any of this matters
+
+This checklist covers the **external** actions needed to enable production
+outreach. As of commit `1e4639d`, several **internal** prerequisites are not yet
+built, and no amount of DNS or credential work will make Titan send until they
+are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
+
+Blocking, in order:
+
+- [ ] **Model gateway** (§9) — not implemented. Without it nothing generates a
+      draft, so there is nothing to approve or send.
+- [ ] **Google Places adapter** (§6) — not implemented. Without it there are no
+      leads to research.
+- [ ] **Temporal workflows and worker** (§4.2) — not implemented. Without them
+      research and follow-up are not orchestrated or durable.
+- [ ] **`/api/v1` surface and RBAC** (§16, §18) — not implemented. There is
+      currently no authenticated way to create a campaign or approve a draft.
+- [ ] **Inbound webhook route** — the endpoint referenced in section 1 below
+      (`/api/v1/delivery/webhooks/resend`) **does not exist yet**. The handler
+      logic (`titan/delivery/webhooks.py`) is written and tested; the HTTP route
+      that calls it is not.
+- [ ] **Dashboard** (§17) — the shipped UI is still the pre-0.2 demo and renders
+      fabricated analytics. Do not show it to anyone as Titan-OS.
+- [ ] **Model IDs** — the `TITAN_MODEL_ROUTE_*` defaults in `config.py` are
+      unverified placeholders. Validate each against the provider's live
+      catalogue before configuring.
+
+What *is* ready today: the schema, workspace isolation, the SSRF guard, the
+policy engine, the intelligence layer, and the outbox/suppression/webhook
+delivery path. Titan can safely run in `research_only` or `draft_only` mode.
+
+---
+
 ## 1. Domain & Email Authenticity Setup
 
 - [ ] **Primary Domain Configuration:**
