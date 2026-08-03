@@ -163,6 +163,15 @@ services:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
     command: ["python", "-m", "titan.workers.temporal_worker"]
+    healthcheck:
+      # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
+      # would be permanently unhealthy and restart-looped. This checks the one
+      # dependency the worker genuinely needs.
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres: {condition: service_healthy}
       temporal: {condition: service_healthy}
@@ -179,6 +188,15 @@ services:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
     command: ["python", "-m", "titan.workers.outbox"]
+    healthcheck:
+      # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
+      # would be permanently unhealthy and restart-looped. This checks the one
+      # dependency the worker genuinely needs.
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
