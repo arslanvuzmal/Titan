@@ -188,6 +188,38 @@ class Settings(BaseSettings):
     rate_limit_redis_url: str | None = None
 
     # ------------------------------------------------------------ validators
+    @field_validator(
+        "clerk_issuer_url",
+        "agent_reach_base_url",
+        "otel_exporter_otlp_endpoint",
+        "browser_worker_token",
+        "resend_api_key",
+        "resend_webhook_secret",
+        "nvidia_api_key",
+        "gemini_api_key",
+        "openrouter_api_key",
+        "cloudflare_api_token",
+        "cloudflare_account_id",
+        "cloudflare_gateway_id",
+        "google_places_api_key",
+        "agent_reach_api_key",
+        "local_jwt_secret",
+        "sender_mailing_address",
+        mode="before",
+    )
+    @classmethod
+    def _empty_string_is_unset(cls, value: object) -> object:
+        """Treat an empty environment variable as absent.
+
+        Docker Compose renders an unset ``${VAR:-}`` as the empty string, not as
+        a missing key. Without this, every optional URL and secret fails
+        validation and the container will not start -- which is exactly how the
+        first real `docker compose run migrate` failed.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, v: str) -> str:
