@@ -38,6 +38,22 @@ class DetectedFinding:
     #: Evidence excerpts supporting the finding, each with a source URL.
     evidence: tuple[tuple[str, str], ...] = field(default=())
 
+    def is_pitchable(self, min_confidence: float = 0.7) -> bool:
+        """Whether this finding may justify a claim in a recipient-facing message.
+
+        Same rule as AuditFinding.is_pitchable, kept on the dataclass too so the
+        detection stage can count pitchable findings before anything is
+        persisted: measured (not model-inferred), confident enough, and backed
+        by at least one evidence excerpt.
+        """
+        from titan.db.enums import PITCHABLE_METHODS
+
+        return (
+            self.verification_method in PITCHABLE_METHODS
+            and self.confidence >= min_confidence
+            and bool(self.evidence)
+        )
+
     @property
     def fingerprint(self) -> str:
         return finding_fingerprint(

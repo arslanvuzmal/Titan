@@ -21,6 +21,7 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from titan.activities import pipeline as pipeline_activities
 from titan.activities import research as research_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
@@ -64,6 +65,7 @@ async def main() -> None:
             research_activities.open_research_run,
             research_activities.requires_human_approval,
             research_activities.record_workflow_event,
+            *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
         ],
         # Bounded concurrency. An unbounded worker will happily start more
         # crawls than the browser worker can serve and then time out on all of

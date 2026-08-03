@@ -242,6 +242,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
     allowed = {
         "titan/delivery/providers/resend.py",
         "titan/models/providers.py",  # build_providers hands keys to clients
+        "titan/providers/browser_client.py",  # bearer token for the worker
         "titan/workers/outbox.py",
         "titan/cli.py",
     }

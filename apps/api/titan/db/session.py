@@ -156,6 +156,12 @@ async def workspace_session(
         try:
             yield session
         finally:
+            # Expunge BEFORE rollback. A rollback expires every loaded
+            # attribute, so a caller that reads `org.industry` after the block
+            # gets DetachedInstanceError instead of the value it just fetched.
+            # Expunging first detaches the instances with their state intact,
+            # which is what a read-only session should hand back.
+            session.expunge_all()
             await session.rollback()
 
 
