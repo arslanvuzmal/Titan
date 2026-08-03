@@ -1,6 +1,6 @@
 # Titan-OS — Final Production Verification Report
 
-**Commit:** `1e4639d1dd26ea2bbff9c2e6deeef4b114ee22e5`
+**Commit:** `ebc5ae9` (Phase 6 added after the first issue of this report)
 **Branch:** `agent/titan-os-production-hardening`
 **Baseline it replaces:** `b5c74685c9adb6def7ea98439b18a1a3703c95e9` (`main`)
 **Date:** 2026-08-03
@@ -18,9 +18,10 @@ This report distinguishes four things that are easy to conflate:
 | **Not implemented** | Does not exist. Named explicitly rather than omitted. |
 | **Deferred** | Deliberately out of scope, with a reason. |
 
-**This build is not feature-complete against the mission.** Phases 0–5 and the
-operational scaffolding are done. **Phases 6, 7 and 8 are not.** Section 4 lists
-exactly what is missing. Nothing below claims a capability that was not run.
+**This build is not feature-complete against the mission.** Phases 0–6 and the
+operational scaffolding are done. **Phases 7 (durable workflows) and 8 (API
+surface and dashboard) are not.** Section 4 lists exactly what is missing.
+Nothing below claims a capability that was not run.
 
 ---
 
@@ -39,7 +40,7 @@ export TITAN_TEST_DATABASE_URL="$TITAN_DATABASE_URL"
 python -m pytest tests -q
 ```
 
-**Result: `274 passed in 12.41s`.**
+**Result: `342 passed in 12.88s`.**
 
 | Test file | Count | What it proves |
 |---|---:|---|
@@ -50,6 +51,8 @@ python -m pytest tests -q
 | `tests/invariants/test_repository_invariants.py` | 24 | Static enforcement of section 28 |
 | `tests/delivery/test_webhooks.py` | 23 | Duplicate collapse, no state regression, signature verification |
 | `tests/db/test_persistence_guarantees.py` | 18 | Isolation, immutability, quota atomicity, optimistic locking |
+| `tests/models/test_gateway.py` | 40 | Typed outputs, budget, circuit breaker, prompt channel isolation |
+| `tests/providers/test_places.py` | 28 | Field masks, filtering, dedupe, error taxonomy |
 
 ### 1.2 Browser worker
 
@@ -107,7 +110,7 @@ Honest status. "Enforced + tested" means a test executed and passed.
 | # | Invariant | Status | Evidence |
 |---|---|---|---|
 | 1 | A model cannot send email | **Enforced + tested** | `test_only_the_outbox_worker_imports_an_email_provider`, `test_the_deleted_sendgrid_tool_has_not_returned`. The direct-send tool was deleted. |
-| 2 | Browser content cannot alter policy | **Partially enforced** | `titan.policy` is a pure function over typed data with no page-text input, so page content structurally cannot reach it. But no model layer exists yet to attack, so this is unproven against a real injection path. |
+| 2 | Browser content cannot alter policy | **Enforced + tested** | `titan.policy` takes no page text. Untrusted content is nonce-fenced, invisible characters stripped, fence-closing defanged (`test_fence_closing_attempt_is_defanged`, `test_untrusted_content_never_enters_the_system_channel`). A model that obeys an injection still has no tool that can act. |
 | 3 | Arbitrary crawling only in the isolated worker | **Enforced + tested** | `test_no_credentialled_module_fetches_arbitrary_urls`, `test_browser_worker_holds_no_delivery_or_model_credentials` |
 | 4 | No send without an outbox row | **Enforced + tested** | Only `outbox_worker.py` holds a provider client; 24 delivery tests |
 | 5 | No send to a suppressed recipient | **Enforced + tested** | `test_suppressed_recipient_is_never_sent_to`, `test_suppression_added_after_queueing_still_blocks` |
@@ -129,7 +132,7 @@ Honest status. "Enforced + tested" means a test executed and passed.
 | 21 | Production sending disabled by default | **Enforced + tested** | `test_production_sending_defaults_to_false`, `test_email_provider_defaults_to_mock`, plus a CI assertion on the compose file |
 | 22 | Research/draft modes work without email auth | **Partially enforced** | Mode resolution is tested (`test_research_only_cannot_draft_or_send`), but the research pipeline is not wired end-to-end, so the mode is proven at the policy layer only |
 
-**Score: 17 enforced and tested, 3 partially enforced, 2 structurally enforced
+**Score: 18 enforced and tested, 2 partially enforced, 2 structurally enforced
 but not end-to-end tested. Baseline was 1 of 22.**
 
 ---
@@ -208,10 +211,10 @@ Stated plainly. None of the following exists in this build.
 
 | Mission section | Item | Status |
 |---|---|---|
-| §6 | Google Places adapter | **Not implemented.** No discovery provider exists. |
+| §6 | Google Places adapter | **Implemented, not live-verified.** 28 hermetic tests; never called with a real key. |
 | §6.2 | Agent Reach adapter | **Not implemented.** |
-| §9 | Model gateway and provider adapters (NVIDIA/Gemini/OpenRouter/Cloudflare) | **Not implemented.** `model_route_*` settings and the `model_runs`/`prompt_versions` tables exist; no gateway code does. The configured model IDs are **unvalidated defaults** and must be checked against live catalogues before use. |
-| §9.5 | Cost ledger enforcement, circuit breakers | **Schema only.** `usage_ledger` table exists; nothing writes to it. |
+| §9 | Model gateway and provider adapters (NVIDIA/Gemini/OpenRouter/Cloudflare) | **Implemented, not live-verified.** Typed outputs, bounded repair, budget ledger, circuit breaker, channel isolation. The configured model IDs remain **unvalidated placeholders**; run `titan validate-models` against a live key before use. |
+| §9.5 | Cost ledger enforcement, circuit breakers | **In-process only.** The gateway enforces budgets and breakers and records every call; persisting those records to `usage_ledger` is not wired. |
 | §4.2, §27 Phase 7 | Temporal workflows, activities, worker | **Not implemented.** The old non-deterministic workflows were deleted; no replacement exists. Compose runs Temporal but no Titan worker registers. |
 | §12.3 | Message generation from evidence | **Validator only.** Nothing generates a draft; the validator is proven against hand-written drafts. |
 | §13 | Follow-up scheduler | **Not implemented.** `email_sequences`/`sequence_steps` tables exist; no scheduler. |
@@ -243,8 +246,9 @@ provider. Specifically:
   against `MockEmailProvider`. Signature verification is tested against locally
   generated Svix signatures, which validates the algorithm, not Resend's exact
   header format in production.
-- **Google Places, Agent Reach, NVIDIA, Gemini, OpenRouter, Cloudflare**: no
-  adapters exist, so nothing to verify.
+- **Google Places, NVIDIA, Gemini, OpenRouter, Cloudflare**: adapters exist and
+  are tested against intercepted HTTP, but none has been called with a real
+  credential. **Agent Reach**: no adapter exists.
 - **Email deliverability**: no seed test, no inbox placement measurement, no
   SPF/DKIM/DMARC validation against a real domain.
 - **Deployment**: nothing has been deployed. `docker compose config` validates
@@ -287,7 +291,8 @@ provider. Specifically:
 | Browser worker | Implemented, unit-tested; **crawl path not verified in this environment** |
 | Docker stack | Config-validated; **not run end-to-end** |
 | CI pipeline | Written; **not executed** (no push to GitHub in this pass) |
-| Discovery, models, workflows, API, dashboard | **Not implemented** |
+| Model gateway, Google Places adapter | Implemented, unit-tested; **not live-verified** |
+| Agent Reach, workflows, API surface, dashboard | **Not implemented** |
 
 **Overall: a verified safety and delivery substrate, not a shippable product.**
 It is safe to run in `research_only` or `draft_only` mode. It must not be

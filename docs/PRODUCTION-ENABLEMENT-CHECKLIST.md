@@ -17,10 +17,11 @@ are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
 
 Blocking, in order:
 
-- [ ] **Model gateway** (§9) — not implemented. Without it nothing generates a
-      draft, so there is nothing to approve or send.
-- [ ] **Google Places adapter** (§6) — not implemented. Without it there are no
-      leads to research.
+- [x] **Model gateway** (§9) — implemented, **not live-verified**. Run
+      `titan validate-models` with a real key before relying on it: the
+      configured model IDs are placeholders.
+- [x] **Google Places adapter** (§6) — implemented, **not live-verified**.
+      Confirm billing SKU expectations against the field masks before a large run.
 - [ ] **Temporal workflows and worker** (§4.2) — not implemented. Without them
       research and follow-up are not orchestrated or durable.
 - [ ] **`/api/v1` surface and RBAC** (§16, §18) — not implemented. There is
