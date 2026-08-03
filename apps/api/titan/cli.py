@@ -120,6 +120,43 @@ def cmd_check_providers(_: argparse.Namespace) -> int:
     return 0 if failures == 0 else 1
 
 
+def cmd_validate_models(_: argparse.Namespace) -> int:
+    """Check every configured model route against its provider's live catalogue.
+
+    The `TITAN_MODEL_ROUTE_*` defaults are plausible identifiers, not verified
+    ones. This is how an operator finds out a model does not exist before a
+    campaign does.
+    """
+    from titan.models.gateway import ModelGateway
+    from titan.models.providers import build_providers
+
+    settings = get_settings()
+    providers = build_providers(settings)
+    if not providers:
+        print("No model providers are configured.")
+        print("Set at least one of TITAN_NVIDIA_API_KEY, TITAN_GEMINI_API_KEY,")
+        print("TITAN_OPENROUTER_API_KEY, or the Cloudflare gateway variables.")
+        return 1
+
+    gateway = ModelGateway(providers, settings)
+    configure_event_loop()
+    report = asyncio.run(gateway.validate_models())
+
+    print(f"Titan-OS model routes ({', '.join(sorted(providers))})")
+    print()
+    for entry in report["routes"]:
+        status = entry.get("status", "unknown")
+        marker = "ok  " if status == "ok" else "FAIL"
+        print(
+            f"  [{marker}] {entry['task']:<13} {entry.get('provider', '?')}:{entry.get('model_id', '?')}"
+        )
+        if entry.get("detail"):
+            print(f"           {entry['detail']}")
+    print()
+    print("All routes valid." if report["ok"] else "One or more routes are invalid.")
+    return 0 if report["ok"] else 1
+
+
 def cmd_env_example(args: argparse.Namespace) -> int:
     """Generate .env.example from the Settings model."""
     lines: list[str] = [
@@ -217,6 +254,9 @@ def main() -> int:
     sub.add_parser("check-providers", help="live provider health check").set_defaults(
         func=cmd_check_providers
     )
+    sub.add_parser(
+        "validate-models", help="check model routes against live catalogues"
+    ).set_defaults(func=cmd_validate_models)
     env_parser = sub.add_parser("env-example", help="regenerate .env.example")
     env_parser.add_argument("-o", "--output", help="write to a file instead of stdout")
     env_parser.set_defaults(func=cmd_env_example)

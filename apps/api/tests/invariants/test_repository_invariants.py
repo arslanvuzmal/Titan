@@ -241,6 +241,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
     # Only the places that must hand a raw credential to a provider client.
     allowed = {
         "titan/delivery/providers/resend.py",
+        "titan/models/providers.py",  # build_providers hands keys to clients
         "titan/workers/outbox.py",
         "titan/cli.py",
     }
