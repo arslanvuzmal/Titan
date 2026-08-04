@@ -25,6 +25,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from titan import __version__
+from titan.api.crm import router as crm_router
 from titan.api.routes import router as v1_router
 from titan.config import get_settings
 from titan.db.session import dispose_engine, get_engine
@@ -112,6 +113,9 @@ app.add_middleware(
 
 
 app.include_router(v1_router)
+# The operator-facing read surface. Same prefix, same auth; kept in its
+# own module because it is assembled views rather than resources.
+app.include_router(crm_router)
 
 
 @app.middleware("http")

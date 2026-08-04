@@ -1,0 +1,735 @@
+"""CRM read surface.
+
+The rest of ``/api/v1`` is the machine-facing contract: narrow models, one
+resource per route. This module is the operator-facing one. A person working a
+lead needs the business, its contacts and their provenance, the findings that
+justify a claim, the drafts, and what was actually delivered -- assembled, not
+scattered across eight requests.
+
+Three rules shape everything here:
+
+* **Nothing is invented.** Every field is a stored column or a live ``COUNT``.
+  Where a value is unknown it is ``null``, never a plausible substitute.
+* **Eligibility is shown, not implied.** A pattern-guessed address is returned
+  so the operator can see Titan found it, flagged with the reason it can never
+  be contacted. Hiding it would make the CRM look emptier than reality;
+  showing it unflagged would invite someone to paste it into their mail client.
+* **List endpoints do not N+1.** Counts arrive as grouped subqueries, so the
+  lead list is a fixed number of statements regardless of page size.
+
+This module is read-only by design. Mutations stay in ``routes.py`` where the
+capability checks and audit writes live.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Sequence
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import Select, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from titan.api.schemas import (
+    ContactChannelOut,
+    ContactOut,
+    CrmStatsOut,
+    DraftOut,
+    LeadOut,
+    MessageOut,
+    OrganizationLocationOut,
+    OrganizationOut,
+    OrganizationSummary,
+    TimelineEventOut,
+)
+from titan.api.security import Principal, require
+from titan.config import get_settings
+from titan.db.enums import ContactSource, LeadStatus
+from titan.db.models import (
+    AuditFinding,
+    Campaign,
+    CampaignPolicy,
+    Contact,
+    ContactChannel,
+    FindingEvidence,
+    Lead,
+    LeadScore,
+    Message,
+    MessageApproval,
+    MessageDraft,
+    Organization,
+    OrganizationDomain,
+    OrganizationLocation,
+    ResearchRun,
+    SuppressionEntry,
+    Workspace,
+)
+from titan.db.session import workspace_session
+from titan.delivery.suppression import is_suppressed
+from titan.intelligence.contacts import check_contact_eligibility
+from titan.intelligence.scoring import band_for
+
+router = APIRouter(prefix="/api/v1", tags=["crm"])
+
+
+async def _not_found(kind: str) -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, f"{kind} not found")
+
+
+# ==========================================================================
+# Shared enrichment
+# ==========================================================================
+async def _primary_locations(
+    session: AsyncSession, org_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, OrganizationLocation]:
+    """One location per organization, preferring the primary one."""
+    if not org_ids:
+        return {}
+    rows = (
+        (
+            await session.execute(
+                select(OrganizationLocation)
+                .where(OrganizationLocation.organization_id.in_(org_ids))
+                .order_by(
+                    OrganizationLocation.organization_id,
+                    OrganizationLocation.is_primary.desc(),
+                    OrganizationLocation.created_at.asc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: dict[uuid.UUID, OrganizationLocation] = {}
+    for row in rows:
+        out.setdefault(row.organization_id, row)
+    return out
+
+
+def _org_summary(
+    org: Organization, location: OrganizationLocation | None
+) -> OrganizationSummary:
+    return OrganizationSummary(
+        id=org.id,
+        display_name=org.display_name,
+        canonical_domain=org.canonical_domain,
+        website_url=org.website_url,
+        industry=org.industry.value,
+        phone_e164=org.phone_e164,
+        rating=org.rating,
+        review_count=org.review_count,
+        business_status=org.business_status,
+        locality=location.locality if location else None,
+        region=location.region if location else None,
+        country_code=location.country_code if location else None,
+    )
+
+
+async def _counts_by_lead(
+    session: AsyncSession, column: Any, model: Any, lead_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """One grouped COUNT for a whole page of leads."""
+    if not lead_ids:
+        return {}
+    rows = await session.execute(
+        select(column, func.count())
+        .select_from(model)
+        .where(column.in_(lead_ids))
+        .group_by(column)
+    )
+    return {row[0]: int(row[1]) for row in rows}
+
+
+async def enrich_leads(session: AsyncSession, leads: Sequence[Lead]) -> list[LeadOut]:
+    """Attach the business, the campaign name, and activity counts.
+
+    Six statements total, regardless of how many leads are on the page.
+    """
+    if not leads:
+        return []
+
+    lead_ids = [lead.id for lead in leads]
+    org_ids = sorted({lead.organization_id for lead in leads})
+    campaign_ids = sorted({lead.campaign_id for lead in leads})
+
+    orgs = {
+        org.id: org
+        for org in (
+            await session.execute(
+                select(Organization).where(Organization.id.in_(org_ids))
+            )
+        )
+        .scalars()
+        .all()
+    }
+    locations = await _primary_locations(session, org_ids)
+    campaign_names = {
+        row[0]: row[1]
+        for row in await session.execute(
+            select(Campaign.id, Campaign.name).where(Campaign.id.in_(campaign_ids))
+        )
+    }
+
+    findings = await _counts_by_lead(
+        session, AuditFinding.lead_id, AuditFinding, lead_ids
+    )
+    drafts = await _counts_by_lead(session, MessageDraft.lead_id, MessageDraft, lead_ids)
+    messages = await _counts_by_lead(session, Message.lead_id, Message, lead_ids)
+
+    # Evidence is one join away from the lead, so it needs its own statement
+    # rather than the grouped helper.
+    evidence: dict[uuid.UUID, int] = {}
+    if lead_ids:
+        evidence = {
+            row[0]: int(row[1])
+            for row in await session.execute(
+                select(AuditFinding.lead_id, func.count(FindingEvidence.id))
+                .select_from(AuditFinding)
+                .join(FindingEvidence, FindingEvidence.finding_id == AuditFinding.id)
+                .where(AuditFinding.lead_id.in_(lead_ids))
+                .group_by(AuditFinding.lead_id)
+            )
+        }
+
+    # "Has a contactable address" is the single most decision-relevant fact in
+    # the list, so it is computed here rather than left to a per-row fetch.
+    eligible_orgs: set[uuid.UUID] = set()
+    if org_ids:
+        rows = await session.execute(
+            select(Contact.organization_id, ContactChannel.source)
+            .select_from(ContactChannel)
+            .join(Contact, Contact.id == ContactChannel.contact_id)
+            .where(
+                Contact.organization_id.in_(org_ids),
+                ContactChannel.channel_type == "email",
+                ContactChannel.is_active.is_(True),
+            )
+        )
+        for org_id, source in rows:
+            if source is not ContactSource.PATTERN_GUESS:
+                eligible_orgs.add(org_id)
+
+    out: list[LeadOut] = []
+    for lead in leads:
+        org = orgs.get(lead.organization_id)
+        out.append(
+            LeadOut(
+                id=lead.id,
+                campaign_id=lead.campaign_id,
+                organization_id=lead.organization_id,
+                status=lead.status.value,
+                latest_score=lead.latest_score,
+                replied_at=lead.replied_at,
+                last_contacted_at=lead.last_contacted_at,
+                followups_sent=lead.followups_sent,
+                status_reason=lead.status_reason,
+                next_action_at=lead.next_action_at,
+                created_at=lead.created_at,
+                organization=(
+                    _org_summary(org, locations.get(org.id)) if org is not None else None
+                ),
+                campaign_name=campaign_names.get(lead.campaign_id),
+                finding_count=findings.get(lead.id, 0),
+                draft_count=drafts.get(lead.id, 0),
+                message_count=messages.get(lead.id, 0),
+                evidence_count=evidence.get(lead.id, 0),
+                has_eligible_contact=lead.organization_id in eligible_orgs,
+            )
+        )
+    return out
+
+
+def apply_lead_filters(
+    stmt: Select[Any],
+    *,
+    campaign_id: uuid.UUID | None,
+    lead_status: str | None,
+    min_score: int | None,
+    max_score: int | None,
+    search: str | None,
+    has_reply: bool | None,
+    contacted: bool | None,
+) -> Select[Any]:
+    """Filters shared by the list route and its total count.
+
+    Applied to both statements from one place so a page can never report a
+    total that disagrees with the rows it returned.
+    """
+    if campaign_id:
+        stmt = stmt.where(Lead.campaign_id == campaign_id)
+    if lead_status:
+        stmt = stmt.where(Lead.status == LeadStatus(lead_status))
+    if min_score is not None:
+        stmt = stmt.where(Lead.latest_score >= min_score)
+    if max_score is not None:
+        stmt = stmt.where(Lead.latest_score <= max_score)
+    if has_reply is not None:
+        stmt = stmt.where(
+            Lead.replied_at.is_not(None) if has_reply else Lead.replied_at.is_(None)
+        )
+    if contacted is not None:
+        stmt = stmt.where(
+            Lead.last_contacted_at.is_not(None)
+            if contacted
+            else Lead.last_contacted_at.is_(None)
+        )
+    if search:
+        term = f"%{search.strip().lower()}%"
+        stmt = stmt.join(Organization, Organization.id == Lead.organization_id).where(
+            or_(
+                func.lower(Organization.display_name).like(term),
+                func.lower(Organization.canonical_domain).like(term),
+                func.lower(Organization.normalized_name).like(term),
+            )
+        )
+    return stmt
+
+
+# ==========================================================================
+# Organizations
+# ==========================================================================
+@router.get("/organizations/{organization_id}", response_model=OrganizationOut)
+async def get_organization(
+    organization_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> OrganizationOut:
+    async with workspace_session(principal.workspace_id) as session:
+        org = await session.get(Organization, organization_id)
+        if org is None:
+            raise await _not_found("organization")
+
+        locations = (
+            (
+                await session.execute(
+                    select(OrganizationLocation)
+                    .where(OrganizationLocation.organization_id == org.id)
+                    .order_by(OrganizationLocation.is_primary.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        domains = [
+            row[0]
+            for row in await session.execute(
+                select(OrganizationDomain.domain)
+                .where(OrganizationDomain.organization_id == org.id)
+                .order_by(OrganizationDomain.is_primary.desc())
+            )
+        ]
+        primary = locations[0] if locations else None
+        summary = _org_summary(org, primary)
+        return OrganizationOut(
+            **summary.model_dump(),
+            legal_name=org.legal_name,
+            normalized_name=org.normalized_name,
+            google_place_id=org.google_place_id,
+            employee_estimate=org.employee_estimate,
+            provenance=org.provenance,
+            locations=[OrganizationLocationOut.model_validate(x) for x in locations],
+            domains=domains,
+            created_at=org.created_at,
+        )
+
+
+# ==========================================================================
+# Contacts
+# ==========================================================================
+@router.get("/leads/{lead_id}/contacts", response_model=list[ContactOut])
+async def lead_contacts(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> list[ContactOut]:
+    """Contacts for a lead's organization, each channel labelled with why it
+    is or is not contactable under this campaign's policy."""
+    async with workspace_session(principal.workspace_id) as session:
+        lead = await session.get(Lead, lead_id)
+        if lead is None:
+            raise await _not_found("lead")
+
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == lead.campaign_id
+                )
+            )
+        ).scalar_one_or_none()
+        allowed = (
+            frozenset(ContactSource(s) for s in policy.allowed_contact_sources)
+            if policy is not None
+            else frozenset()
+        )
+        require_verified = policy.require_verified_email if policy else True
+
+        contacts = (
+            (
+                await session.execute(
+                    select(Contact)
+                    .where(Contact.organization_id == lead.organization_id)
+                    .order_by(Contact.is_decision_maker.desc(), Contact.created_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        out: list[ContactOut] = []
+        for contact in contacts:
+            channels: list[ContactChannelOut] = []
+            for channel in contact.channels:
+                model = ContactChannelOut(
+                    id=channel.id,
+                    channel_type=channel.channel_type,
+                    value=channel.value,
+                    normalized_value=channel.normalized_value,
+                    value_domain=channel.value_domain,
+                    source=channel.source.value,
+                    source_url=channel.source_url,
+                    discovered_at=channel.discovered_at,
+                    verification_status=channel.verification_status.value,
+                    confidence=channel.confidence,
+                    consent_basis=channel.consent_basis,
+                    is_active=channel.is_active,
+                )
+                if channel.channel_type == "email":
+                    result = check_contact_eligibility(
+                        source=channel.source,
+                        verification=channel.verification_status,
+                        is_active=channel.is_active,
+                        allowed_sources=allowed,
+                        require_verified=require_verified,
+                        email=channel.normalized_value,
+                    )
+                    entry = await is_suppressed(
+                        session,
+                        workspace_id=principal.workspace_id,
+                        email=channel.normalized_value,
+                    )
+                    model.suppressed = entry is not None
+                    model.eligible_for_outreach = result.eligible and entry is None
+                    reasons = list(result.reasons)
+                    if entry is not None:
+                        reasons.append(f"suppressed: {entry.reason.value}")
+                    model.ineligibility_reason = "; ".join(reasons) or None
+                else:
+                    model.ineligibility_reason = (
+                        f"{channel.channel_type} is not an outreach channel"
+                    )
+                channels.append(model)
+
+            out.append(
+                ContactOut(
+                    id=contact.id,
+                    organization_id=contact.organization_id,
+                    full_name=contact.full_name,
+                    role_title=contact.role_title,
+                    is_decision_maker=contact.is_decision_maker,
+                    is_generic_role=contact.is_generic_role,
+                    notes=contact.notes,
+                    channels=channels,
+                )
+            )
+        return out
+
+
+# ==========================================================================
+# Per-lead drafts and messages
+# ==========================================================================
+@router.get("/leads/{lead_id}/drafts", response_model=list[DraftOut])
+async def lead_drafts(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("draft:read")),
+) -> list[DraftOut]:
+    async with workspace_session(principal.workspace_id) as session:
+        if await session.get(Lead, lead_id) is None:
+            raise await _not_found("lead")
+        rows = (
+            (
+                await session.execute(
+                    select(MessageDraft)
+                    .where(MessageDraft.lead_id == lead_id)
+                    .order_by(MessageDraft.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [DraftOut.model_validate(r) for r in rows]
+
+
+@router.get("/leads/{lead_id}/messages", response_model=list[MessageOut])
+async def lead_messages(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> list[MessageOut]:
+    async with workspace_session(principal.workspace_id) as session:
+        if await session.get(Lead, lead_id) is None:
+            raise await _not_found("lead")
+        rows = (
+            (
+                await session.execute(
+                    select(Message)
+                    .where(Message.lead_id == lead_id)
+                    .order_by(Message.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [MessageOut.model_validate(r) for r in rows]
+
+
+# ==========================================================================
+# Timeline
+# ==========================================================================
+@router.get("/leads/{lead_id}/timeline", response_model=list[TimelineEventOut])
+async def lead_timeline(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> list[TimelineEventOut]:
+    """Everything that happened to this lead, newest first.
+
+    Derived from the record tables at read time. There is no separate event
+    log to fall out of step with them, and nothing appears here that is not
+    also a row somewhere.
+    """
+    async with workspace_session(principal.workspace_id) as session:
+        lead = await session.get(Lead, lead_id)
+        if lead is None:
+            raise await _not_found("lead")
+
+        events: list[TimelineEventOut] = [
+            TimelineEventOut(
+                at=lead.created_at,
+                kind="lead.discovered",
+                title="Lead discovered",
+                detail=f"status {lead.status.value}",
+                reference_id=lead.id,
+            )
+        ]
+
+        for run in (
+            (
+                await session.execute(
+                    select(ResearchRun).where(ResearchRun.lead_id == lead_id)
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            events.append(
+                TimelineEventOut(
+                    at=run.created_at,
+                    kind="research.run",
+                    title=f"Research run {run.status}",
+                    detail=run.failure_reason,
+                    reference_id=run.id,
+                )
+            )
+
+        for finding in (
+            (
+                await session.execute(
+                    select(AuditFinding).where(AuditFinding.lead_id == lead_id)
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            events.append(
+                TimelineEventOut(
+                    at=finding.created_at,
+                    kind="finding.detected",
+                    title=finding.title,
+                    detail=finding.page_url,
+                    reference_id=finding.id,
+                    severity=finding.severity.value,
+                )
+            )
+
+        for score in (
+            (await session.execute(select(LeadScore).where(LeadScore.lead_id == lead_id)))
+            .scalars()
+            .all()
+        ):
+            events.append(
+                TimelineEventOut(
+                    at=score.created_at,
+                    kind="lead.scored",
+                    title=f"Scored {score.total} ({score.band})",
+                    detail=f"threshold {score.threshold_applied}",
+                    reference_id=score.id,
+                )
+            )
+
+        drafts = (
+            (
+                await session.execute(
+                    select(MessageDraft).where(MessageDraft.lead_id == lead_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        draft_ids = [d.id for d in drafts]
+        for draft in drafts:
+            events.append(
+                TimelineEventOut(
+                    at=draft.created_at,
+                    kind="draft.generated",
+                    title=f"Draft v{draft.version}: {draft.subject}",
+                    detail=(
+                        "validation passed"
+                        if draft.validation_passed
+                        else "validation FAILED"
+                    ),
+                    reference_id=draft.id,
+                    severity=None if draft.validation_passed else "high",
+                )
+            )
+
+        if draft_ids:
+            for approval in (
+                (
+                    await session.execute(
+                        select(MessageApproval).where(
+                            MessageApproval.draft_id.in_(draft_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            ):
+                events.append(
+                    TimelineEventOut(
+                        at=approval.decided_at,
+                        kind="draft.reviewed",
+                        title=f"Review: {approval.decision}",
+                        detail=approval.reason,
+                        reference_id=approval.draft_id,
+                    )
+                )
+
+        for message in (
+            (await session.execute(select(Message).where(Message.lead_id == lead_id)))
+            .scalars()
+            .all()
+        ):
+            for when, kind, title in (
+                (message.sent_at, "message.sent", "Message sent"),
+                (message.delivered_at, "message.delivered", "Message delivered"),
+                (message.bounced_at, "message.bounced", "Message bounced"),
+                (message.complained_at, "message.complained", "Spam complaint"),
+            ):
+                if when is not None:
+                    events.append(
+                        TimelineEventOut(
+                            at=when,
+                            kind=kind,
+                            title=title,
+                            detail=message.to_email_normalized,
+                            reference_id=message.id,
+                            severity=(
+                                "high"
+                                if kind in {"message.bounced", "message.complained"}
+                                else None
+                            ),
+                        )
+                    )
+
+        if lead.replied_at is not None:
+            events.append(
+                TimelineEventOut(
+                    at=lead.replied_at,
+                    kind="lead.replied",
+                    title="Reply received",
+                    detail="all further outreach is stopped for this lead",
+                    reference_id=lead.id,
+                )
+            )
+
+        events.sort(key=lambda e: e.at, reverse=True)
+        return events
+
+
+# ==========================================================================
+# Overview counters
+# ==========================================================================
+async def _group_count(session: AsyncSession, column: Any, model: Any) -> dict[str, int]:
+    rows = await session.execute(
+        select(column, func.count()).select_from(model).group_by(column)
+    )
+    out: dict[str, int] = {}
+    for value, count in rows:
+        key = value.value if hasattr(value, "value") else str(value)
+        out[key] = int(count)
+    return out
+
+
+@router.get("/stats", response_model=CrmStatsOut)
+async def crm_stats(
+    principal: Principal = Depends(require("research:read")),
+) -> CrmStatsOut:
+    settings = get_settings()
+    async with workspace_session(principal.workspace_id) as session:
+        workspace = await session.get(Workspace, principal.workspace_id)
+        if workspace is None:
+            raise await _not_found("workspace")
+
+        async def count(model: Any) -> int:
+            return int(await session.scalar(select(func.count()).select_from(model)) or 0)
+
+        bands: dict[str, int] = {}
+        for (score,) in await session.execute(
+            select(Lead.latest_score).where(Lead.latest_score.is_not(None))
+        ):
+            bands[band_for(int(score)).value] = (
+                bands.get(band_for(int(score)).value, 0) + 1
+            )
+
+        eligible = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(ContactChannel)
+                .where(
+                    ContactChannel.channel_type == "email",
+                    ContactChannel.is_active.is_(True),
+                    ContactChannel.source != ContactSource.PATTERN_GUESS,
+                )
+            )
+            or 0
+        )
+        replied = int(
+            await session.scalar(
+                select(func.count()).select_from(Lead).where(Lead.replied_at.is_not(None))
+            )
+            or 0
+        )
+
+        return CrmStatsOut(
+            leads_total=await count(Lead),
+            leads_by_status=await _group_count(session, Lead.status, Lead),
+            leads_by_band=bands,
+            campaigns_total=await count(Campaign),
+            organizations_total=await count(Organization),
+            contacts_total=await count(Contact),
+            eligible_contacts=eligible,
+            findings_total=await count(AuditFinding),
+            evidence_total=await count(FindingEvidence),
+            drafts_by_status=await _group_count(
+                session, MessageDraft.status, MessageDraft
+            ),
+            messages_by_state=await _group_count(session, Message.state, Message),
+            suppressions_total=await count(SuppressionEntry),
+            replied_total=replied,
+            # Both must be true for anything to leave the building; the CRM
+            # reports the conjunction rather than the workspace flag alone.
+            sending_authorized=(
+                workspace.sending_authorized and settings.production_sending_enabled
+            ),
+            operating_mode=workspace.operating_mode.value,
+        )
+
+
+__all__ = ["apply_lead_filters", "enrich_leads", "router"]

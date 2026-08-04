@@ -310,7 +310,7 @@ def score_lead(data: ScoringInput, threshold: int = 70) -> ScoreResult:
         total = min(total, 20)
         reasons.append(f"Business status is {data.business_status}")
 
-    band = _band(total)
+    band = band_for(total)
     if not reasons:
         reasons.append(
             f"{len(pitchable)} evidenced finding(s); strongest severity "
@@ -364,7 +364,10 @@ def _business_activity(data: ScoringInput) -> tuple[float, str]:
     return raw, f"{reviews} reviews, rating {data.rating if data.rating else 'unknown'}"
 
 
-def _band(total: int) -> Band:
+def band_for(total: int) -> Band:
+    """Public name for the band boundaries, so callers outside scoring
+    (the CRM overview) classify a stored total exactly as the scorer did
+    rather than re-deriving the thresholds."""
     if total >= 85:
         return Band.HIGH_PRIORITY
     if total >= 70:
@@ -381,5 +384,6 @@ __all__ = [
     "Component",
     "ScoreResult",
     "ScoringInput",
+    "band_for",
     "score_lead",
 ]

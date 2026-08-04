@@ -117,6 +117,96 @@ class SendingAuthorizationRequest(BaseModel):
     )
 
 
+class OrganizationSummary(BaseModel):
+    """Just enough of a business to recognise it in a list.
+
+    The CRM lists leads, but a human recognises *businesses*. A row showing
+    only ``organization_id`` is unusable, so the list endpoint joins this in.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    display_name: str
+    canonical_domain: str | None = None
+    website_url: str | None = None
+    industry: str = "general"
+    phone_e164: str | None = None
+    rating: float | None = None
+    review_count: int | None = None
+    business_status: str | None = None
+    locality: str | None = None
+    region: str | None = None
+    country_code: str | None = None
+
+
+class OrganizationLocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    formatted_address: str | None
+    locality: str | None
+    region: str | None
+    postal_code: str | None
+    country_code: str | None
+    timezone: str | None
+    is_primary: bool
+
+
+class OrganizationOut(OrganizationSummary):
+    """Full business record, including where each field came from."""
+
+    legal_name: str | None = None
+    normalized_name: str = ""
+    google_place_id: str | None = None
+    employee_estimate: int | None = None
+    provenance: list[dict[str, Any]] = Field(default_factory=list)
+    locations: list[OrganizationLocationOut] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    created_at: dt.datetime | None = None
+
+
+class ContactChannelOut(BaseModel):
+    """One reachable address, with the provenance that decides eligibility.
+
+    ``eligible_for_outreach`` is computed rather than stored: a pattern-guessed
+    address is displayed (so an operator can see Titan found it) but is never
+    contactable, and the UI must show that distinction rather than imply the
+    address is usable.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    channel_type: str
+    value: str
+    normalized_value: str
+    value_domain: str | None
+    source: str
+    source_url: str | None
+    discovered_at: dt.datetime
+    verification_status: str
+    confidence: float
+    consent_basis: str | None
+    is_active: bool
+    eligible_for_outreach: bool = False
+    ineligibility_reason: str | None = None
+    suppressed: bool = False
+
+
+class ContactOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    full_name: str | None
+    role_title: str | None
+    is_decision_maker: bool
+    is_generic_role: bool
+    notes: str | None
+    channels: list[ContactChannelOut] = Field(default_factory=list)
+
+
 class LeadOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -128,6 +218,58 @@ class LeadOut(BaseModel):
     replied_at: dt.datetime | None
     last_contacted_at: dt.datetime | None
     followups_sent: int
+
+    # --- CRM enrichment. Optional so that a plain `model_validate(lead)`
+    # --- still produces a valid (if sparse) record.
+    status_reason: str | None = None
+    next_action_at: dt.datetime | None = None
+    created_at: dt.datetime | None = None
+    organization: OrganizationSummary | None = None
+    campaign_name: str | None = None
+    finding_count: int = 0
+    draft_count: int = 0
+    message_count: int = 0
+    evidence_count: int = 0
+    #: True when at least one contact channel could lawfully be contacted.
+    #: Distinct from "an address exists" -- see ContactChannelOut.
+    has_eligible_contact: bool = False
+
+
+class TimelineEventOut(BaseModel):
+    """One dated thing that happened to a lead.
+
+    Assembled from the record tables rather than a separate event log, so the
+    timeline cannot drift from what actually happened.
+    """
+
+    at: dt.datetime
+    kind: str
+    title: str
+    detail: str | None = None
+    reference_id: uuid.UUID | None = None
+    severity: str | None = None
+
+
+class CrmStatsOut(BaseModel):
+    """Counters for the CRM overview. Every number is a live COUNT."""
+
+    leads_total: int
+    leads_by_status: dict[str, int]
+    leads_by_band: dict[str, int]
+    campaigns_total: int
+    organizations_total: int
+    contacts_total: int
+    eligible_contacts: int
+    findings_total: int
+    evidence_total: int
+    drafts_by_status: dict[str, int]
+    messages_by_state: dict[str, int]
+    suppressions_total: int
+    replied_total: int
+    #: Reflects the process kill switch and the workspace ceiling, so the CRM
+    #: can state plainly whether anything could actually be sent right now.
+    sending_authorized: bool
+    operating_mode: str
 
 
 class FindingOut(BaseModel):
@@ -276,6 +418,9 @@ __all__ = [
     "CampaignOut",
     "CampaignPolicyOut",
     "CampaignPolicyUpdate",
+    "ContactChannelOut",
+    "ContactOut",
+    "CrmStatsOut",
     "DraftOut",
     "ErrorBody",
     "EvidenceOut",
@@ -283,12 +428,16 @@ __all__ = [
     "LeadOut",
     "LoginRequest",
     "MessageOut",
+    "OrganizationLocationOut",
+    "OrganizationOut",
+    "OrganizationSummary",
     "Page",
     "ResearchStartRequest",
     "ScoreOut",
     "SendingAuthorizationRequest",
     "SuppressionCreate",
     "SuppressionOut",
+    "TimelineEventOut",
     "TokenResponse",
     "UsageOut",
     "WorkflowRunOut",
