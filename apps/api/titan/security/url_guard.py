@@ -127,7 +127,7 @@ class Resolver(Protocol):
 def system_resolver(host: str, port: int) -> list[str]:
     """Resolve a hostname to every A and AAAA address."""
     infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    return [info[4][0] for info in infos]
+    return [str(info[4][0]) for info in infos]
 
 
 def _unwrap(

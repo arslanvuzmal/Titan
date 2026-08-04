@@ -17,9 +17,9 @@ Two things this adapter is careful about beyond the mechanics:
   keeps its own independently-derived evidence in separate tables so the two are
   never confused.
 
-Not live-verified: this adapter has never been called with a real API key. The
-request shapes follow the published v1 contract but have not been confirmed
-against the service.
+Live-provider-tested (2026-08-03): a real text search against
+``places.googleapis.com/v1`` returned and parsed 8 UK businesses. Pagination
+past page 1 and the details pass are implemented but were not exercised live.
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from titan.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +183,18 @@ class GooglePlacesProvider:
         self._base_url = base_url.rstrip("/")
         self._client = client
         self._max_retries = max_retries
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> GooglePlacesProvider:
+        """Build from configuration.
+
+        The unwrapping of the SecretStr happens here, inside the provider
+        module, so that callers never hold a raw key -- the repository
+        invariant test enforces that boundary.
+        """
+        if settings.google_places_api_key is None:
+            raise PlacesError("TITAN_GOOGLE_PLACES_API_KEY is not configured")
+        return cls(settings.google_places_api_key.get_secret_value())
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:

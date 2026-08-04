@@ -13,6 +13,7 @@ finding is a false statement about a real business.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from titan.contracts.evidence import CrawlResult, PageEvidence, finding_fingerprint
 from titan.db.enums import FindingCategory, Severity, VerificationMethod
@@ -66,7 +67,7 @@ class DetectedFinding:
 SMALL, MEDIUM, LARGE = "small", "medium", "large"
 
 
-def _f(**kwargs) -> DetectedFinding:
+def _f(**kwargs: Any) -> DetectedFinding:
     return DetectedFinding(**kwargs)
 
 

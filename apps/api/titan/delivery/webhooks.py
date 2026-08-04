@@ -156,7 +156,7 @@ async def _store_event(
         return False
 
     stmt = (
-        pg_insert(ProviderEvent.__table__)
+        pg_insert(ProviderEvent.__table__)  # type: ignore[arg-type]
         .values(
             workspace_id=workspace_id,
             provider=event.provider,
@@ -229,7 +229,8 @@ async def _apply_state(
         .where(Message.id == message.id, Message.state_rank <= incoming_rank)
         .values(**values)
     )
-    return result.rowcount > 0
+    # CursorResult exposes rowcount; the Result protocol does not.
+    return result.rowcount > 0  # type: ignore[attr-defined]
 
 
 async def _apply_side_effects(

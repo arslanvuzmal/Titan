@@ -185,7 +185,7 @@ async def discover(
     if settings.google_places_api_key is None:
         raise SystemExit("TITAN_GOOGLE_PLACES_API_KEY is not set")
 
-    provider = GooglePlacesProvider(settings.google_places_api_key.get_secret_value())
+    provider = GooglePlacesProvider.from_settings(settings)
     try:
         result = await provider.search(
             DiscoveryQuery(

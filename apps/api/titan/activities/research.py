@@ -20,7 +20,7 @@ import uuid
 from sqlalchemy import select
 from temporalio import activity
 
-from titan.config import get_settings
+from titan.config import OperatingMode, Settings, get_settings
 from titan.db.enums import LeadStatus
 from titan.db.models import (
     CampaignPolicy,
@@ -134,9 +134,7 @@ async def requires_human_approval(request: ResearchLeadInput) -> bool:
     return not mode.allows(Capability.AUTO_APPROVE)
 
 
-def _process_mode(settings):
-    from titan.config import OperatingMode
-
+def _process_mode(settings: Settings) -> OperatingMode:
     if not settings.production_sending_enabled:
         return OperatingMode.DRAFT_ONLY
     return OperatingMode.CONTROLLED_AUTOPILOT
@@ -173,7 +171,7 @@ async def record_workflow_event(request: RecordEventInput) -> None:
             await session.flush()
 
         await session.execute(
-            pg_insert(WorkflowEvent.__table__)
+            pg_insert(WorkflowEvent.__table__)  # type: ignore[arg-type]
             .values(
                 workspace_id=workspace_id,
                 workflow_run_id=run.id,

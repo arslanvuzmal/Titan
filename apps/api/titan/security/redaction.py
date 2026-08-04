@@ -50,7 +50,7 @@ SENSITIVE_KEY_PARTS: frozenset[str] = frozenset(
 
 REDACTED = "[REDACTED]"
 
-_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
+_PATTERNS: tuple[tuple[str, re.Pattern[str], str | None], ...] = (
     (
         "BEARER",
         re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/\-]{8,}=*"),
