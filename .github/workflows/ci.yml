@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -107,10 +108,21 @@ jobs:
           python -m titan.cli env-example -o /tmp/env.generated
           diff -u ../../.env.example /tmp/env.generated
 
+      # Audits the resolved dependency set rather than the installed
+      # environment. Auditing the environment means auditing `titan-os` itself,
+      # which is installed with `-e` and is not on PyPI: --strict then fails on
+      # the project, and --skip-editable turns that into a *skip*, which
+      # --strict also fails on.
+      #
+      # --strict is kept, and there is no `|| pip-audit` fallback. The previous
+      # fallback re-ran the same audit without --strict, so a genuine
+      # resolution failure ended green -- a step that cannot fail is not an
+      # audit.
       - name: Dependency audit
         run: |
           uv pip install --system pip-audit
-          pip-audit --strict --ignore-vuln GHSA-4xh5-x5gv-qwph || pip-audit
+          uv pip compile pyproject.toml --extra dev -o /tmp/titan-requirements.txt
+          pip-audit --strict -r /tmp/titan-requirements.txt             --ignore-vuln GHSA-4xh5-x5gv-qwph
 
   browser-worker:
     name: Browser worker
@@ -152,7 +164,24 @@ jobs:
       # No `version:` here on purpose: package.json already pins
       # packageManager, and specifying both is a hard error in this action.
       - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
-      - run: pnpm install --no-frozen-lockfile
+      # Frozen. A lockfile that CI is allowed to ignore is not a lockfile;
+      # this used to be --no-frozen-lockfile because the browser worker (an
+      # npm project) was in the pnpm workspace and its entries went stale.
+      # Vercel reads packageManager from the Root Directory (apps/web), not
+      # from the repository root, and silently falls back to pnpm 8 without it
+      # -- which cannot read a lockfileVersion 9 lockfile. Both must agree.
+      - name: packageManager is pinned identically in root and apps/web
+        working-directory: .
+        run: |
+          root=$(node -p "require('./package.json').packageManager")
+          web=$(node -p "require('./apps/web/package.json').packageManager")
+          if [ "$root" != "$web" ]; then
+            echo "::error::packageManager differs: root=$root apps/web=$web"
+            exit 1
+          fi
+          echo "packageManager pinned at $root in both"
+
+      - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm exec eslint . --max-warnings 0
       - name: Type check
@@ -187,22 +216,51 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+
+      # Push only from the default branch of this repository. A pull request
+      # from a fork must never be able to publish an image under our name, and
+      # `github.event_name` is the only thing that distinguishes them.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build API image
         uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
         with:
           context: .
           file: apps/api/Dockerfile
-          push: false
+          # Loaded locally on every run so the assertions below still execute
+          # on a pull request, where nothing is pushed.
           load: true
-          tags: titan-api:ci
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # Immutable digest-pinned tag plus a moving one. Deployments pin
+          # sha-<commit>; `latest` is for convenience only and must not be what
+          # a production compose references.
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/titan-api:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/titan-api:latest
+            titan-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build browser worker image
         uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
         with:
           context: apps/browser-worker
           file: apps/browser-worker/Dockerfile
-          push: false
           load: true
-          tags: titan-browser-worker:ci
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/titan-browser-worker:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/titan-browser-worker:latest
+            titan-browser-worker:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: API image runs as non-root
         run: |
           uid=$(docker run --rm --entrypoint id titan-api:ci -u)
@@ -211,3 +269,22 @@ jobs:
             exit 1
           fi
           echo "API image uid=$uid"
+
+      - name: Browser worker image runs as non-root
+        run: |
+          uid=$(docker run --rm --entrypoint id titan-browser-worker:ci -u)
+          if [ "$uid" = "0" ]; then
+            echo "::error::browser worker image runs as root"
+            exit 1
+          fi
+          echo "browser worker uid=$uid"
+
+      # The compiler is a build-time tool. Finding it in the runtime image
+      # means the two-stage build has collapsed back into one.
+      - name: Browser worker image ships no compiler
+        run: |
+          if docker run --rm --entrypoint sh titan-browser-worker:ci                -c "test -d node_modules/typescript"; then
+            echo "::error::typescript is present in the runtime image"
+            exit 1
+          fi
+          echo "runtime image contains no compiler"

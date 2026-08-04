@@ -3,6 +3,33 @@
 # This image deliberately receives NO database, email, or model credentials.
 # It is the only component that fetches attacker-controlled URLs, so a full
 # browser escape yields nothing that can send mail or read tenant data.
+#
+# Two stages, so the TypeScript compiler never reaches the runtime image. The
+# previous single-stage build installed production dependencies, then tried to
+# add the compiler with `npm install --no-save typescript` and invoke it with
+# `npx tsc`. Neither worked: --no-save under NODE_ENV=production was a no-op,
+# and `npx tsc` then downloaded and executed an unrelated registry package
+# named `tsc` -- a build-time supply-chain hazard as well as a failure.
+
+# ---------------------------------------------------------------- build stage
+FROM mcr.microsoft.com/playwright:v1.49.1-noble AS builder
+
+WORKDIR /app
+
+# NODE_ENV is deliberately not "production" here: the compiler is a
+# devDependency and has to be installed.
+COPY package.json package-lock.json* ./
+RUN npm ci --include=dev --no-audit --no-fund
+
+COPY tsconfig.json ./
+COPY src ./src
+COPY fixtures ./fixtures
+
+# The project's own typescript, resolved from node_modules. Nothing is fetched
+# at build time beyond the locked dependency set.
+RUN ./node_modules/.bin/tsc -p tsconfig.json
+
+# -------------------------------------------------------------- runtime stage
 FROM mcr.microsoft.com/playwright:v1.49.1-noble
 
 ENV NODE_ENV=production \
@@ -10,16 +37,13 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
+# `npm ci` with no fallback. A lockfile that disagrees with package.json is a
+# reproducibility failure and must fail the build rather than quietly resolve
+# to whatever the registry offers today.
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund
+RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY tsconfig.json ./
-COPY src ./src
-COPY fixtures ./fixtures
-
-RUN npm install --no-save typescript@5.7.2 \
- && npx tsc -p tsconfig.json \
- && npm prune --omit=dev
+COPY --from=builder /app/dist ./dist
 
 # The playwright base image ships a non-root `pwuser`.
 USER pwuser

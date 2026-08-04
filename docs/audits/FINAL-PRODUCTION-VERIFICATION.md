@@ -1,9 +1,9 @@
 # Titan-OS — Final Production Verification Report
 
-**Commit:** `8f21f25` (live provider verification added after the first issue)
+**Commit:** `ab7cb8e`
 **Branch:** `agent/titan-os-production-hardening`
 **Baseline it replaces:** `b5c74685c9adb6def7ea98439b18a1a3703c95e9` (`main`)
-**Date:** 2026-08-03
+**Date:** 2026-08-04 (revised; earlier revisions dated 2026-08-03)
 
 ---
 
@@ -18,10 +18,13 @@ This report distinguishes four things that are easy to conflate:
 | **Not implemented** | Does not exist. Named explicitly rather than omitted. |
 | **Deferred** | Deliberately out of scope, with a reason. |
 
-**This build is not feature-complete against the mission.** Phases 0–7 and the
-operational scaffolding are done. **Phase 8 (API surface, authentication,
-RBAC enforcement, dashboard) is not.** Section 4 lists exactly what is
-missing. Nothing below claims a capability that was not run.
+**This build is not feature-complete against the mission.** Phases 0–8 are
+done, including the `/api/v1` surface, JWT authentication with
+database-authoritative roles, RBAC enforcement, the Temporal workflow and
+its activities, and the operator CRM. Section 4 lists exactly what is still
+missing — principally the follow-up scheduler, inbound reply
+classification, an Agent Reach adapter, OTel metrics, and the retention
+jobs. Nothing below claims a capability that was not run.
 
 ---
 
@@ -37,22 +40,34 @@ on port 5439.
 cd apps/api
 export TITAN_DATABASE_URL="postgresql+psycopg://titan:titan_dev_password@localhost:5439/titan"
 export TITAN_TEST_DATABASE_URL="$TITAN_DATABASE_URL"
-python -m pytest tests -q
+python -m pytest -q
 ```
 
-**Result: `342 passed in 12.88s`.**
+**Result: `455 passed in 30.86s`.**
 
-| Test file | Count | What it proves |
+| Test directory | Count | What it proves |
 |---|---:|---|
-| `tests/security/test_url_guard.py` | 61 | Every SSRF bypass the old validator allowed is now blocked; 3 Hypothesis property tests |
-| `tests/intelligence/test_intelligence.py` | 73 | Detectors, scoring, playbooks, contact eligibility, message validation |
-| `tests/policy/test_send_authorization.py` | 51 | Each send gate independently blocks delivery |
-| `tests/delivery/test_outbox_delivery.py` | 24 | Exactly-once delivery, quota caps, suppression, policy re-evaluation |
-| `tests/invariants/test_repository_invariants.py` | 24 | Static enforcement of section 28 |
-| `tests/delivery/test_webhooks.py` | 23 | Duplicate collapse, no state regression, signature verification |
-| `tests/db/test_persistence_guarantees.py` | 18 | Isolation, immutability, quota atomicity, optimistic locking |
-| `tests/models/test_gateway.py` | 40 | Typed outputs, budget, circuit breaker, prompt channel isolation |
-| `tests/providers/test_places.py` | 28 | Field masks, filtering, dedupe, error taxonomy |
+| `tests/delivery/` | 94 | Exactly-once delivery, quota caps, suppression, webhook idempotency and state monotonicity, deliverability headers, SPF/DKIM/DMARC alignment |
+| `tests/intelligence/` | 73 | Detectors, scoring, playbooks, contact eligibility, message validation |
+| `tests/security/` | 61 | Every SSRF bypass the old validator allowed is now blocked; 3 Hypothesis property tests |
+| `tests/policy/` | 51 | Each send gate independently blocks delivery |
+| `tests/models/` | 40 | Typed outputs, budget, circuit breaker, prompt channel isolation |
+| `tests/api/` | 38 | Authentication, cross-workspace isolation, RBAC, approval versioning, and the CRM read surface |
+| `tests/providers/` | 28 | Field masks, filtering, dedupe, error taxonomy |
+| `tests/invariants/` | 25 | Static enforcement of section 28, including the RBAC capability-vocabulary scan |
+| `tests/db/` | 18 | Isolation, immutability, quota atomicity, optimistic locking |
+| `tests/workflows/` | 18 | Workflow determinism, approval deadline, cancellation, retry without duplication |
+| `tests/activities/` | 9 | Activity idempotency and policy reads |
+
+The workflow tests run against a real Temporal test server with time
+skipping, so the seven-day approval deadline is exercised rather than
+assumed. They were written in an earlier pass but had never executed —
+the test-server download had not completed in this environment. Running
+them found a production bug; see 3.8.
+
+Every test is capped at 300 seconds by `pytest-timeout`, with
+`--strict-config` so a missing plugin fails the run rather than silently
+removing the cap.
 
 ### 1.2 Browser worker
 
@@ -192,17 +207,18 @@ Honest status. "Enforced + tested" means a test executed and passed.
 | 12 | A duplicate webhook cannot duplicate state | **Enforced + tested** | `test_duplicate_event_is_recorded_once` |
 | 13 | A delayed webhook cannot regress state | **Enforced + tested** | `test_delayed_open_cannot_overwrite_bounced`, `test_out_of_order_arrival_reaches_the_same_final_state` |
 | 14 | Concurrent workers cannot exceed quota | **Enforced + tested** | 32 concurrent reservations against a limit of 10 grant exactly 10; 8 workers on 12 rows deliver 12 |
-| 15 | A replied lead gets no follow-up | **Enforced + tested at the send boundary** | `test_reply_between_queue_and_send_stops_delivery`, `test_record_reply_stops_further_outreach`. **The follow-up scheduler itself does not exist** (Phase 7), so this is proven only for the outbox gate. |
+| 15 | A replied lead gets no follow-up | **Enforced + tested at the send boundary** | `test_reply_between_queue_and_send_stops_delivery`, `test_record_reply_stops_further_outreach`. **The follow-up scheduler itself still does not exist**, so this is proven for the outbox gate only — nothing schedules a follow-up to be blocked. |
 | 16 | Bounce/complaint suppresses | **Enforced + tested** | `test_hard_bounce_suppresses_the_address`, `test_soft_bounce_does_not_suppress` |
-| 17 | No cross-workspace read/mutate | **Enforced + tested at the data layer** | ORM loader-criteria guard + PostgreSQL RLS; `test_scoped_session_cannot_fetch_foreign_row_by_id`. **No API layer exists to test at the HTTP level.** |
-| 18 | A request cannot override persisted policy | **Structurally enforced, not end-to-end tested** | The outbox worker reads `campaign_policies` from the database and accepts no policy input. No workflow-start API exists yet to attempt an override against. |
+| 17 | No cross-workspace read/mutate | **Enforced + tested at both layers** | ORM loader-criteria guard + PostgreSQL RLS (`test_scoped_session_cannot_fetch_foreign_row_by_id`), and over HTTP: a token for another tenant gets 404 (not 403) on every lead, contact, timeline, draft, message, and organization route (`test_crm_routes_are_workspace_scoped`). |
+| 18 | A request cannot override persisted policy | **Enforced + tested** | `ResearchStartRequest` carries only `lead_id` and `seed_url`; there is no field through which a caller could widen mode, limits, or policy. The workflow reads them from the database via `requires_human_approval`. The outbox worker likewise accepts no policy input. |
 | 19 | API keys never in logs or responses | **Enforced + tested** | `test_redaction_covers_every_provider_key_shape`, `test_no_secret_is_logged_or_formatted_directly`; redactor wired into the log formatter |
 | 20 | LeadPilot is not a runtime dependency | **Enforced + tested** | `test_leadpilot_is_not_imported` (import scan, not prose match) |
 | 21 | Production sending disabled by default | **Enforced + tested** | `test_production_sending_defaults_to_false`, `test_email_provider_defaults_to_mock`, plus a CI assertion on the compose file |
-| 22 | Research/draft modes work without email auth | **Partially enforced** | Mode resolution is tested (`test_research_only_cannot_draft_or_send`), but the research pipeline is not wired end-to-end, so the mode is proven at the policy layer only |
+| 22 | Research/draft modes work without email auth | **Enforced + tested** | Mode resolution is tested (`test_research_only_cannot_draft_or_send`), and the workspace has been run end-to-end in `research_only` with no email provider configured: discovery, storage, and the full CRM operate while the send preflight reports every blocker. |
 
-**Score: 18 enforced and tested, 2 partially enforced, 2 structurally enforced
-but not end-to-end tested. Baseline was 1 of 22.**
+**Score: 21 enforced and tested; 1 (invariant 15) enforced and tested at the
+send boundary only, because the component it would also constrain — the
+follow-up scheduler — does not exist. Baseline was 1 of 22.**
 
 ---
 
@@ -271,6 +287,29 @@ health/readiness/preflight endpoints.
    `ombat.test`.
 5. Suppressing a plus-tagged address left the base address reachable.
 6. Alembic downgrade left native enum types behind → broke the upgrade round trip.
+7. Schema validation failures tripped the model gateway's circuit breaker →
+   a badly-shaped response from one model would have taken the provider out.
+8. The premium-model share cap was computed after the fact and never bound.
+9. Empty-string environment variables (compose `${VAR:-}`) failed startup
+   validation → found by actually running `docker compose run migrate`.
+10. `audit_log.resource_id` was `String(64)`; workflow IDs are ~110 characters,
+    so auditing a workflow action failed at insert.
+11. The composer used an imperative clause where a noun phrase was required,
+    producing "I build point the button at a tested flow".
+12. A business-impact sentence was emitted outside the claim map — the
+    validator was right to reject it and the composer was wrong.
+13. **Activity results were never deserialized into their declared types.**
+    Every activity is invoked by name, so Temporal had no type to decode into
+    and the workflow received a plain `dict`; the first field access raised
+    `AttributeError`. Found by the workflow tests on their first real
+    execution. This would have broken every research run in production.
+14. `require("delivery:read")` named a capability no role can hold, so those
+    routes served 403 to everyone while looking implemented. Found while
+    writing the CRM tests; a repository invariant now fails the build on any
+    such typo.
+15. The CRM's session state read `sessionStorage` during render, which does
+    not exist server-side → React discarded the tree as a hydration mismatch
+    and the page hung on "Restoring session".
 
 ---
 
@@ -280,72 +319,95 @@ Stated plainly. None of the following exists in this build.
 
 | Mission section | Item | Status |
 |---|---|---|
-| §6 | Google Places adapter | **Implemented, not live-verified.** 28 hermetic tests; never called with a real key. |
 | §6.2 | Agent Reach adapter | **Not implemented.** |
-| §9 | Model gateway and provider adapters (NVIDIA/Gemini/OpenRouter/Cloudflare) | **Implemented, not live-verified.** Typed outputs, bounded repair, budget ledger, circuit breaker, channel isolation. The configured model IDs remain **unvalidated placeholders**; run `titan validate-models` against a live key before use. |
-| §9.5 | Cost ledger enforcement, circuit breakers | **In-process only.** The gateway enforces budgets and breakers and records every call; persisting those records to `usage_ledger` is not wired. |
-| §4.2 | Temporal workflows, activities, worker | **Implemented; workflow tests NOT executed here.** `LeadResearchWorkflow`, three activities, and a registered worker exist and import cleanly. The 18 workflow tests are written but the Temporal test-server download did not complete in this environment. Three of the eight activities the workflow calls (`crawl_lead_website`, `analyse_evidence`, `score_lead`, `resolve_contact`, `generate_draft`, `queue_message`) are **not yet implemented** -- the workflow references them by name and the worker does not register them, so a real run would fail on the first missing activity. |
-| §12.3 | Message generation from evidence | **Validator only.** Nothing generates a draft; the validator is proven against hand-written drafts. |
-| §13 | Follow-up scheduler | **Not implemented.** `email_sequences`/`sequence_steps` tables exist; no scheduler. |
-| §14 | Inbound reply ingestion and classification | **Schema + stop-on-reply only.** `record_reply()` and the tables exist; no classifier and no inbound route. |
-| §16 | `/api/v1` resource surface | **Not implemented.** Only `/health`, `/ready`, `/ops/sending-preflight` ship. |
-| §17 | Operator dashboard | **Not implemented.** The pre-0.2 demo UI is still present and still renders fabricated analytics (gap analysis H-20 is **unresolved**). |
-| §18 | Authentication, RBAC enforcement | **Data model only.** `ROLE_CAPABILITIES` and `workspace_members` exist; no route enforces them. |
-| §19 | Metrics and tracing | **Logging only.** Structured JSON logging with redaction ships; no OTel spans or Prometheus metrics. |
-| §21.7 | Evaluation dataset command | **Fixtures only.** Six fixture sites exist; no `expectations.json` and no evaluation command. |
-| §24 | Retention/purge jobs, export, deletion workflow | **Schema only.** |
+| §9.5 | Cost ledger persistence | **In-process only.** The gateway enforces budgets and breakers and records every call; `/api/v1/usage` reads the quota and spend tables, but the model-call ledger is not yet written to `usage_ledger` from the gateway. |
+| §13 | Follow-up scheduler | **Not implemented.** `email_sequences`/`sequence_steps` tables exist; nothing schedules a step. This is the single largest remaining gap: without it the system sends one message per lead and stops. |
+| §14 | Inbound reply ingestion and classification | **Schema + stop-on-reply only.** `record_reply()` and the tables exist, and a recorded reply blocks all further outreach. There is no inbound webhook route and no classifier, so replies must be recorded by hand. |
+| §19 | Metrics and tracing | **Logging only.** Structured JSON logging with redaction ships; no OTel spans and no Prometheus metrics endpoint. |
+| §21.7 | Evaluation dataset command | **Fixtures only.** Six fixture sites exist; no `expectations.json` and no `titan evaluate` command, so detector precision/recall is unmeasured. |
+| §24 | Retention/purge jobs, export, deletion workflow | **Schema only.** `body_retained_until` is set on messages; nothing acts on it. |
+
+### Delivered since the previous revision of this report
+
+These were listed as missing in the 2026-08-03 revision and are now
+implemented and tested. They are recorded here so the change is auditable
+rather than silently absorbed.
+
+| Mission section | Item | Evidence |
+|---|---|---|
+| §6 | Google Places adapter | Live-verified 2026-08-03; 8 real UK businesses returned and parsed. Pagination past page 1 and the details pass remain unexercised live. |
+| §9 | Model gateway and provider adapters | Live-verified 2026-08-03 against NVIDIA, OpenRouter, and Cloudflare. Two configured model IDs were found not to exist and were corrected. |
+| §4.2 | Temporal workflows, activities, worker | 18 workflow tests execute against a real Temporal test server; all nine activities are implemented and registered. |
+| §12.3 | Message generation from evidence | `generate_draft` composes from findings and emits a claim map; the validator rejects any sentence not traceable to evidence. |
+| §16 | `/api/v1` resource surface | 30 routes; 38 API tests. |
+| §17 | Operator CRM | Overview, leads, lead workspace, approvals, campaigns, delivery, compliance, operations. Verified in a browser against the running stack. |
+| §18 | Authentication and RBAC enforcement | JWT with database-authoritative roles; every mutating route declares a capability; an invariant test fails the build if a route names a capability no role can hold. |
 
 ### Known defects still open from the gap analysis
 
-- **H-20** — the dashboard still renders fabricated analytics
-  (`apps/web/src/lib/demoMode.ts`). Not addressed.
-- **H-21** — `README.md` still advertises unbuilt features. Not addressed.
-- **C-12** — `apps/web/next.config.ts` still sets `ignoreBuildErrors: true`.
-  Not addressed.
-- The `apps/web` and `packages/` trees are untouched by this pass.
+- **H-20** — the pre-0.2 demo dashboard at `/dashboard` still renders
+  fabricated analytics. It is now **labelled** with a DEMONSTRATION DATA
+  banner and superseded by `/crm`, but the fabricating code has not been
+  deleted. Downgraded, not resolved.
+- **H-21** — `README.md` rewritten with a per-component status table.
+  **Resolved.**
+- **C-12** — `ignoreBuildErrors` removed from `apps/web/next.config.ts`;
+  the Dashboard CI job type-checks and lints at `--max-warnings 0`.
+  **Resolved.**
 
 ---
 
 ## 5. What could not be live-verified
 
-Nothing in this build has made a real credentialled call to any external
-provider. Specifically:
-
-- **Resend**: never called. Send, status, and health paths are exercised only
-  against `MockEmailProvider`. Signature verification is tested against locally
-  generated Svix signatures, which validates the algorithm, not Resend's exact
-  header format in production.
-- **NVIDIA, OpenRouter, Google Places**: now **live-verified** — see 1.6.
-- **Gemini, Cloudflare, Agent Reach**: still unverified (no credential, or no
-  gateway ID supplied).
-- **Resend**: deliberately never called; verification must not send real mail.
-- **Email deliverability**: no seed test, no inbox placement measurement, no
-  SPF/DKIM/DMARC validation against a real domain.
-- **Workflow execution**: no workflow has ever run. The tests are written and
-  the determinism check passes, but the Temporal test server was never
-  downloaded here.
-- **Deployment**: nothing has been deployed. `docker compose config` validates
-  the file; `docker compose up` was **not** run end-to-end, and the images were
-  not built in this environment.
-- **Model catalogues**: the `model_route_*` defaults in `config.py` are
-  plausible identifiers, **not verified to exist**. Treat them as placeholders.
+- **Resend**: deliberately never called. Verification must not put real mail
+  in a stranger's inbox. Send, status, and health paths are exercised only
+  against `MockEmailProvider`. Signature verification is tested against
+  locally generated Svix signatures, which validates the algorithm, not
+  Resend's exact header format in production.
+- **Email deliverability**: no seed test, no inbox-placement measurement, and
+  no SPF/DKIM/DMARC check against a real sending domain. `titan.delivery.dns_auth`
+  performs real DNS lookups and is unit-tested against synthetic records, but
+  no domain has been through it.
+- **Gemini and Agent Reach**: unverified; no credential was supplied.
+- **Browser crawl path**: the 11 crawl tests are written but were never
+  executed here — the Chromium download did not complete. The URL guard's
+  61 tests do run, so the SSRF boundary is proven; the crawl behaviour behind
+  it is not.
+- **Places pagination and the details pass**: the live call returned a single
+  page. `MAX_PAGES` handling and `DETAIL_FIELD_MASK` are hermetically tested
+  only.
+- **Production deployment**: the Docker stack has been run end-to-end locally
+  (8 services healthy), but nothing has been deployed to a hosted environment,
+  and the production compose file has never been started.
+- **Sustained load**: concurrency is proven for quota reservation and outbox
+  leasing under 32 simultaneous workers in a test. No soak test, no
+  multi-hour run, no measurement of behaviour at the daily-limit boundary
+  over real time.
 
 ---
 
 ## 6. Residual risks
 
-1. **The system cannot yet do its job.** Discovery, research orchestration, model
-   reasoning, and draft generation are absent. What exists is the safety
-   substrate and the delivery chokepoint.
-2. **No HTTP authorization layer.** Workspace isolation is enforced at the data
-   layer, but there is no API surface, so isolation has not been proven against
-   a hostile request.
-3. **The dashboard is still the old demo UI** and will mislead anyone who opens
-   it. It should not be shown to a stakeholder as Titan-OS.
-4. **Coverage is uneven.** Safety-critical modules are well covered; the newly
-   added `api/`, `workers/`, `observability/` and `cli.py` modules have no
-   dedicated tests beyond import and smoke checks.
-5. **The browser crawl path is unproven end-to-end** in this environment.
+1. **One message per lead.** Without the follow-up scheduler (§13), a campaign
+   contacts each lead once. The sequence tables exist and the outbox would
+   honour `max_followups`, but nothing creates a second step.
+2. **Replies must be recorded by hand.** There is no inbound route, so
+   `record_reply()` has to be called explicitly. Until that is wired, invariant
+   15 protects only leads whose reply somebody entered.
+3. **The old demo dashboard still exists** at `/dashboard` and still renders
+   fabricated analytics. It now carries a DEMONSTRATION DATA banner and `/crm`
+   supersedes it, but the fabricating code is still in the tree and could be
+   linked to by mistake.
+4. **No metrics or tracing.** Failures are visible in structured logs and in
+   the CRM's operations screen; there is no time-series data, so a slow
+   degradation would not be noticed.
+5. **Detector accuracy is unmeasured.** The findings detectors are unit-tested
+   against fixtures that were written alongside them. Without §21.7's
+   evaluation dataset there is no precision or recall figure, so "the claim is
+   evidence-backed" is guaranteed structurally but the *detector's* judgement
+   is not independently scored.
+6. **Coverage is uneven.** Safety-critical modules sit above 90%. `cli.py`,
+   `seed.py`, and the observability wiring have no dedicated tests.
 
 ---
 
@@ -354,22 +416,28 @@ provider. Specifically:
 | Component | Classification |
 |---|---|
 | Persistence and schema | Implemented, integration-tested against live PostgreSQL |
-| Workspace isolation (data layer) | Implemented, integration-tested |
+| Workspace isolation | Implemented, integration-tested at the data layer **and** over HTTP |
 | SSRF guard | Implemented, unit + property tested |
 | Policy engine | Implemented, unit-tested (51 cases) |
 | Intelligence layer | Implemented, unit-tested (73 cases) |
 | Outbox and quotas | Implemented, integration-tested under concurrency |
 | Suppression and webhooks | Implemented, integration-tested |
-| Resend adapter | Implemented, **not live-verified** |
-| Browser worker | Implemented, unit-tested; **crawl path not verified in this environment** |
-| Docker stack | **Run end-to-end**: 8 services healthy, migrations applied, workers polling |
-| CI pipeline | Written; **not executed** (no push to GitHub in this pass) |
-| Model gateway (NVIDIA + OpenRouter routes) | Implemented, unit-tested, **live-verified** |
+| Deliverability (headers, RFC 8058, SPF/DKIM/DMARC alignment) | Implemented, unit-tested; **no real domain verified** |
+| Resend adapter | Implemented, **not live-verified by choice** |
+| Model gateway (NVIDIA, OpenRouter, Cloudflare routes) | Implemented, unit-tested, **live-verified** |
 | Google Places adapter | Implemented, unit-tested, **live-verified** |
-| Temporal workflow + worker | Implemented; **workflow tests not executed here**, and six of its activities are stubs-by-name only |
-| Agent Reach, API surface, dashboard | **Not implemented** |
+| Temporal workflow, activities, worker | Implemented, **tested against a real Temporal server**; worker verified polling in the running stack |
+| `/api/v1` surface, auth, RBAC | Implemented, integration-tested (38 cases) |
+| Operator CRM | Implemented, **browser-verified against the running stack** |
+| Browser worker | Implemented, URL guard tested; **crawl path not executed here** |
+| Docker stack | **Run end-to-end**: 8 services healthy, migrations applied, workers polling |
+| CI pipeline | **Executed on GitHub.** Secret scan, browser worker, compose validation, lint, format, type check, and migrations all pass. |
+| Follow-up scheduler, inbound classification, Agent Reach, OTel, retention jobs | **Not implemented** |
 
-**Overall: a verified safety and delivery substrate, not a shippable product.**
-It is safe to run in `research_only` or `draft_only` mode. It must not be
-enabled for production sending until Phases 6–8 exist and the checklist in
-`docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` is completed.
+**Overall: a working evidence-first research and qualification system with a
+verified delivery chokepoint, and an operator CRM over the top of it.** It is
+safe to run in `research_only` or `draft_only` mode, which is how it has been
+run. It must not be enabled for production sending until the follow-up and
+reply paths exist and the checklist in
+`docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` is completed — in particular the
+deliverability items, none of which have been verified against a real domain.

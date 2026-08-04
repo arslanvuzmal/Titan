@@ -1,401 +1,184 @@
 'use client';
 
 /**
- * The Titan-OS CRM.
+ * CRM overview.
  *
- * Every figure on this page comes from /api/v1. Nothing is sampled, seeded, or
- * padded — if the backend is unreachable the page says so rather than showing
- * plausible numbers, which is the failure mode the pre-0.2 dashboard had.
+ * Every number here is a live COUNT from /api/v1/stats. There is no derived
+ * "pipeline value", no projected revenue, and no conversion estimate, because
+ * Titan measures page facts and delivery outcomes -- it does not measure
+ * business results, and a dashboard that displays one it did not measure is
+ * the exact failure the pre-0.2 build shipped.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  api,
-  login,
-  type Campaign,
-  type Draft,
-  type Finding,
-  type Lead,
-  type Score,
-  type SendingPreflight,
-  type Workspace,
-} from '@/lib/titan';
+import Link from 'next/link';
+import React from 'react';
+import { Badge, Card, ErrorNote, Spinner, Stat } from '@/components/crm/ui';
+import { useApi } from '@/lib/session';
+import { api } from '@/lib/titan';
 
-const OWNER_EMAIL = 'arslan@arslanvuzmallone.dev';
-const WORKSPACE_SLUG = 'titan';
-
-interface OrgLike {
-  id: string;
-  name: string;
-  domain: string | null;
-  rating: number | null;
-  reviews: number | null;
-}
-
-export default function CrmPage() {
-  const [token, setToken] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [preflight, setPreflight] = useState<SendingPreflight | null>(null);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [selected, setSelected] = useState<Lead | null>(null);
-  const [findings, setFindings] = useState<Finding[]>([]);
-  const [scores, setScores] = useState<Score[]>([]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const t = await login(OWNER_EMAIL, WORKSPACE_SLUG);
-      setToken(t);
-      const [ws, pf, cs, ls, ds] = await Promise.all([
-        api.workspace(t),
-        api.preflight(),
-        api.campaigns(t),
-        api.leads(t),
-        api.drafts(t),
-      ]);
-      setWorkspace(ws);
-      setPreflight(pf);
-      setCampaigns(cs.items);
-      setLeads(ls.items);
-      setDrafts(ds.items);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'unknown error');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const openLead = useCallback(
-    async (lead: Lead) => {
-      if (!token) return;
-      setSelected(lead);
-      setFindings([]);
-      setScores([]);
-      try {
-        const [f, s] = await Promise.all([
-          api.findings(token, lead.id),
-          api.scores(token, lead.id),
-        ]);
-        setFindings(f);
-        setScores(s);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'failed to load lead');
-      }
-    },
-    [token],
-  );
-
-  if (loading) {
-    return <Shell><p className="text-slate-500">Loading from the Titan API…</p></Shell>;
+function Distribution({
+  data,
+  href,
+  emptyLabel,
+}: {
+  data: Record<string, number>;
+  href?: (key: string) => string;
+  emptyLabel: string;
+}) {
+  const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((sum, [, n]) => sum + n, 0);
+  if (entries.length === 0) {
+    return <p className="py-4 text-sm text-slate-500">{emptyLabel}</p>;
   }
-
-  if (error) {
-    return (
-      <Shell>
-        <div className="rounded border-l-4 border-red-500 bg-red-50 p-4">
-          <p className="font-semibold text-red-900">Cannot reach the Titan API</p>
-          <p className="mt-1 font-mono text-sm text-red-800">{error}</p>
-          <p className="mt-3 text-sm text-red-800">
-            This page shows no data rather than sample data. Start the stack with{' '}
-            <code className="rounded bg-red-100 px-1">docker compose up -d</code>.
-          </p>
-          <button
-            onClick={() => void load()}
-            className="mt-3 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
-          >
-            Retry
-          </button>
-        </div>
-      </Shell>
-    );
-  }
-
-  const qualified = leads.filter((l) => l.latest_score !== null && l.latest_score >= 70);
-  const scored = leads.filter((l) => l.latest_score !== null);
-
   return (
-    <Shell>
-      {/* The safety posture is the first thing an operator should see. */}
-      <section
-        className={`mb-6 rounded border-l-4 p-4 ${
-          preflight?.would_send
-            ? 'border-amber-500 bg-amber-50'
-            : 'border-emerald-600 bg-emerald-50'
-        }`}
-      >
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-semibold text-slate-900">
-            Sending: {preflight?.would_send ? 'ARMED' : 'disabled'}
-          </h2>
-          <span className="text-xs uppercase tracking-wide text-slate-600">
-            mode: {workspace?.operating_mode}
-          </span>
-        </div>
-        {preflight && preflight.blockers.length > 0 && (
-          <ul className="mt-2 space-y-1 text-sm text-slate-700">
-            {preflight.blockers.map((b) => (
-              <li key={b}>• {b}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-5">
-        <Stat label="Campaigns" value={campaigns.length} />
-        <Stat label="Leads" value={leads.length} />
-        <Stat label="Scored" value={scored.length} />
-        <Stat label="Qualified (≥70)" value={qualified.length} />
-        <Stat label="Drafts" value={drafts.length} />
-      </section>
-
-      <section className="mb-8">
-        <SectionTitle>Campaigns</SectionTitle>
-        {campaigns.length === 0 ? (
-          <Empty>No campaigns yet.</Empty>
-        ) : (
-          <div className="overflow-x-auto rounded border border-slate-200">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600">
-                <tr>
-                  <Th>Name</Th>
-                  <Th>Industry</Th>
-                  <Th>Status</Th>
-                  <Th>Leads</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map((c) => (
-                  <tr key={c.id} className="border-t border-slate-100">
-                    <Td className="font-medium text-slate-900">{c.name}</Td>
-                    <Td>{c.industry}</Td>
-                    <Td>{c.status}</Td>
-                    <Td>{leads.filter((l) => l.campaign_id === c.id).length}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <section className="mb-8">
-        <SectionTitle>Leads</SectionTitle>
-        {leads.length === 0 ? (
-          <Empty>
-            No leads. Run{' '}
-            <code className="rounded bg-slate-100 px-1">
-              python -m titan.seed --query &quot;dentists in Manchester UK&quot;
-            </code>
-          </Empty>
-        ) : (
-          <div className="overflow-x-auto rounded border border-slate-200">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-slate-600">
-                <tr>
-                  <Th>Lead</Th>
-                  <Th>Status</Th>
-                  <Th>Score</Th>
-                  <Th>Contacted</Th>
-                  <Th>Replied</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((l) => (
-                  <tr
-                    key={l.id}
-                    className={`border-t border-slate-100 ${
-                      selected?.id === l.id ? 'bg-slate-50' : ''
-                    }`}
-                  >
-                    <Td className="font-mono text-xs text-slate-500">
-                      {l.organization_id.slice(0, 8)}
-                    </Td>
-                    <Td>{l.status}</Td>
-                    <Td>
-                      {l.latest_score === null ? (
-                        <span className="text-slate-400">not scored</span>
-                      ) : (
-                        <span className="font-semibold">{l.latest_score}</span>
-                      )}
-                    </Td>
-                    <Td>{l.last_contacted_at ? 'yes' : '—'}</Td>
-                    <Td>{l.replied_at ? 'yes' : '—'}</Td>
-                    <Td>
-                      <button
-                        onClick={() => void openLead(l)}
-                        className="text-sm font-medium text-blue-700 hover:underline"
-                      >
-                        Open
-                      </button>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {selected && (
-        <section className="mb-8 rounded border border-slate-200 p-4">
-          <SectionTitle>Lead workspace</SectionTitle>
-          <p className="mb-3 font-mono text-xs text-slate-500">{selected.id}</p>
-
-          <h4 className="mt-4 font-semibold text-slate-800">Score</h4>
-          {scores.length === 0 ? (
-            <Empty>
-              Not scored yet. Scoring runs as part of research; this lead has only
-              been discovered.
-            </Empty>
-          ) : (
-            <div className="mt-2 text-sm">
-              <p>
-                <span className="text-2xl font-bold">{scores[0].total}</span>{' '}
-                <span className="text-slate-600">
-                  ({scores[0].band}, threshold {scores[0].threshold_applied})
-                </span>
-              </p>
-              <ul className="mt-2 space-y-1 text-slate-700">
-                {scores[0].reasons.map((r) => (
-                  <li key={r}>• {r}</li>
-                ))}
-              </ul>
+    <ul className="space-y-2">
+      {entries.map(([key, count]) => {
+        const row = (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <Badge>{key}</Badge>
+              <span className="text-sm font-semibold tabular-nums text-slate-900">{count}</span>
             </div>
-          )}
-
-          <h4 className="mt-5 font-semibold text-slate-800">
-            Findings ({findings.length})
-          </h4>
-          {findings.length === 0 ? (
-            <Empty>
-              No findings. Titan only records what it measured — a lead that has
-              not been crawled has none, and that is the correct display.
-            </Empty>
-          ) : (
-            <ul className="mt-2 space-y-3">
-              {findings.map((f) => (
-                <li key={f.id} className="rounded border border-slate-200 p-3 text-sm">
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-medium text-slate-900">{f.title}</span>
-                    <span className="text-xs uppercase text-slate-500">
-                      {f.severity} · {(f.confidence * 100).toFixed(0)}%
-                    </span>
-                  </div>
-                  {f.observed_value && (
-                    <p className="mt-1 font-mono text-xs text-slate-600">
-                      observed: {f.observed_value}
-                    </p>
-                  )}
-                  {f.business_impact && (
-                    <p className="mt-1 text-slate-700">{f.business_impact}</p>
-                  )}
-                  <p className="mt-1 text-xs text-slate-500">
-                    verified by {f.verification_method}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
-
-      <section>
-        <SectionTitle>Drafts</SectionTitle>
-        {drafts.length === 0 ? (
-          <Empty>
-            No drafts. A draft is only generated once a lead has evidence-backed
-            findings and an eligible contact.
-          </Empty>
-        ) : (
-          <ul className="space-y-3">
-            {drafts.map((d) => (
-              <li key={d.id} className="rounded border border-slate-200 p-4">
-                <div className="flex items-baseline justify-between">
-                  <span className="font-medium text-slate-900">{d.subject}</span>
-                  <span
-                    className={`text-xs font-semibold ${
-                      d.validation_passed ? 'text-emerald-700' : 'text-red-700'
-                    }`}
-                  >
-                    {d.validation_passed ? 'validated' : 'validation failed'}
-                  </span>
-                </div>
-                <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-slate-700">
-                  {d.body_text}
-                </pre>
-                {d.claim_map.length > 0 && (
-                  <div className="mt-3 border-t border-slate-100 pt-2">
-                    <p className="text-xs font-semibold uppercase text-slate-500">
-                      Claim → evidence
-                    </p>
-                    {d.claim_map.map((c, i) => (
-                      <p key={i} className="mt-1 text-xs text-slate-600">
-                        “{c.sentence.slice(0, 90)}…” → finding{' '}
-                        <code>{c.finding_id.slice(0, 8)}</code> ·{' '}
-                        {c.evidence_ids.length} evidence row(s)
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </Shell>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-slate-800"
+                style={{ width: `${total ? (count / total) * 100 : 0}%` }}
+              />
+            </div>
+          </>
+        );
+        return (
+          <li key={key}>
+            {href ? (
+              <Link href={href(key)} className="block rounded-lg p-1 hover:bg-slate-50">
+                {row}
+              </Link>
+            ) : (
+              row
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+export default function OverviewPage() {
+  const { data, error, loading, reload } = useApi((t) => api.stats(t), []);
+
+  if (loading && !data) return <Spinner label="Loading workspace" />;
+  if (error) return <ErrorNote error={error} onRetry={reload} />;
+  if (!data) return null;
+
+  const awaiting = data.drafts_by_status.awaiting_approval ?? 0;
+  const bounced =
+    (data.messages_by_state.bounced ?? 0) + (data.messages_by_state.complained ?? 0);
+
   return (
-    <main className="mx-auto max-w-6xl p-6">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Titan-OS</h1>
-        <p className="text-sm text-slate-600">
-          Live data from <code>/api/v1</code>. Nothing on this page is sampled.
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold text-slate-900">Overview</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Live counts from the operational database. Nothing on this page is
+          estimated or projected.
         </p>
-      </header>
-      {children}
-    </main>
-  );
-}
+      </div>
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded border border-slate-200 p-3">
-      <p className="text-2xl font-bold text-slate-900">{value}</p>
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Leads" value={data.leads_total} hint={`${data.organizations_total} businesses`} />
+        <Stat
+          label="Awaiting approval"
+          value={awaiting}
+          hint="drafts a human has not yet reviewed"
+          tone={awaiting > 0 ? 'good' : 'neutral'}
+        />
+        <Stat
+          label="Contactable addresses"
+          value={data.eligible_contacts}
+          hint={`of ${data.contacts_total} contacts; pattern guesses excluded`}
+        />
+        <Stat
+          label="Bounced or complained"
+          value={bounced}
+          tone={bounced > 0 ? 'bad' : 'neutral'}
+          hint="reputation-affecting outcomes"
+        />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card title="Pipeline" subtitle="Leads by status">
+          <Distribution
+            data={data.leads_by_status}
+            href={(key) => `/crm/leads?status=${encodeURIComponent(key)}`}
+            emptyLabel="No leads yet. Run discovery to populate the workspace."
+          />
+        </Card>
+
+        <Card title="Qualification" subtitle="Leads by score band">
+          <Distribution
+            data={data.leads_by_band}
+            emptyLabel="No lead has been scored yet."
+          />
+        </Card>
+
+        <Card title="Delivery" subtitle="Messages by state">
+          <Distribution
+            data={data.messages_by_state}
+            emptyLabel="Nothing has been queued for delivery."
+          />
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Evidence" subtitle="What claims can be traced to">
+          <dl className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">Findings</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums">{data.findings_total}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">Evidence rows</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums">{data.evidence_total}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-slate-500">
+            A message sentence may only assert something the recipient can check
+            if it maps to a finding backed by at least one evidence row.
+          </p>
+        </Card>
+
+        <Card title="Sending state" subtitle="Both switches must be on">
+          <dl className="space-y-2 text-sm">
+            <div className="flex items-center justify-between">
+              <dt className="text-slate-600">Operating mode</dt>
+              <dd>
+                <Badge>{data.operating_mode}</Badge>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-slate-600">Delivery authorized</dt>
+              <dd>
+                <Badge tone={data.sending_authorized ? 'good' : 'warn'}>
+                  {data.sending_authorized ? 'yes' : 'no'}
+                </Badge>
+              </dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-slate-600">Suppression entries</dt>
+              <dd className="font-semibold tabular-nums">{data.suppressions_total}</dd>
+            </div>
+            <div className="flex items-center justify-between">
+              <dt className="text-slate-600">Leads that replied</dt>
+              <dd className="font-semibold tabular-nums">{data.replied_total}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-slate-500">
+            &quot;Delivery authorized&quot; is the conjunction of the workspace
+            flag and the process kill switch. Either one off means nothing
+            leaves the building.
+          </p>
+        </Card>
+      </div>
     </div>
   );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h3 className="mb-2 text-lg font-semibold text-slate-900">{children}</h3>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="rounded border border-dashed border-slate-300 p-4 text-sm text-slate-600">
-      {children}
-    </p>
-  );
-}
-
-function Th({ children }: { children?: React.ReactNode }) {
-  return <th className="px-3 py-2 font-medium">{children}</th>;
-}
-
-function Td({ children, className = '' }: { children?: React.ReactNode; className?: string }) {
-  return <td className={`px-3 py-2 ${className}`}>{children}</td>;
 }

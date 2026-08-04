@@ -11,6 +11,7 @@ a real deadline. The activities themselves are covered separately.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 
@@ -42,6 +43,10 @@ from titan.workflows.types import (
     ScoreActivityInput,
     ScoreActivityResult,
 )
+
+#: A test workflow is time-skipped, so anything past this is a stuck run
+#: rather than a slow one.
+WORKFLOW_TIMEOUT = 60.0
 
 TASK_QUEUE = "titan-research-test"
 
@@ -187,7 +192,20 @@ async def run_workflow(
         )
         if signal_after is not None:
             await signal_after(handle)
-        return await handle.result(), handle
+        # Bounded. A bug inside the workflow body is a *workflow task* failure,
+        # which Temporal retries forever by design -- correct in production,
+        # where you deploy a fix and the run resumes, but in a test it hangs the
+        # suite. This turns that into a failure with a usable message.
+        try:
+            result = await asyncio.wait_for(handle.result(), timeout=WORKFLOW_TIMEOUT)
+        except TimeoutError as exc:
+            described = await handle.describe()
+            raise AssertionError(
+                f"workflow did not complete within {WORKFLOW_TIMEOUT}s "
+                f"(status {described.status}); a workflow task is most likely "
+                f"failing and being retried -- check the worker log above"
+            ) from exc
+        return result, handle
 
 
 @pytest.fixture

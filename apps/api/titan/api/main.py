@@ -14,6 +14,7 @@ its database is alive (do not restart it) but not ready (do not route to it).
 from __future__ import annotations
 
 import contextlib
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -100,14 +101,35 @@ app = FastAPI(
 )
 
 app.add_middleware(SecurityHeadersMiddleware)
+#: Exact origins. The wildcard the pre-0.2 build used, combined with
+#: allow_credentials, is the classic over-permissive CORS configuration.
+CORS_ORIGINS = [
+    str(settings.frontend_url).rstrip("/"),
+    *(o.strip().rstrip("/") for o in settings.extra_cors_origins if o.strip()),
+]
+
+#: Vercel preview deployments get a unique hostname each time, so they cannot
+#: be enumerated. The pattern is anchored at both ends and pinned to the
+#: project's own Vercel scope -- `.*\.vercel\.app` would hand a credentialled
+#: origin to anyone who can deploy to Vercel, which is everyone.
+CORS_ORIGIN_REGEX = (
+    rf"^https://[a-z0-9-]+-{re.escape(settings.vercel_preview_scope)}\.vercel\.app$"
+    if settings.vercel_preview_scope
+    else None
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[str(settings.frontend_url).rstrip("/")],
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
-    # Narrowed from the pre-0.2 wildcard, which combined with credentials is
-    # the classic over-permissive CORS configuration.
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Idempotency-Key",
+        "X-Titan-Workspace",
+    ],
     max_age=600,
 )
 

@@ -422,3 +422,80 @@ def test_every_required_capability_exists_in_the_role_vocabulary() -> None:
         "these routes demand a capability no role can hold, so they are "
         f"unreachable: {offenders}"
     )
+
+
+# ==========================================================================
+# Deployment: a stack that looks healthy must actually do the work
+# ==========================================================================
+#: Every long-running process a complete Titan needs. The API and dashboard
+#: alone produce a deployment that serves the CRM and researches nothing.
+REQUIRED_WORKER_COMMANDS = {
+    "titan.workers.outbox",
+    "titan.workers.temporal_worker",
+}
+
+
+def test_the_production_stack_runs_every_worker() -> None:
+    """The production compose shipped for months without a single worker.
+
+    Nothing failed: the API was healthy, the dashboard rendered, and no lead
+    was ever researched and no message ever sent. A missing worker is silent
+    by construction, so it needs a static check rather than a smoke test.
+    """
+    compose = REPO / "deploy" / "docker-compose.prod.yml"
+    if not compose.exists():
+        pytest.skip("no production compose in this tree")
+    text = compose.read_text(encoding="utf-8")
+
+    missing = [c for c in REQUIRED_WORKER_COMMANDS if c not in text]
+    assert not missing, (
+        f"the production stack starts no process running: {sorted(missing)}. "
+        "It would serve the CRM and do no work."
+    )
+    assert "browser-worker:" in text, (
+        "the production stack has no browser worker, so research cannot capture evidence"
+    )
+
+
+def test_the_production_stack_does_not_ship_a_default_password() -> None:
+    """A committed default is a published credential.
+
+    Required secrets use ``${VAR:?...}`` so the stack refuses to start rather
+    than coming up on a value that is in a public repository.
+    """
+    compose = REPO / "deploy" / "docker-compose.prod.yml"
+    if not compose.exists():
+        pytest.skip("no production compose in this tree")
+
+    offenders = [
+        line.strip()
+        for line in compose.read_text(encoding="utf-8").splitlines()
+        if re.search(r"(PASSWORD|SECRET|TOKEN|_KEY)\s*[:=].*\$\{[A-Z_]+:-", line)
+    ]
+    assert not offenders, (
+        f"these give a secret a default value instead of failing closed: {offenders}"
+    )
+
+
+def test_the_browser_worker_gets_no_application_credentials() -> None:
+    """Invariant 3, at the deployment layer.
+
+    The worker is the only component that fetches attacker-controlled URLs.
+    Handing it the application env_file would put database and provider
+    credentials one browser escape away.
+    """
+    compose = REPO / "deploy" / "docker-compose.prod.yml"
+    if not compose.exists():
+        pytest.skip("no production compose in this tree")
+
+    text = compose.read_text(encoding="utf-8")
+    start = text.index("browser-worker:")
+    # Up to the next top-level service definition.
+    rest = text[start:]
+    end = re.search(r"\n  [a-z][a-z-]*:\n", rest)
+    block = rest[: end.start()] if end else rest
+
+    assert "env_file" not in block, (
+        "the browser worker is given the application env_file; it must hold no "
+        "database, email, or model credential"
+    )

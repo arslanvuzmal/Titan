@@ -3,12 +3,9 @@
 import React from 'react';
 import { Search, Bell, HelpCircle, Shield, Sparkles } from 'lucide-react';
 
-interface TopNavbarProps {
-  sidebarOpen: boolean;
-  setSidebarOpen: (val: boolean) => void;
-}
-
-export default function TopNavbar({ sidebarOpen, setSidebarOpen }: TopNavbarProps) {
+// The sidebar toggle lives in Sidebar itself; this bar took the state as
+// props and never used it.
+export default function TopNavbar() {
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 flex items-center justify-between px-6 shrink-0 z-20 shadow-xs">
       {/* Search & Global Filter */}

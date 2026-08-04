@@ -40,6 +40,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
     "hypothesis>=6.112",
     "respx>=0.21",
     "ruff>=0.7",
@@ -119,6 +120,14 @@ ignore_errors = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# A hard backstop. A workflow-task failure inside a Temporal workflow is
+# retried forever by design, which once turned a single broken test into a
+# CI job that hung until the runner timed out. No test may exceed this.
+timeout = 300
+timeout_method = "thread"
+# --strict-config turns a missing pytest-timeout into an immediate error
+# rather than an ignored `timeout` key and a silently unbounded suite.
+addopts = "--strict-config --strict-markers"
 markers = [
     "integration: requires a live PostgreSQL",
     "browser: requires the browser evidence worker",

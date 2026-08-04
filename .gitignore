@@ -26,3 +26,12 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Added by `vercel link`.
+.vercel
+
+# Every local env file. `.env.example` is generated from titan/config.py, is
+# meant to be committed, and CI diffs it against a fresh generation -- so it is
+# explicitly re-included rather than swallowed by the wildcard.
+.env*
+!.env.example

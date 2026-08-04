@@ -177,6 +177,7 @@ class LeadResearchWorkflow:
             request,
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=DB_RETRY,
+            result_type=str,
         )
         await self._record(request, workflow_id, "research.started", {})
 
@@ -199,6 +200,10 @@ class LeadResearchWorkflow:
             # occupy a slot for the full start_to_close timeout.
             heartbeat_timeout=timedelta(seconds=90),
             retry_policy=CRAWL_RETRY,
+            # The activity is referenced by name, so Temporal cannot infer
+            # the return type from the annotation above; without this the
+            # payload arrives as a plain dict.
+            result_type=CrawlActivityResult,
         )
 
         if crawl.status == "blocked":
@@ -244,6 +249,7 @@ class LeadResearchWorkflow:
             ),
             start_to_close_timeout=MODEL_TIMEOUT,
             retry_policy=MODEL_RETRY,
+            result_type=AnalyseActivityResult,
         )
         self._pitchable = analysis.pitchable_findings
 
@@ -271,6 +277,7 @@ class LeadResearchWorkflow:
             ),
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=DB_RETRY,
+            result_type=ScoreActivityResult,
         )
         self._score = score.total
         await self._record(
@@ -302,6 +309,7 @@ class LeadResearchWorkflow:
             ),
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=DB_RETRY,
+            result_type=ContactActivityResult,
         )
         if contact.eligible_channel_id is None:
             self._blocked.extend(contact.rejected_reasons)
@@ -327,6 +335,7 @@ class LeadResearchWorkflow:
             ),
             start_to_close_timeout=MODEL_TIMEOUT,
             retry_policy=MODEL_RETRY,
+            result_type=DraftActivityResult,
         )
         self._draft_id = draft.draft_id
 
@@ -354,6 +363,7 @@ class LeadResearchWorkflow:
             request,
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=DB_RETRY,
+            result_type=bool,
         )
 
         approval_id: str | None = None
@@ -409,6 +419,7 @@ class LeadResearchWorkflow:
             ),
             start_to_close_timeout=DB_TIMEOUT,
             retry_policy=QUEUE_RETRY,
+            result_type=QueueActivityResult,
         )
 
         if not queued.queued:
