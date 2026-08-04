@@ -1,7 +1,15 @@
+# The browser worker is deliberately absent.
+#
+# It is an npm project with its own package-lock.json, installed with `npm ci`
+# in its Dockerfile and in CI. Including it here put its dependencies in the
+# pnpm lockfile too, where they immediately went stale -- which is why CI ran
+# `pnpm install --no-frozen-lockfile`, defeating the point of a lockfile.
+#
+# Keeping it out is also consistent with what it is: an isolated component with
+# no shared dependencies, built and deployed on its own.
 packages:
-  - "apps/*"
+  - "apps/web"
   - "packages/*"
-allowBuilds:
-  '@prisma/client': set this to true or false
-  '@prisma/engines': set this to true or false
-  prisma: set this to true or false
+
+# Prisma is gone (replaced by SQLAlchemy in apps/api). These entries are kept
+# out rather than answered, so a stray Prisma dependency fails loudly.

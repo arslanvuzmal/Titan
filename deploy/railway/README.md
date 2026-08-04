@@ -1,0 +1,248 @@
+# Deploying Titan-OS: Vercel + Railway
+
+The dashboard goes to Vercel. Everything else goes to Railway. This split is
+not a preference — five of the six components cannot run on Vercel:
+
+| Component | Why it needs a container host |
+|---|---|
+| Temporal worker | Polls a task queue continuously; a serverless function has no request to hang that on |
+| Outbox worker | Holds `FOR UPDATE SKIP LOCKED` leases across a loop that must outlive any single request |
+| Browser worker | Playwright + Chromium, and its whole security value is running isolated with no credentials |
+| Temporal server | Stateful, with its own database |
+| PostgreSQL, Redis | Managed data services |
+
+The alternative — one VM running `deploy/docker-compose.prod.yml` — is a
+complete substitute for everything below. Pick one.
+
+---
+
+## Before you start
+
+**Rotate the provider keys first.** Any key that has been pasted into a chat
+window, a terminal transcript, or a support ticket must be treated as public.
+Rotating is minutes; a leaked Places key billed against your account is not.
+
+Decide which of these is true, because it changes what you deploy:
+
+- **Research only** — Titan discovers, crawls, scores, and drafts. Nothing is
+  ever sent. `TITAN_PRODUCTION_SENDING_ENABLED=false`. This is the tested
+  configuration and the one to start with.
+- **Sending enabled** — do not do this yet. Deliverability has never been
+  verified against a real sending domain, and without the follow-up scheduler
+  each lead receives exactly one message. See
+  `docs/PRODUCTION-ENABLEMENT-CHECKLIST.md`.
+
+---
+
+## 1. Clerk
+
+The API refuses to issue its own tokens when `TITAN_ENVIRONMENT=production`,
+so a deployed Titan authenticates through Clerk or not at all.
+
+1. Create a Clerk application. Note the **Frontend API URL** — it looks like
+   `https://something-12.clerk.accounts.dev`. That is the issuer.
+2. In Clerk, add the user who will operate Titan.
+3. Create the matching Titan user *before* first sign-in, with the same email:
+
+   ```sql
+   INSERT INTO users (email, display_name, is_active)
+   VALUES ('you@example.com', 'Your Name', true);
+
+   INSERT INTO workspace_members (workspace_id, user_id, role)
+   SELECT w.id, u.id, 'owner'
+   FROM workspaces w, users u
+   WHERE w.slug = 'titan' AND u.email = 'you@example.com';
+   ```
+
+   Titan provisions nobody implicitly. A valid Clerk token for an unknown
+   subject gets 401 — who may reach this system stays a deliberate act. On
+   first sign-in the Clerk subject is bound to this row, and only if Clerk
+   states the email is verified.
+
+**The role is never read from the token.** It is read from `workspace_members`
+on every request, so revoking a membership takes effect immediately rather
+than when the token expires.
+
+---
+
+## 2. Railway
+
+Create one project with these services. All the `apps/api` services run the
+same image with different start commands.
+
+| Service | Root directory | Start command |
+|---|---|---|
+| `postgres` | Railway Postgres plugin | — |
+| `redis` | Railway Redis plugin | — (optional, see below) |
+| `api` | `apps/api` | `uvicorn titan.api.main:app --host 0.0.0.0 --port $PORT` |
+| `outbox-worker` | `apps/api` | `python -m titan.workers.outbox` |
+| `temporal-worker` | `apps/api` | `python -m titan.workers.temporal_worker` |
+| `browser-worker` | `apps/browser-worker` | `node dist/src/server.js` |
+
+Only `api` gets a public domain. The workers and the browser worker are
+reached over the private network and must not be exposed.
+
+### Temporal
+
+Railway has no Temporal plugin. Either:
+
+- **Temporal Cloud** — set `TITAN_TEMPORAL_HOST` to your namespace endpoint and
+  supply the client certificate. This is the option that does not require you
+  to operate a Temporal cluster.
+- **A Railway service** from `temporalio/auto-setup:1.22.4` with its own
+  Postgres, mirroring the `temporal` and `temporal-postgres` services in
+  `deploy/docker-compose.prod.yml`. Note that image is meant for development;
+  for anything you depend on, use Cloud.
+
+Until Temporal is reachable the `temporal-worker` will restart-loop and no
+research run will progress. The API and CRM work regardless — which is exactly
+the failure mode to watch for, because nothing else looks wrong.
+
+### Migrations
+
+Run once against the deployed database, before the first API start, and again
+after any deploy that adds a migration:
+
+```
+railway run --service api alembic upgrade head
+```
+
+Do not put this in the API start command: several API replicas would race, and
+a failed migration would take the API down with it rather than failing on its
+own.
+
+---
+
+## 3. Environment variables
+
+`.env.example` at the repository root is generated from `titan/config.py` and
+lists all of them. The ones that matter for a deployment:
+
+**Every `apps/api` service** (api and both workers — a worker missing one of
+these fails in a way the API will not show you):
+
+```
+TITAN_ENVIRONMENT=production
+TITAN_DATABASE_URL=${{Postgres.DATABASE_URL}}        # +psycopg, see below
+TITAN_RATE_LIMIT_REDIS_URL=${{Redis.REDIS_URL}}      # optional; see below
+TITAN_AUTH_MODE=clerk
+TITAN_CLERK_ISSUER_URL=https://<your>.clerk.accounts.dev
+TITAN_FRONTEND_URL=https://<your-project>.vercel.app
+TITAN_TEMPORAL_HOST=<temporal endpoint>:7233
+TITAN_BROWSER_WORKER_URL=http://browser-worker.railway.internal:8800
+TITAN_BROWSER_WORKER_TOKEN=<generate a long random value>
+TITAN_PRODUCTION_SENDING_ENABLED=false
+TITAN_GOOGLE_PLACES_API_KEY=<rotated key>
+TITAN_OPENROUTER_API_KEY=<rotated key>
+TITAN_NVIDIA_API_KEY=<rotated key>
+TITAN_SENDER_MAILING_ADDRESS=<a real postal address>
+```
+
+Redis is used only for distributed rate limiting. Leaving
+`TITAN_RATE_LIMIT_REDIS_URL` unset is supported — limits then apply per
+process rather than across replicas, which is fine for a single API instance
+and wrong the moment you scale to two.
+
+Railway's `DATABASE_URL` is `postgresql://`; Titan needs the driver named
+explicitly. Set `TITAN_DATABASE_URL` to the same value with
+`postgresql+psycopg://`, or the API will start on the wrong driver and fail on
+the first query.
+
+**`browser-worker` only:**
+
+```
+BROWSER_WORKER_PORT=8800
+BROWSER_WORKER_TOKEN=<the same value as TITAN_BROWSER_WORKER_TOKEN>
+```
+
+That is the complete list for this service. It is the only component that
+fetches attacker-controlled URLs, so it holds no database URL, no provider key,
+and no email credential — a full browser escape yields nothing that can read
+tenant data or send mail. Do not add variables to it out of convenience.
+
+---
+
+## 4. Vercel
+
+Import the repository and set **Root Directory to `apps/web`**. Everything
+else comes from `apps/web/vercel.json`.
+
+One environment variable:
+
+```
+NEXT_PUBLIC_API_URL=https://<your-api>.up.railway.app
+```
+
+It is `NEXT_PUBLIC_`, so it is compiled into the bundle and visible to anyone
+who opens devtools. That is fine — it is a public API address, and every route
+behind it requires a verified token. Never put a secret behind that prefix.
+
+### Preview deployments
+
+Every Vercel preview gets a unique hostname, so it cannot be listed in the
+API's allowed origins in advance. Set on the API:
+
+```
+TITAN_VERCEL_PREVIEW_SCOPE=<your-project-scope>
+```
+
+which allows `https://<anything>-<scope>.vercel.app` and nothing else. Leaving
+it unset means previews cannot reach the API — the safe default, since
+`*.vercel.app` is an origin anyone in the world can deploy to.
+
+---
+
+## 5. Continuous deployment
+
+- **Vercel** deploys `apps/web` on every push, with a preview per pull request.
+- **CI** publishes `ghcr.io/<owner>/titan-api` and
+  `ghcr.io/<owner>/titan-browser-worker` on every push to `main`, tagged both
+  `sha-<commit>` and `latest`. Pull requests build but never push.
+- **Railway** can watch the repository, or pull the image by tag.
+
+Pin `sha-<commit>` in anything you depend on. `latest` moves under you, so a
+restart six weeks from now silently becomes an upgrade — and you find out
+during whatever caused the restart.
+
+---
+
+## 6. Verify the deployment
+
+In order. Each step fails differently, and a later one passing does not imply
+an earlier one worked.
+
+```bash
+API=https://<your-api>.up.railway.app
+
+# 1. The process is up.
+curl -sf $API/health
+
+# 2. It can reach Postgres and the schema is at a known revision.
+#    Note: /ready checks the database only. Redis being down will not show up
+#    here, and neither will an unreachable Temporal or browser worker.
+curl -s $API/ready | jq
+
+# 3. Sending is blocked, and it says why. Expect would_send: false.
+curl -s $API/ops/sending-preflight | jq
+
+# 4. Auth actually rejects. Expect 401, not 200 and not 500.
+curl -s -o /dev/null -w '%{http_code}\n' $API/api/v1/stats
+```
+
+Then sign in to the Vercel URL and confirm:
+
+- the banner reads **Delivery is blocked** and lists the blockers;
+- **Operations** shows the Temporal worker's runs — if it shows none after a
+  research run, the worker is not connected;
+- **Leads** lists real rows, not an error.
+
+### What "deployed" does not mean
+
+- **Nothing sends.** `TITAN_PRODUCTION_SENDING_ENABLED` is false, and turning
+  it on requires the deliverability work in
+  `docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` first.
+- **Each lead gets one message.** The follow-up scheduler is not built.
+- **Replies must be recorded by hand.** There is no inbound webhook yet, so
+  the stop-on-reply guard only protects leads whose reply somebody entered.
+
+`docs/audits/FINAL-PRODUCTION-VERIFICATION.md` §4 is the full list.

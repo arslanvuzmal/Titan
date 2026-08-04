@@ -1,90 +1,184 @@
-version: '3.8'
+# Self-hosted Titan-OS.
+#
+# This is the single-VM path. The managed path (Vercel for the dashboard,
+# Railway for everything else) is in deploy/railway/README.md; the two are
+# alternatives, not layers.
+#
+# What the previous version of this file got wrong, recorded because a
+# deployment file that looks plausible is worse than one that is obviously
+# incomplete:
+#
+#   * It ran none of the three workers. The API and dashboard came up, the CRM
+#     worked, and nothing was ever researched or sent -- a stack that looks
+#     healthy while doing no work at all.
+#   * postgres:15-alpine, with no pgvector. The schema requires the extension
+#     and everything else is tested on 16.
+#   * Temporal shared the application database, so a Temporal schema upgrade
+#     reached tenant data.
+#   * POSTGRES_PASSWORD defaulted to a literal committed in this file. A
+#     production compose must refuse to start rather than come up on a
+#     published password.
+#
+# Required variables have no defaults on purpose: `${VAR:?message}` aborts with
+# that message instead of starting something half-configured.
 
 services:
   nginx:
     image: nginx:alpine
-    container_name: titan_nginx
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       api:
         condition: service_healthy
-      web:
-        condition: service_healthy
-    networks:
-      - titan_network
+    networks: [titan_network]
 
-  api:
-    image: ghcr.io/arslanvuzmal/titan-api:latest
-    container_name: titan_api
-    restart: unless-stopped
-    env_file:
-      - .env
-    # Do not expose ports to the host; only available within the docker network
-    expose:
-      - "8000"
+  # One-shot. Everything else waits for it, so no process opens a connection
+  # against a schema it does not understand.
+  migrate:
+    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE, e.g. ghcr.io/arslanvuzmal/titan-api:sha-abc1234}
+    restart: "no"
+    env_file: [.env]
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
+    networks: [titan_network]
+
+  api:
+    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    restart: unless-stopped
+    env_file: [.env]
+    # Not published to the host: nginx terminates TLS and is the only ingress.
+    expose: ["8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-    networks:
-      - titan_network
+    networks: [titan_network]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-  web:
-    image: ghcr.io/arslanvuzmal/titan-web:latest
-    container_name: titan_web
-    restart: unless-stopped
-    env_file:
-      - .env
-    expose:
-      - "3000"
-    networks:
-      - titan_network
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: titan_postgres
+  # Leases outbox rows and talks to the email provider. The only component
+  # that holds a delivery credential.
+  outbox-worker:
+    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["python", "-m", "titan.workers.outbox"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [titan_network]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so
+      # it would be permanently unhealthy and restart-looped. `preflight` is
+      # also wrong here -- it exits non-zero whenever sending is blocked,
+      # which is the normal and desired state in research_only mode. This
+      # checks the one dependency the worker genuinely needs.
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
+  temporal-worker:
+    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    restart: unless-stopped
+    env_file: [.env]
+    command: ["python", "-m", "titan.workers.temporal_worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+    networks: [titan_network]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
+  # The only component that fetches attacker-controlled URLs, and the only one
+  # with no database, email, or model credentials. `env_file` is deliberately
+  # absent -- a full browser escape must yield nothing worth having.
+  browser-worker:
+    image: ${TITAN_BROWSER_WORKER_IMAGE:?set TITAN_BROWSER_WORKER_IMAGE}
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-titan}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-titan_secret_password}
+      BROWSER_WORKER_PORT: "8800"
+      BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:?set TITAN_BROWSER_WORKER_TOKEN}
+    expose: ["8800"]
+    networks: [titan_network]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    # pgvector on 16, matching what the schema and the test suite assume.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-titan}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - titan_network
+    networks: [titan_network]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-titan}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Temporal's own database, separate from the application's so a Temporal
+  # schema upgrade cannot touch tenant data.
+  temporal-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
+      POSTGRES_PASSWORD: ${TEMPORAL_POSTGRES_PASSWORD:?set TEMPORAL_POSTGRES_PASSWORD}
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal_postgres_data:/var/lib/postgresql/data
+    networks: [titan_network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    container_name: titan_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
-    networks:
-      - titan_network
+    networks: [titan_network]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -93,24 +187,24 @@ services:
 
   temporal:
     image: temporalio/auto-setup:1.22.4
-    container_name: titan_temporal
     restart: unless-stopped
     environment:
-      - DB=postgresql
-      - DB_PORT=5432
-      - POSTGRES_USER=${POSTGRES_USER:-titan}
-      - POSTGRES_PWD=${POSTGRES_PASSWORD:-titan_secret_password}
-      - POSTGRES_SEEDS=postgres
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: ${TEMPORAL_POSTGRES_USER:-temporal}
+      POSTGRES_PWD: ${TEMPORAL_POSTGRES_PASSWORD:?set TEMPORAL_POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: temporal-postgres
     depends_on:
-      postgres:
+      temporal-postgres:
         condition: service_healthy
-    networks:
-      - titan_network
+    expose: ["7233"]
+    networks: [titan_network]
     healthcheck:
-      test: ["CMD", "tctl", "cluster", "health"]
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
 
 networks:
   titan_network:
@@ -118,4 +212,5 @@ networks:
 
 volumes:
   postgres_data:
+  temporal_postgres_data:
   redis_data:

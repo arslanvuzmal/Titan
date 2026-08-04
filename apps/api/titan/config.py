@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     service_name: str = "titan-api"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     frontend_url: AnyHttpUrl = AnyHttpUrl("http://localhost:3000")
+    #: Additional exact origins allowed to call the API with credentials.
+    #: Comma-separated. Use for a custom domain alongside the canonical one.
+    extra_cors_origins: list[str] = Field(default_factory=list)
+    #: Vercel gives every preview deployment a unique hostname, so a preview
+    #: cannot be listed in advance. Setting this to the project's Vercel scope
+    #: (e.g. "titan-os-arslanvuzmal") allows
+    #: https://<anything>-<scope>.vercel.app -- and nothing else. Left unset,
+    #: no preview origin is allowed, which is the safe default: an attacker who
+    #: can deploy to *.vercel.app must not inherit a credentialled origin.
+    vercel_preview_scope: str | None = None
 
     # --------------------------------------------------------------- database
     database_url: str = (
