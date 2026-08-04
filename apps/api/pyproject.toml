@@ -92,6 +92,7 @@ ignore = [
 "tests/**" = ["S105", "S106", "S311", "DTZ001", "DTZ005"]
 "titan/db/migrations/**" = ["I001", "E402"]
 "titan/cli.py" = ["T20"]
+"titan/seed.py" = ["T20"]  # operator script; printing is the interface
 
 [tool.ruff.format]
 docstring-code-format = true
