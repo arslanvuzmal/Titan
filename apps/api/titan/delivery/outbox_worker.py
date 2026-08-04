@@ -62,7 +62,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import get_sessionmaker
-from titan.delivery import quotas
+from titan.delivery import deliverability, quotas
 from titan.delivery.providers.base import (
     EmailProvider,
     OutboundEmail,
@@ -287,6 +287,29 @@ class OutboxWorker:
             return ProcessResult(row.id, "deferred", outcome.reason)
 
         email = self._render(row, decision)
+
+        # Deliverability is checked at the send boundary, alongside policy.
+        # A message that would be filtered is not "sent with a warning" -- it
+        # is a message that damages the domain for every later message, so it
+        # is stopped here.
+        placement = await self._check_deliverability(session, row, email)
+        if not placement.ok:
+            reasons = "; ".join(s.detail for s in placement.blocking)
+            if any(
+                s.code
+                in {
+                    "warmup_limit_reached",
+                    "complaint_rate_exceeded",
+                    "bounce_rate_exceeded",
+                }
+                for s in placement.blocking
+            ):
+                # Temporary: volume or reputation. Defer rather than discard.
+                await self._defer(session, row, f"deliverability: {reasons}")
+                return ProcessResult(row.id, "deferred", reasons)
+            await self._block(session, row, f"deliverability: {reasons}")
+            return ProcessResult(row.id, "blocked", reasons)
+
         try:
             result = await self._provider.send(email)
         except Exception as exc:  # provider client raised, e.g. process crash
@@ -297,6 +320,88 @@ class OutboxWorker:
             return ProcessResult(row.id, "retried", str(exc))
 
         return await self._record(session, row, result)
+
+    async def _check_deliverability(
+        self, session: AsyncSession, row: OutboxMessage, email: OutboundEmail
+    ) -> deliverability.DeliverabilityReport:
+        """Assess inbox placement for this specific message."""
+        sender = await session.get(SenderIdentity, row.sender_identity_id)
+        now = self._now()
+
+        # Reputation is measured per sending domain over the trailing 30 days:
+        # a fresh window would let a bad week be forgotten too quickly, and a
+        # lifetime window would never recover.
+        since = now - dt.timedelta(days=30)
+        stats = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                      count(*) FILTER (WHERE sent_at IS NOT NULL)      AS sent,
+                      count(*) FILTER (WHERE delivered_at IS NOT NULL) AS delivered,
+                      count(*) FILTER (WHERE bounced_at IS NOT NULL)   AS bounced,
+                      count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
+                      FROM messages
+                     WHERE sender_identity_id = :sender AND created_at >= :since
+                    """
+                ),
+                {"sender": row.sender_identity_id, "since": since},
+            )
+        ).one()
+
+        first_send_at = (
+            await session.execute(
+                text(
+                    "SELECT min(sent_at) FROM messages "
+                    "WHERE sender_identity_id = :sender AND sent_at IS NOT NULL"
+                ),
+                {"sender": row.sender_identity_id},
+            )
+        ).scalar_one_or_none()
+
+        sent_today = int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM messages WHERE sender_identity_id = :s "
+                        "AND sent_at >= :start"
+                    ),
+                    {
+                        "s": row.sender_identity_id,
+                        "start": dt.datetime.combine(
+                            now.date(), dt.time.min, tzinfo=dt.UTC
+                        ),
+                    },
+                )
+            ).scalar_one()
+            or 0
+        )
+
+        headers = dict(email.headers)
+        if email.list_unsubscribe:
+            headers["List-Unsubscribe"] = email.list_unsubscribe
+        if email.list_unsubscribe_post:
+            headers["List-Unsubscribe-Post"] = email.list_unsubscribe_post
+
+        return deliverability.evaluate(
+            deliverability.DeliverabilityContext(
+                subject=email.subject,
+                text_body=email.text_body,
+                html_body=email.html_body,
+                from_name=email.from_name,
+                mailing_address=sender.mailing_address if sender else None,
+                headers=headers,
+                reputation=deliverability.ReputationWindow(
+                    sent=int(stats.sent or 0),
+                    delivered=int(stats.delivered or 0),
+                    hard_bounced=int(stats.bounced or 0),
+                    complained=int(stats.complained or 0),
+                ),
+                first_send_at=first_send_at,
+                sent_today=sent_today,
+                now=now,
+            )
+        )
 
     def _is_temporary(self, decision: Decision) -> bool:
         from titan.policy.engine import DenyCode

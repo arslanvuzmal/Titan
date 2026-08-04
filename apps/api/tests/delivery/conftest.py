@@ -204,7 +204,23 @@ async def build_sendable(
         idempotency_key=f"draft-{tag}",
         status=DraftStatus.APPROVED,
         subject="A broken button on your booking page",
-        body_text="Body with an evidenced observation.",
+        # A realistic, deliverability-compliant body. The stub this replaced was
+        # correctly refused by the deliverability gate: too short, no postal
+        # address in the text. A fixture that could not legitimately be sent
+        # would make every delivery test vacuous.
+        body_text=(
+            "Hi there,\n\n"
+            "On fixture-business.test the booking button returns a 404, so anyone "
+            "who clicks it cannot reach your booking form. That is the step most "
+            "likely to be used by someone ready to act. I build booking and "
+            "follow-up fixes for businesses of this size, and could outline what "
+            "it would take in about ten minutes.\n\n"
+            "Would a short call next week be useful?\n\n"
+            "Arslan Vuzmal Lone\n"
+            "https://arslanvuzmallone.dev\n"
+            "12 Fictional Row, Testville, TE1 1ST\n"
+            "Unsubscribe: https://arslanvuzmallone.dev/unsubscribe\n"
+        ),
         claim_map=[
             {
                 "sentence": "Your booking button returns a 404.",
@@ -272,7 +288,13 @@ async def build_sendable(
             "reply_to": sender.reply_to_email,
             "subject": draft.subject,
             "text_body": draft.body_text,
-            "list_unsubscribe": f"<{sender.unsubscribe_mailto}>",
+            # RFC 8058: an https target plus the -Post header is what renders
+            # Gmail's one-click unsubscribe button.
+            "list_unsubscribe": (
+                "<https://arslanvuzmallone.dev/unsubscribe>, "
+                f"<{sender.unsubscribe_mailto}>"
+            ),
+            "list_unsubscribe_post": "List-Unsubscribe=One-Click",
         },
     )
     session.add(outbox)

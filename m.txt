@@ -1,0 +1,52 @@
+feat(deliverability): authentication verification, required headers, reputation limits, warm-up
+
+Answers "make the mails not go to spam" with the honest version of that: no
+setting guarantees the inbox. Placement is a receiver judgement about domain
+reputation. What is enforceable is removing every known reason to be filtered,
+and refusing to send when the signals that predict filtering go bad.
+
+dns_auth.py replaces the pre-0.2 spf_ok/dkim_ok/dmarc_ok booleans, which a human
+ticked. A checkbox is not verification; the operator ticking it is usually the
+one who misconfigured the record. This resolves the actual TXT records and
+checks:
+  - SPF: present, exactly one (two records is a permerror, worse than none),
+    no +all, within the RFC 7208 ten-lookup limit
+  - DKIM: key present, p= not empty (an empty p= REVOKES the key), 2048-bit,
+    not stuck in t=y test mode
+  - DMARC: present (Gmail and Yahoo require it from bulk senders), valid policy
+  - ALIGNMENT, which most guides omit and which is the usual cause of
+    "everything looks configured but mail still lands in spam": SPF
+    authenticates the envelope sender, not the visible From:. A subdomain setup
+    aligns in relaxed mode and FAILS in strict.
+
+deliverability.py enforces what decides placement once auth passes:
+  - RFC 8058 one-click unsubscribe. Without List-Unsubscribe-Post, Gmail shows
+    no unsubscribe button and the recipient clicks "report spam" instead --
+    the fastest way to destroy a sending domain.
+  - construction: plain-text alternative required, image-only blocked, link
+    density, URL shorteners, shouting subjects, fake Re: subjects, postal
+    address present in the body
+  - reputation: complaint rate pauses at 0.1%, a third of Gmail's published
+    0.3% ceiling, because by the time you measure 0.3% you are already being
+    filtered. Hard bounces pause at 2%. Rates are ignored below 50 sends, or
+    one complaint in ten would pause a healthy campaign.
+  - warm-up: a 20-day volume ramp. A new domain at full volume looks exactly
+    like a compromised one.
+
+Wired into the outbox worker at the send boundary, not offered as advice.
+Reputation and warm-up blocks DEFER; construction and auth failures BLOCK.
+
+The delivery test fixture had to be rewritten: its stub body was correctly
+refused by the new gate (too short, no postal address, no one-click header). A
+fixture that could not legitimately be sent would make every delivery test
+vacuous.
+
+Verified: 419 tests pass, 47 of them new. ruff clean.
+
+Not verified: no message has been sent through a real provider, so none of this
+is confirmed against actual inbox placement. Domain authentication for
+arslanvuzmallone.dev is still unconfigured -- run titan CLI checks after the DNS
+records in docs/PRODUCTION-ENABLEMENT-CHECKLIST.md are published.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PATL2roTVofBaSvu5sfmS9
