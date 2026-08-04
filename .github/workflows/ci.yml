@@ -167,6 +167,20 @@ jobs:
       # Frozen. A lockfile that CI is allowed to ignore is not a lockfile;
       # this used to be --no-frozen-lockfile because the browser worker (an
       # npm project) was in the pnpm workspace and its entries went stale.
+      # Vercel reads packageManager from the Root Directory (apps/web), not
+      # from the repository root, and silently falls back to pnpm 8 without it
+      # -- which cannot read a lockfileVersion 9 lockfile. Both must agree.
+      - name: packageManager is pinned identically in root and apps/web
+        working-directory: .
+        run: |
+          root=$(node -p "require('./package.json').packageManager")
+          web=$(node -p "require('./apps/web/package.json').packageManager")
+          if [ "$root" != "$web" ]; then
+            echo "::error::packageManager differs: root=$root apps/web=$web"
+            exit 1
+          fi
+          echo "packageManager pinned at $root in both"
+
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm exec eslint . --max-warnings 0
