@@ -31,7 +31,7 @@ interface StoredSession {
   slug: string;
 }
 
-interface SessionValue {
+export interface SessionValue {
   token: string | null;
   principal: Principal | null;
   workspace: Workspace | null;
@@ -43,7 +43,7 @@ interface SessionValue {
   can: (...capabilities: string[]) => boolean;
 }
 
-const SessionContext = createContext<SessionValue | null>(null);
+export const SessionContext = createContext<SessionValue | null>(null);
 
 function read(): StoredSession | null {
   if (typeof window === 'undefined') return null;
@@ -55,7 +55,15 @@ function read(): StoredSession | null {
   }
 }
 
-export function SessionProvider({ children }: { children: React.ReactNode }) {
+/**
+ * Local development sessions.
+ *
+ * The token is minted by `/api/v1/auth/token`, which the API refuses to serve
+ * when TITAN_ENVIRONMENT=production. A deployed Titan therefore uses
+ * `ClerkSessionProvider` instead -- there is no configuration under which this
+ * provider talks to a production API.
+ */
+export function LocalSessionProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [principal, setPrincipal] = useState<Principal | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);

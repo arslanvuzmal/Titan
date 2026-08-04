@@ -19,14 +19,16 @@ import datetime as dt
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import lru_cache
 
 import jwt
 from fastapi import Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from titan.api.clerk import ClerkAuthError, ClerkVerifier
 from titan.config import Settings, get_settings
 from titan.db.enums import ROLE_CAPABILITIES, SENSITIVE_CAPABILITIES, WorkspaceRole
-from titan.db.models import User, WorkspaceMember
+from titan.db.models import User, Workspace, WorkspaceMember
 from titan.db.session import get_sessionmaker
 
 
@@ -83,28 +85,23 @@ def issue_token(
     )
 
 
-async def current_principal(
-    request: Request,
-    authorization: str | None = Header(default=None),
-) -> Principal:
-    """Resolve the caller, or reject.
+@lru_cache(maxsize=1)
+def _verifier_for(issuer: str) -> ClerkVerifier:
+    """One verifier per issuer, so the JWKS cache is shared across requests."""
+    return ClerkVerifier(issuer)
 
-    The membership lookup is the point: a token proves *who*, the database
-    decides *what they may do*.
-    """
-    settings = get_settings()
 
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise AuthError("missing bearer token")
-    token = authorization.split(" ", 1)[1].strip()
+def get_clerk_verifier(settings: Settings | None = None) -> ClerkVerifier:
+    settings = settings or get_settings()
+    if settings.clerk_issuer_url is None:
+        raise AuthError("clerk auth is selected but TITAN_CLERK_ISSUER_URL is unset")
+    return _verifier_for(str(settings.clerk_issuer_url))
 
-    if settings.auth_mode != "local":
-        # Clerk verification would slot in here. Refusing is the correct
-        # behaviour until it is implemented -- silently accepting would be worse.
-        raise AuthError(f"auth_mode {settings.auth_mode!r} is not implemented")
+
+def _decode_local(token: str, settings: Settings) -> tuple[uuid.UUID, uuid.UUID]:
+    """Verify a locally-issued token. Returns (user_id, workspace_id)."""
     if settings.local_jwt_secret is None:
         raise AuthError("server authentication is not configured")
-
     try:
         claims = jwt.decode(
             token,
@@ -119,10 +116,107 @@ async def current_principal(
         raise AuthError(f"invalid token: {type(exc).__name__}") from exc
 
     try:
-        user_id = uuid.UUID(claims["sub"])
-        workspace_id = uuid.UUID(claims["ws"])
+        return uuid.UUID(claims["sub"]), uuid.UUID(claims["ws"])
     except (KeyError, ValueError) as exc:
         raise AuthError("malformed token claims") from exc
+
+
+async def _resolve_clerk_user(
+    token: str, settings: Settings, requested_workspace: str | None
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """Verify a Clerk token and map it onto a Titan user and workspace.
+
+    A Clerk token proves an identity at Clerk. It says nothing about which
+    Titan workspace the caller is acting in, so the workspace is chosen here
+    and the membership check downstream is what actually authorizes it.
+    """
+    verifier = get_clerk_verifier(settings)
+    try:
+        identity = verifier.verify(token)
+    except ClerkAuthError as exc:
+        raise AuthError(str(exc)) from exc
+
+    async with get_sessionmaker()() as session:
+        user = (
+            await session.execute(
+                select(User).where(User.external_subject == identity.subject)
+            )
+        ).scalar_one_or_none()
+
+        if user is None and identity.email and identity.email_verified:
+            # First sign-in for an account an operator already created. The
+            # binding is done once, and only on an address Clerk states it has
+            # verified -- an unverified claim would let anyone who can assert
+            # someone's email take over their Titan account.
+            user = (
+                await session.execute(
+                    select(User).where(
+                        func.lower(User.email) == identity.email.strip().lower(),
+                        User.external_subject.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if user is not None:
+                user.external_subject = identity.subject
+                await session.commit()
+
+        if user is None or not user.is_active:
+            # No implicit provisioning. An unknown subject is not an error to
+            # explain in detail -- doing so would confirm which emails exist.
+            raise AuthError("no Titan account is linked to this identity")
+
+        memberships = (
+            await session.execute(
+                select(WorkspaceMember, Workspace)
+                .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+                .where(WorkspaceMember.user_id == user.id)
+            )
+        ).all()
+
+    if not memberships:
+        raise AuthError("this identity has no workspace membership")
+
+    if requested_workspace:
+        wanted = requested_workspace.strip().lower()
+        for _membership, workspace in memberships:
+            if workspace.slug == wanted or str(workspace.id) == wanted:
+                return user.id, workspace.id
+        # Same message as "no membership": distinguishing them would reveal
+        # which workspaces exist.
+        raise AuthError("no active membership for this workspace")
+
+    if len(memberships) > 1:
+        raise AuthError(
+            "this identity belongs to several workspaces; "
+            "send the X-Titan-Workspace header"
+        )
+    return user.id, memberships[0][1].id
+
+
+async def current_principal(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_titan_workspace: str | None = Header(default=None),
+) -> Principal:
+    """Resolve the caller, or reject.
+
+    The membership lookup is the point: a token proves *who*, the database
+    decides *what they may do*. That holds for both auth modes -- the Clerk
+    path returns an identity and nothing else, so a forged or stale role claim
+    has nowhere to enter.
+    """
+    settings = get_settings()
+
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise AuthError("missing bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+
+    if settings.auth_mode == "clerk":
+        user_id, workspace_id = await _resolve_clerk_user(
+            token, settings, x_titan_workspace
+        )
+    else:
+        user_id, workspace_id = _decode_local(token, settings)
 
     async with get_sessionmaker()() as session:
         row = (
@@ -180,6 +274,7 @@ __all__ = [
     "AuthError",
     "Principal",
     "current_principal",
+    "get_clerk_verifier",
     "is_sensitive",
     "issue_token",
     "require",
