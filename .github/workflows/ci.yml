@@ -107,17 +107,21 @@ jobs:
           python -m titan.cli env-example -o /tmp/env.generated
           diff -u ../../.env.example /tmp/env.generated
 
+      # Audits the resolved dependency set rather than the installed
+      # environment. Auditing the environment means auditing `titan-os` itself,
+      # which is installed with `-e` and is not on PyPI: --strict then fails on
+      # the project, and --skip-editable turns that into a *skip*, which
+      # --strict also fails on.
+      #
+      # --strict is kept, and there is no `|| pip-audit` fallback. The previous
+      # fallback re-ran the same audit without --strict, so a genuine
+      # resolution failure ended green -- a step that cannot fail is not an
+      # audit.
       - name: Dependency audit
         run: |
           uv pip install --system pip-audit
-          # --skip-editable: titan-os is installed from this tree with `-e` and
-          # is not on PyPI, so --strict treats "cannot resolve" as a failure and
-          # the job goes red for the project auditing itself.
-          #
-          # The previous `|| pip-audit` fallback re-ran the same audit without
-          # --strict, which turned every real resolution failure green. Removed:
-          # a step that cannot fail is not an audit.
-          pip-audit --strict --skip-editable --ignore-vuln GHSA-4xh5-x5gv-qwph
+          uv pip compile pyproject.toml --extra dev -o /tmp/titan-requirements.txt
+          pip-audit --strict -r /tmp/titan-requirements.txt             --ignore-vuln GHSA-4xh5-x5gv-qwph
 
   browser-worker:
     name: Browser worker
