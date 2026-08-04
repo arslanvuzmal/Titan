@@ -96,7 +96,9 @@ class VersionedMixin:
 
     @declared_attr.directive
     def __mapper_args__(cls) -> dict[str, Any]:
-        return {"version_id_col": cls.__table__.c.version}
+        # __table__ is supplied by the declarative machinery at class
+        # creation time; a mixin cannot declare it.
+        return {"version_id_col": cls.__table__.c.version}  # type: ignore[attr-defined]
 
 
 class WorkspaceScoped:
@@ -128,7 +130,11 @@ class WorkspaceScoped:
         extra = getattr(cls, "__extra_table_args__", ())
         return (
             *extra,
-            Index(f"ix_{cls.__tablename__}_ws_created", "workspace_id", "created_at"),
+            Index(
+                f"ix_{cls.__tablename__}_ws_created",  # type: ignore[attr-defined]
+                "workspace_id",
+                "created_at",
+            ),
         )
 
 

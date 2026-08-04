@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 import jwt
@@ -151,7 +152,7 @@ async def current_principal(
     )
 
 
-def require(*capabilities: str):
+def require(*capabilities: str) -> Callable[..., Awaitable[Principal]]:
     """Dependency factory enforcing capabilities server-side."""
 
     async def _check(

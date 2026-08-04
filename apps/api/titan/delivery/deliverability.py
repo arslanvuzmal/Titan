@@ -337,7 +337,7 @@ def check_message(
                 "Required by CAN-SPAM and expected by filters.",
             )
         )
-    elif mailing_address.strip() not in text_body:
+    elif mailing_address is not None and mailing_address.strip() not in text_body:
         signals.append(
             Signal(
                 "address_not_in_body",

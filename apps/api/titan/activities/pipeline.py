@@ -14,12 +14,14 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from temporalio import activity
 
-from titan.config import get_settings
+from titan.config import Settings, get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
     ContactSource,
@@ -56,9 +58,9 @@ from titan.intelligence.contacts import (
     check_contact_eligibility,
     extract_contacts_from_pages,
 )
-from titan.intelligence.findings import detect_findings
+from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import MessageContext, validate_message
-from titan.intelligence.playbooks import get_playbook, select_offers
+from titan.intelligence.playbooks import Offer, get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
 from titan.providers.browser_client import BrowserWorkerClient
@@ -118,7 +120,11 @@ async def crawl_lead_website(request: CrawlActivityInput) -> CrawlActivityResult
             )
 
         lead = await session.get(Lead, uuid.UUID(request.lead_id))
-        org = await session.get(Organization, lead.organization_id) if lead else None
+        org = (
+            await session.get(Organization, lead.organization_id)
+            if lead is not None
+            else None
+        )
         seed = request.seed_url or (org.website_url if org else "") or ""
         industry = org.industry if org else None
 
@@ -181,7 +187,7 @@ async def _persist_crawl(
             # Immutable, and unique per (crawl_run, url): a retried ingest of
             # the same page collapses rather than duplicating evidence.
             inserted = await session.execute(
-                pg_insert(Page.__table__)
+                pg_insert(Page.__table__)  # type: ignore[arg-type]
                 .values(
                     workspace_id=workspace_id,
                     crawl_run_id=crawl.id,
@@ -211,7 +217,7 @@ async def _persist_crawl(
 
         for artifact in result.artifacts:
             await session.execute(
-                pg_insert(BrowserArtifact.__table__)
+                pg_insert(BrowserArtifact.__table__)  # type: ignore[arg-type]
                 .values(
                     workspace_id=workspace_id,
                     crawl_run_id=crawl.id,
@@ -295,7 +301,7 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
                 fingerprint({"url": (finding.page_url or "").rstrip("/").lower()})
             )
             inserted = await session.execute(
-                pg_insert(AuditFinding.__table__)
+                pg_insert(AuditFinding.__table__)  # type: ignore[arg-type]
                 .values(
                     workspace_id=workspace_id,
                     research_run_id=uuid.UUID(request.research_run_id),
@@ -328,7 +334,7 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
 
             for excerpt, source_url in finding.evidence:
                 await session.execute(
-                    pg_insert(FindingEvidence.__table__)
+                    pg_insert(FindingEvidence.__table__)  # type: ignore[arg-type]
                     .values(
                         workspace_id=workspace_id,
                         finding_id=finding_id,
@@ -344,7 +350,7 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
                 pitchable += 1
 
         await session.execute(
-            ResearchRun.__table__.update()
+            ResearchRun.__table__.update()  # type: ignore[attr-defined]
             .where(ResearchRun.id == uuid.UUID(request.research_run_id))
             .values(findings_count=created, pages_crawled=len(evidence))
         )
@@ -365,8 +371,12 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
 
     async with workspace_session(workspace_id) as session:
         lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
         org = await session.get(Organization, lead.organization_id)
         campaign = await session.get(Campaign, uuid.UUID(request.campaign_id))
+        if org is None or campaign is None:
+            raise ValueError("lead references a missing organization or campaign")
         policy = (
             await session.execute(
                 select(CampaignPolicy).where(
@@ -392,7 +402,7 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
         )
         contact = await session.get(Contact, channel.contact_id) if channel else None
         # Snapshot every attribute needed after the session closes.
-        org_snapshot = {
+        org_snapshot: dict[str, Any] = {
             "industry": org.industry,
             "review_count": org.review_count,
             "rating": org.rating,
@@ -449,7 +459,7 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
             )
         )
         await session.execute(
-            Lead.__table__.update()
+            Lead.__table__.update()  # type: ignore[attr-defined]
             .where(Lead.id == uuid.UUID(request.lead_id))
             .values(
                 latest_score=result.total,
@@ -469,7 +479,7 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
     )
 
 
-def _to_detected(row: AuditFinding):
+def _to_detected(row: AuditFinding) -> DetectedFinding:
     from titan.intelligence.findings import DetectedFinding
 
     return DetectedFinding(
@@ -507,7 +517,11 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
 
     async with workspace_session(workspace_id) as session:
         lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
         org = await session.get(Organization, lead.organization_id)
+        if org is None:
+            raise ValueError("lead references a missing organization")
         policy = (
             await session.execute(
                 select(CampaignPolicy).where(
@@ -590,7 +604,7 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                 continue
 
             inserted = await session.execute(
-                pg_insert(ContactChannel.__table__)
+                pg_insert(ContactChannel.__table__)  # type: ignore[arg-type]
                 .values(
                     workspace_id=workspace_id,
                     contact_id=contact_row_id,
@@ -627,7 +641,7 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                 ).scalar_one()
 
             await session.execute(
-                Lead.__table__.update()
+                Lead.__table__.update()  # type: ignore[attr-defined]
                 .where(Lead.id == uuid.UUID(request.lead_id))
                 .values(primary_contact_channel_id=channel_id)
             )
@@ -668,11 +682,17 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             )
 
         lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
         org = await session.get(Organization, lead.organization_id)
+        channel_row = await session.get(
+            ContactChannel, uuid.UUID(request.contact_channel_id)
+        )
+        if org is None or channel_row is None:
+            raise ValueError("draft references a missing organization or channel")
         org_domain = org.canonical_domain or org.display_name
         org_industry = org.industry
-        channel = await session.get(ContactChannel, uuid.UUID(request.contact_channel_id))
-        channel_id = channel.id
+        channel_id = channel_row.id
         campaign_row = await session.get(Campaign, uuid.UUID(request.campaign_id))
         sender_row = (
             await session.get(SenderIdentity, campaign_row.sender_identity_id)
@@ -776,7 +796,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         session.add(draft)
         await session.flush()
         await session.execute(
-            Lead.__table__.update()
+            Lead.__table__.update()  # type: ignore[attr-defined]
             .where(Lead.id == uuid.UUID(request.lead_id))
             .values(
                 status=(
@@ -794,8 +814,14 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
 
 
 def _compose(
-    *, org_domain, finding, offer, settings, mailing_address, evidence_ids: list[str]
-):
+    *,
+    org_domain: str,
+    finding: AuditFinding,
+    offer: Offer | None,
+    settings: Settings,
+    mailing_address: str | None,
+    evidence_ids: list[str],
+) -> tuple[str, str, list[dict[str, Any]]]:
     """Build the message from the evidence.
 
     Deliberately template-driven rather than model-generated in this build: the
@@ -858,7 +884,7 @@ def _compose(
     return subject, body, claim_map
 
 
-def _describe(finding) -> str:
+def _describe(finding: AuditFinding) -> str:
     observed = (finding.observed_value or "").strip()
     mapping = {
         "broken_primary_cta": f"main call-to-action button returns {observed or 'nothing'}",
@@ -900,6 +926,12 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
         channel = await session.get(ContactChannel, draft.contact_channel_id)
         campaign = await session.get(Campaign, draft.campaign_id)
         workspace = await session.get(Workspace, workspace_id)
+        if channel is None or campaign is None:
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=("draft references a missing channel or campaign",),
+            )
         sender = (
             await session.get(SenderIdentity, campaign.sender_identity_id)
             if campaign.sender_identity_id
@@ -985,7 +1017,9 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
         return QueueActivityResult(outbox_id=str(outbox.id), queued=True)
 
 
-ALL_PIPELINE_ACTIVITIES = [
+#: Registered with the Temporal worker. Temporal's decorator returns an
+#: untyped callable, so the element type is widened deliberately.
+ALL_PIPELINE_ACTIVITIES: list[Callable[..., Any]] = [
     crawl_lead_website,
     analyse_evidence,
     score_lead,

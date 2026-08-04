@@ -243,6 +243,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         "titan/delivery/providers/resend.py",
         "titan/models/providers.py",  # build_providers hands keys to clients
         "titan/providers/browser_client.py",  # bearer token for the worker
+        "titan/providers/places.py",  # from_settings() builds the Places client
         "titan/api/security.py",  # signs and verifies session tokens
         "titan/workers/outbox.py",
         "titan/cli.py",
@@ -382,3 +383,42 @@ def test_safety_critical_entry_points_exist(module: str, symbol: str) -> None:
     import importlib
 
     assert hasattr(importlib.import_module(module), symbol)
+
+
+# ==========================================================================
+# RBAC: every capability a route demands must actually be grantable
+# ==========================================================================
+def test_every_required_capability_exists_in_the_role_vocabulary() -> None:
+    """A typo in ``require(...)`` denies everyone, silently.
+
+    ``require("delivery:read")`` compiles, imports, and serves 403 to every
+    caller including the owner -- the route looks implemented and is
+    unreachable. This scan makes that a build failure instead.
+    """
+    from titan.db.enums import ROLE_CAPABILITIES
+
+    grantable: set[str] = set()
+    for capabilities in ROLE_CAPABILITIES.values():
+        grantable |= set(capabilities)
+
+    offenders: list[str] = []
+    for path in python_sources():
+        tree = parse(path)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Name) and func.id == "require"):
+                continue
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    if arg.value not in grantable:
+                        offenders.append(
+                            f"{path.relative_to(API).as_posix()}:{arg.lineno} "
+                            f"requires {arg.value!r}"
+                        )
+
+    assert not offenders, (
+        "these routes demand a capability no role can hold, so they are "
+        f"unreachable: {offenders}"
+    )

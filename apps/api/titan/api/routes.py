@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy import func, select
 
 from titan.api import audit
+from titan.api.crm import apply_lead_filters, enrich_leads
 from titan.api.schemas import (
     ApprovalDecisionRequest,
     ApprovalOut,
@@ -304,6 +305,8 @@ async def update_policy(
             raise await _not_found("campaign")
 
         workspace = await session.get(Workspace, principal.workspace_id)
+        if workspace is None:
+            raise await _not_found("workspace")
         changes: dict[str, Any] = {}
 
         if payload.operating_mode is not None:
@@ -392,31 +395,63 @@ async def set_sending_authorization(
 # ==========================================================================
 # Leads, findings, evidence, scores
 # ==========================================================================
+#: Sort keys the CRM may order by. An allowlist rather than a raw column name,
+#: so a query parameter can never reach the SQL as an identifier.
+LEAD_SORTS: dict[str, Any] = {
+    "score": Lead.latest_score,
+    "created": Lead.created_at,
+    "contacted": Lead.last_contacted_at,
+    "next_action": Lead.next_action_at,
+}
+
+
 @router.get("/leads", response_model=Page[LeadOut], tags=["leads"])
 async def list_leads(
     principal: Principal = Depends(require("research:read")),
     campaign_id: uuid.UUID | None = None,
     lead_status: str | None = Query(None, alias="status"),
     min_score: int | None = Query(None, ge=0, le=100),
+    max_score: int | None = Query(None, ge=0, le=100),
+    search: str | None = Query(None, alias="q", max_length=200),
+    has_reply: bool | None = None,
+    contacted: bool | None = None,
+    sort: str = Query("score", pattern=r"^(score|created|contacted|next_action)$"),
+    direction: str = Query("desc", pattern=r"^(asc|desc)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> Page[LeadOut]:
+    """The CRM lead list.
+
+    Rows come back enriched with the business, campaign, and activity counts
+    (see :func:`titan.api.crm.enrich_leads`) because a list of bare UUIDs is
+    not something a human can work from.
+    """
+    filters = {
+        "campaign_id": campaign_id,
+        "lead_status": lead_status,
+        "min_score": min_score,
+        "max_score": max_score,
+        "search": search,
+        "has_reply": has_reply,
+        "contacted": contacted,
+    }
     async with workspace_session(principal.workspace_id) as session:
-        stmt = select(Lead)
-        if campaign_id:
-            stmt = stmt.where(Lead.campaign_id == campaign_id)
-        if lead_status:
-            from titan.db.enums import LeadStatus
+        try:
+            stmt = apply_lead_filters(select(Lead), **filters)  # type: ignore[arg-type]
+            count_stmt = apply_lead_filters(
+                select(func.count()).select_from(Lead),
+                **filters,  # type: ignore[arg-type]
+            )
+        except ValueError as exc:  # an unknown status string
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
-            stmt = stmt.where(Lead.status == LeadStatus(lead_status))
-        if min_score is not None:
-            stmt = stmt.where(Lead.latest_score >= min_score)
-
-        total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
+        total = await session.scalar(count_stmt)
+        column = LEAD_SORTS[sort]
+        ordering = column.desc() if direction == "desc" else column.asc()
         rows = (
             (
                 await session.execute(
-                    stmt.order_by(Lead.latest_score.desc().nullslast())
+                    stmt.order_by(ordering.nullslast(), Lead.created_at.desc())
                     .limit(limit)
                     .offset(offset)
                 )
@@ -425,7 +460,7 @@ async def list_leads(
             .all()
         )
         return Page(
-            items=[LeadOut.model_validate(r) for r in rows],
+            items=await enrich_leads(session, rows),
             total=int(total or 0),
             limit=limit,
             offset=offset,
@@ -441,7 +476,7 @@ async def get_lead(
         lead = await session.get(Lead, lead_id)
         if lead is None:
             raise await _not_found("lead")
-        return LeadOut.model_validate(lead)
+        return (await enrich_leads(session, [lead]))[0]
 
 
 @router.get(

@@ -115,7 +115,7 @@ async def suppress(
             )
 
     stmt = (
-        pg_insert(SuppressionEntry.__table__)
+        pg_insert(SuppressionEntry.__table__)  # type: ignore[arg-type]
         .values(
             workspace_id=workspace_id,
             scope=scope,

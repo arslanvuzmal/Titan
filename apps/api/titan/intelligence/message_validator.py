@@ -248,7 +248,12 @@ def _sentences(text: str) -> list[str]:
     return out
 
 
-def _scan(patterns, text: str, code: ViolationCode, detail: str) -> list[Violation]:
+def _scan(
+    patterns: tuple[re.Pattern[str], ...],
+    text: str,
+    code: ViolationCode,
+    detail: str,
+) -> list[Violation]:
     out: list[Violation] = []
     for pattern in patterns:
         match = pattern.search(text)
@@ -305,14 +310,15 @@ def validate_message(ctx: MessageContext) -> ValidationReport:
                 f"expected portfolio link {ctx.portfolio_url}",
             )
         )
-    if not (ctx.mailing_address or "").strip():
+    mailing_address = (ctx.mailing_address or "").strip()
+    if not mailing_address:
         violations.append(
             Violation(
                 ViolationCode.MISSING_MAILING_ADDRESS,
                 "no physical mailing address configured; required in commercial email",
             )
         )
-    elif ctx.mailing_address not in body:
+    elif mailing_address not in body:
         violations.append(
             Violation(
                 ViolationCode.MISSING_FOOTER, "mailing address is not present in the body"
@@ -446,8 +452,8 @@ def _validate_claims(ctx: MessageContext) -> tuple[list[str], list[Violation]]:
         if not _CLAIM_MARKERS.search(sentence):
             continue  # not a factual claim about the recipient
         key = _normalize(sentence)
-        entry = mapped.get(key)
-        if entry is None:
+        claim = mapped.get(key)
+        if claim is None:
             violations.append(
                 Violation(
                     ViolationCode.UNSUPPORTED_CLAIM,
@@ -458,8 +464,8 @@ def _validate_claims(ctx: MessageContext) -> tuple[list[str], list[Violation]]:
             )
             continue
 
-        finding_id = str(entry.get("finding_id") or "")
-        evidence_ids = [str(e) for e in (entry.get("evidence_ids") or [])]
+        finding_id = str(claim.get("finding_id") or "")
+        evidence_ids = [str(e) for e in (claim.get("evidence_ids") or [])]
         if not finding_id:
             violations.append(
                 Violation(

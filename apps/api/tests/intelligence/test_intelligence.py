@@ -457,9 +457,9 @@ def test_undeliverable_service_removes_its_weight() -> None:
     ],
 )
 def test_band_boundaries(total: int, expected: Band) -> None:
-    from titan.intelligence.scoring import _band
+    from titan.intelligence.scoring import band_for
 
-    assert _band(total) is expected
+    assert band_for(total) is expected
 
 
 # ==========================================================================

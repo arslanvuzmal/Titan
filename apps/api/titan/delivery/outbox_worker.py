@@ -33,6 +33,7 @@ import os
 import random
 import socket
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import select, text, update
@@ -96,7 +97,7 @@ class OutboxWorker:
         settings: Settings | None = None,
         *,
         owner: str | None = None,
-        now_fn=None,
+        now_fn: Callable[[], dt.datetime] | None = None,
     ) -> None:
         self._provider = provider
         self._settings = settings or get_settings()
@@ -175,8 +176,20 @@ class OutboxWorker:
         lead = await session.get(Lead, row.lead_id)
         draft = await session.get(MessageDraft, row.draft_id)
         sender = await session.get(SenderIdentity, row.sender_identity_id)
-        if not all((workspace, campaign, lead, draft, sender)):
-            return None, "a referenced record no longer exists"
+        for label, record in (
+            ("workspace", workspace),
+            ("campaign", campaign),
+            ("lead", lead),
+            ("draft", draft),
+            ("sender identity", sender),
+        ):
+            if record is None:
+                return None, f"{label} no longer exists"
+        assert workspace is not None
+        assert campaign is not None
+        assert lead is not None
+        assert draft is not None
+        assert sender is not None
 
         policy = (
             await session.execute(
