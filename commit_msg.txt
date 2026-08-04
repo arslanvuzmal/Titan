@@ -1,0 +1,45 @@
+feat(api): /api/v1 surface with authentication, RBAC, and an audit chain
+
+Phase 8 backend. Addresses gap analysis C-07, C-08, H-10, H-11, H-12.
+
+23 routes: auth, workspace, campaigns + policy, leads, findings, evidence,
+scores, drafts, approvals, suppressions, messages, research runs, workflows,
+usage. Every response is an explicit Pydantic model, so a credential column
+cannot reach a client by being added to a table.
+
+Fixes for what the audit found:
+  - the role is read from workspace_members on EVERY request, not trusted from
+    a JWT claim; revoking a membership or deactivating a user invalidates an
+    unexpired token immediately (both tested)
+  - RBAC is applied, not merely defined: every mutating route declares a
+    capability, and sending:enable belongs to owner alone -- admin does not
+    have it
+  - cross-workspace access returns 404, not 403; a 403 confirms the resource
+    exists, which is an existence oracle
+  - the approvals route no longer swallows its ownership check. It scopes to
+    the workspace, refuses a stale draft_version (so approve-then-edit-then-send
+    cannot bypass review), refuses to approve a draft that failed validation
+    even for a privileged human, and writes an immutable approval
+
+Enabling delivery is its own route, its own capability, and requires a typed
+acknowledgement string, so no casual boolean field can activate live outreach.
+
+A campaign is born in research_only with sending off; the policy route refuses
+any mode more permissive than the workspace ceiling (invariant 18).
+
+Audit entries form a per-workspace hash chain and are written inside the
+caller transaction, so a rolled-back action cannot leave a log claiming it
+happened. Detail is redacted before write.
+
+There is deliberately NO delete route for suppressions.
+
+One real bug found by running it: audit_log.resource_id was String(64), sized
+for a UUID, but a workflow id is ~110 chars. The insert failed and took the
+whole audited action down with it, since the audit write shares the
+transaction. Widened to 255 in migration ab42f11ce875.
+
+Verified: 372 tests pass, including 21 new API tests driving the real ASGI app
+against the real database. ruff clean; alembic check clean.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01PATL2roTVofBaSvu5sfmS9

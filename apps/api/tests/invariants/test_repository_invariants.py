@@ -243,6 +243,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         "titan/delivery/providers/resend.py",
         "titan/models/providers.py",  # build_providers hands keys to clients
         "titan/providers/browser_client.py",  # bearer token for the worker
+        "titan/api/security.py",  # signs and verifies session tokens
         "titan/workers/outbox.py",
         "titan/cli.py",
     }

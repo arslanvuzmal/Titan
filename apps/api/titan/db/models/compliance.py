@@ -173,7 +173,11 @@ class AuditLog(Base, WorkspaceScoped, TimestampMixin, ImmutableMixin):
     id: Mapped[uuid.UUID] = uuid_pk()
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(60), nullable=False)
-    resource_id: Mapped[str | None] = mapped_column(String(64))
+    # 255, not 64: a resource_id is not always a UUID. A workflow id is
+    # "research::<ws>::<campaign>::<lead>", ~110 characters, and a 64-char
+    # column silently failed the insert -- taking the whole audited action
+    # down with it, since the audit write shares the caller's transaction.
+    resource_id: Mapped[str | None] = mapped_column(String(255))
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )

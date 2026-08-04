@@ -1,12 +1,11 @@
 """Titan-OS control-plane HTTP service.
 
-Scope note, stated plainly: this build ships **operational** endpoints --
-health, readiness, and the send-preflight report. The full ``/api/v1`` resource
-surface (campaigns, leads, evidence, approvals) is Phase 8 and is **not
-implemented**; see docs/audits/FINAL-PRODUCTION-VERIFICATION.md. Rather than
-expose stub routes that return plausible-looking empty data -- the exact defect
-the audit found in the pre-0.2 approvals router -- the surface here is limited
-to what genuinely works.
+Ships operational endpoints (health, readiness, send preflight) plus the
+``/api/v1`` resource surface in titan.api.routes.
+
+No route returns plausible-looking empty data on error, which was the defect the
+audit found in the pre-0.2 approvals router: it queried a nonexistent table,
+swallowed the failure, and returned [].
 
 Readiness is deliberately separate from liveness: a service that cannot reach
 its database is alive (do not restart it) but not ready (do not route to it).
@@ -26,6 +25,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from titan import __version__
+from titan.api.routes import router as v1_router
 from titan.config import get_settings
 from titan.db.session import dispose_engine, get_engine
 from titan.observability.logging import configure_logging
@@ -109,6 +109,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
     max_age=600,
 )
+
+
+app.include_router(v1_router)
 
 
 @app.middleware("http")
