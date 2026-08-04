@@ -110,7 +110,14 @@ jobs:
       - name: Dependency audit
         run: |
           uv pip install --system pip-audit
-          pip-audit --strict --ignore-vuln GHSA-4xh5-x5gv-qwph || pip-audit
+          # --skip-editable: titan-os is installed from this tree with `-e` and
+          # is not on PyPI, so --strict treats "cannot resolve" as a failure and
+          # the job goes red for the project auditing itself.
+          #
+          # The previous `|| pip-audit` fallback re-ran the same audit without
+          # --strict, which turned every real resolution failure green. Removed:
+          # a step that cannot fail is not an audit.
+          pip-audit --strict --skip-editable --ignore-vuln GHSA-4xh5-x5gv-qwph
 
   browser-worker:
     name: Browser worker
