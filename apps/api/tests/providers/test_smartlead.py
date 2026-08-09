@@ -33,12 +33,37 @@ from titan.providers.smartlead import (
     SmartleadError,
 )
 
-SINGLE_STEP_CAMPAIGN = {
-    "id": 42,
-    "name": "Titan carrier",
-    "status": "START",
-    "sequences": [{"seq_number": 1, "subject": "{{titan_subject}}"}],
-}
+SINGLE_STEP_CAMPAIGN = {"id": 42, "name": "Titan carrier", "status": "START"}
+
+#: Shaped like the live response. Note that the campaign payload above carries
+#: no sequences: GET /campaigns/{id} does not include them, which is why the
+#: shape check reads /campaigns/{id}/sequences instead.
+ONE_STEP = [
+    {
+        "id": 10112621,
+        "email_campaign_id": 42,
+        "seq_number": 1,
+        "subject": "{{titan_subject}}",
+        "email_body": "{{titan_body}}",
+    }
+]
+
+
+def campaign_routes(sequences: list | None = None, lead_response: dict | None = None):
+    """Handler covering the two GETs the adapter makes, plus the lead import."""
+    seqs = ONE_STEP if sequences is None else sequences
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/sequences"):
+            return httpx.Response(200, json=seqs)
+        if path.endswith("/leads"):
+            return httpx.Response(
+                200, json=lead_response or {"upload_count": 1, "bulk_lead_ids": ["9"]}
+            )
+        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+
+    return handler
 
 
 def client_with(handler) -> SmartleadClient:
@@ -160,15 +185,9 @@ async def test_a_multi_step_campaign_is_refused() -> None:
     drafted, never checked against evidence and never authorized.
     """
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                **SINGLE_STEP_CAMPAIGN,
-                "sequences": [{"seq_number": 1}, {"seq_number": 2}, {"seq_number": 3}],
-            },
-        )
-
+    handler = campaign_routes(
+        sequences=[{"seq_number": 1}, {"seq_number": 2}, {"seq_number": 3}]
+    )
     provider = provider_with(handler)
     ok, detail = await provider.verify_campaign_shape()
 
@@ -183,16 +202,29 @@ async def test_a_multi_step_campaign_is_refused() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_campaign_that_does_not_report_its_shape_is_refused() -> None:
-    """Unknown shape is a refusal, not an assumption."""
+async def test_a_campaign_with_no_sequence_steps_is_refused() -> None:
+    """Nothing to render the message into is a refusal, not an assumption."""
+    ok, detail = await provider_with(
+        campaign_routes(sequences=[])
+    ).verify_campaign_shape()
+
+    assert ok is False
+    assert "no sequence steps" in detail
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_sequence_list_is_refused() -> None:
+    """If the shape cannot be established, the adapter does not send."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"id": 42, "name": "opaque", "status": "START"})
+        if request.url.path.endswith("/sequences"):
+            return httpx.Response(500, text="upstream error")
+        return campaign_routes()(request)
 
     ok, detail = await provider_with(handler).verify_campaign_shape()
 
     assert ok is False
-    assert "unknown" in detail
+    assert "cannot read sequences" in detail
 
 
 # ==========================================================================
@@ -208,8 +240,7 @@ async def test_the_validated_subject_and_body_travel_as_data() -> None:
 
         if request.url.path.endswith("/leads"):
             seen["body"] = jsonlib.loads(request.content)
-            return httpx.Response(200, json={"upload_count": 1, "bulk_lead_ids": ["9"]})
-        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+        return campaign_routes()(request)
 
     result = await provider_with(handler).send(email())
 
@@ -235,7 +266,7 @@ async def test_a_duplicate_import_is_accepted_rather_than_resent() -> None:
             return httpx.Response(
                 200, json={"upload_count": 0, "already_added_to_campaign": 1}
             )
-        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+        return campaign_routes()(request)
 
     result = await provider_with(handler).send(email())
 
@@ -249,7 +280,7 @@ async def test_an_invalid_address_is_a_permanent_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/leads"):
             return httpx.Response(200, json={"upload_count": 0, "invalid_email_count": 1})
-        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+        return campaign_routes()(request)
 
     result = await provider_with(handler).send(email())
 
@@ -263,7 +294,7 @@ async def test_a_rejected_key_stops_without_suppressing_the_recipient() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/leads"):
             return httpx.Response(401, json={"message": "unauthorized"})
-        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+        return campaign_routes()(request)
 
     result = await provider_with(handler).send(email())
 
@@ -278,7 +309,7 @@ async def test_a_transport_failure_is_retryable_not_permanent() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/leads"):
             return httpx.Response(503, text="upstream unavailable")
-        return httpx.Response(200, json=SINGLE_STEP_CAMPAIGN)
+        return campaign_routes()(request)
 
     result = await provider_with(handler).send(email())
 

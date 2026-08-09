@@ -224,6 +224,19 @@ class SmartleadClient:
         )
         return result if isinstance(result, dict) else {}
 
+    async def get_sequences(self, campaign_id: int) -> list[dict[str, Any]]:
+        """The campaign's sequence steps, in Smartlead's own order.
+
+        A separate call on purpose: ``GET /campaigns/{id}`` does **not** include
+        sequences, verified against the live API on 2026-08-09. Reading the
+        campaign payload and finding no steps therefore means "this endpoint
+        does not report them", not "this campaign has none" -- a distinction the
+        carrier-shape check depends on to avoid refusing every campaign.
+        """
+        payload = await self._request("GET", f"/campaigns/{campaign_id}/sequences")
+        rows = payload if isinstance(payload, list) else (payload or {}).get("data", [])
+        return [row for row in rows if isinstance(row, dict)]
+
     async def attach_email_accounts(
         self, campaign_id: int, email_account_ids: list[int]
     ) -> dict[str, Any]:

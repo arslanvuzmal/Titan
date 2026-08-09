@@ -105,20 +105,19 @@ class SmartleadProvider:
         Titan never drafted, never validated against evidence, and never
         authorized -- silently, and outside every gate in this repository.
         """
+        # Read the sequences endpoint, not the campaign payload: the campaign
+        # object does not carry its steps (verified live, 2026-08-09), so
+        # inspecting it would find nothing and refuse every campaign forever.
         try:
-            campaign = await self._client.get_campaign(self._campaign_id)
+            steps = await self._client.get_sequences(self._campaign_id)
         except SmartleadError as exc:
-            return False, f"cannot read campaign {self._campaign_id}: {exc}"
+            return False, f"cannot read sequences for {self._campaign_id}: {exc}"
 
-        steps = campaign.raw.get("sequences") or campaign.raw.get("sequence_count")
-        if isinstance(steps, list):
-            count = len(steps)
-        elif isinstance(steps, int):
-            count = steps
-        else:
+        count = len(steps)
+        if count == 0:
             return False, (
-                f"campaign {self._campaign_id} does not report its sequence steps; "
-                "refusing to send through a campaign whose shape is unknown"
+                f"campaign {self._campaign_id} has no sequence steps; there is "
+                "nothing to render the message into"
             )
 
         if count != 1:
