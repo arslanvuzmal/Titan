@@ -147,6 +147,28 @@ async def reserve_all(
     return QuotaOutcome(granted=True)
 
 
+async def release_all(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    requests: list[QuotaRequest],
+    window_date: dt.date,
+) -> None:
+    """Hand back one unit in every scope, for a send that did not happen.
+
+    Reservation happens *before* the provider call, so without this a message
+    the provider refuses still consumes a send. With a recipient-domain limit of
+    2 per day, one message failing six times would close that domain for the
+    rest of the day while delivering nothing.
+
+    Only a caller that knows nothing was delivered may release. An ambiguous
+    outcome -- a client exception that may have been raised after the provider
+    accepted -- must keep the reservation, because counting a send that happened
+    is far cheaper than not counting one.
+    """
+    await _release(session, workspace_id, requests, window_date)
+
+
 async def _release(
     session: AsyncSession,
     workspace_id: uuid.UUID,
@@ -204,6 +226,7 @@ __all__ = [
     "QuotaRequest",
     "QuotaScope",
     "next_window_start",
+    "release_all",
     "reserve_all",
     "snapshot",
 ]

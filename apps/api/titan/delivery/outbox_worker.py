@@ -294,17 +294,17 @@ class OutboxWorker:
             await self._block(session, row, decision.reason_text())
             return ProcessResult(row.id, "blocked", decision.reason_text())
 
-        outcome = await self._reserve_quota(session, row)
-        if not outcome.granted:
-            await self._defer(session, row, outcome.reason or "quota exhausted")
-            return ProcessResult(row.id, "deferred", outcome.reason)
-
         email = self._render(row, decision)
 
         # Deliverability is checked at the send boundary, alongside policy.
         # A message that would be filtered is not "sent with a warning" -- it
         # is a message that damages the domain for every later message, so it
         # is stopped here.
+        #
+        # This runs *before* the quota reservation on purpose. Quota counts
+        # sends, and a message stopped here is not one; reserving first meant a
+        # blocked message still spent a unit of the workspace, campaign, sender
+        # and recipient-domain allowance for the day.
         placement = await self._check_deliverability(session, row, email)
         if not placement.ok:
             reasons = "; ".join(s.detail for s in placement.blocking)
@@ -323,9 +323,21 @@ class OutboxWorker:
             await self._block(session, row, f"deliverability: {reasons}")
             return ProcessResult(row.id, "blocked", reasons)
 
+        # Last thing before the provider call, so every refusal above this line
+        # costs nothing from the day's allowance.
+        outcome = await self._reserve_quota(session, row)
+        if not outcome.granted:
+            await self._defer(session, row, outcome.reason or "quota exhausted")
+            return ProcessResult(row.id, "deferred", outcome.reason)
+
         try:
             result = await self._provider.send(email)
         except Exception as exc:  # provider client raised, e.g. process crash
+            # The quota reservation is deliberately NOT released here. A client
+            # exception can be raised after the provider accepted the message
+            # (a lost response, a timeout on the read), so this outcome is
+            # ambiguous. Counting a send that happened costs one message of
+            # headroom; not counting one puts real mail over the daily cap.
             logger.warning(
                 "provider raised during send", extra={"outbox_id": str(row.id)}
             )
@@ -423,9 +435,15 @@ class OutboxWorker:
         codes = set(decision.codes)
         return bool(codes) and codes <= temporary
 
-    async def _reserve_quota(
+    async def _quota_requests(
         self, session: AsyncSession, row: OutboxMessage
-    ) -> quotas.QuotaOutcome:
+    ) -> list[quotas.QuotaRequest]:
+        """The four scopes one send consumes.
+
+        Built in one place so a release returns units to exactly the scopes the
+        reservation took them from -- a release that reconstructed the list
+        differently would silently corrupt the counters.
+        """
         settings = self._settings
         policy = (
             await session.execute(
@@ -437,33 +455,47 @@ class OutboxWorker:
         workspace = await session.get(Workspace, row.workspace_id)
         sender = await session.get(SenderIdentity, row.sender_identity_id)
 
+        return [
+            quotas.QuotaRequest(
+                quotas.QuotaScope.WORKSPACE,
+                str(row.workspace_id),
+                workspace.daily_send_limit
+                if workspace
+                else settings.quota_workspace_daily,
+            ),
+            quotas.QuotaRequest(
+                quotas.QuotaScope.CAMPAIGN,
+                str(row.campaign_id),
+                policy.daily_send_limit,
+            ),
+            quotas.QuotaRequest(
+                quotas.QuotaScope.SENDER,
+                str(row.sender_identity_id),
+                sender.daily_send_limit if sender else settings.quota_sender_daily,
+            ),
+            quotas.QuotaRequest(
+                quotas.QuotaScope.RECIPIENT_DOMAIN,
+                row.to_domain,
+                policy.recipient_domain_daily_limit,
+            ),
+        ]
+
+    async def _reserve_quota(
+        self, session: AsyncSession, row: OutboxMessage
+    ) -> quotas.QuotaOutcome:
         return await quotas.reserve_all(
             session,
             workspace_id=row.workspace_id,
-            requests=[
-                quotas.QuotaRequest(
-                    quotas.QuotaScope.WORKSPACE,
-                    str(row.workspace_id),
-                    workspace.daily_send_limit
-                    if workspace
-                    else settings.quota_workspace_daily,
-                ),
-                quotas.QuotaRequest(
-                    quotas.QuotaScope.CAMPAIGN,
-                    str(row.campaign_id),
-                    policy.daily_send_limit,
-                ),
-                quotas.QuotaRequest(
-                    quotas.QuotaScope.SENDER,
-                    str(row.sender_identity_id),
-                    sender.daily_send_limit if sender else settings.quota_sender_daily,
-                ),
-                quotas.QuotaRequest(
-                    quotas.QuotaScope.RECIPIENT_DOMAIN,
-                    row.to_domain,
-                    policy.recipient_domain_daily_limit,
-                ),
-            ],
+            requests=await self._quota_requests(session, row),
+            window_date=self._now().date(),
+        )
+
+    async def _release_quota(self, session: AsyncSession, row: OutboxMessage) -> None:
+        """Give back the reservation for a send the provider refused."""
+        await quotas.release_all(
+            session,
+            workspace_id=row.workspace_id,
+            requests=await self._quota_requests(session, row),
             window_date=self._now().date(),
         )
 
@@ -519,6 +551,11 @@ class OutboxWorker:
                 .values(status=DraftStatus.QUEUED)
             )
             return ProcessResult(row.id, "sent")
+
+        # Nothing below this point was delivered: the provider answered and
+        # refused. Give the reservation back so a rejected message does not
+        # spend one of the day's sends (see quotas.release_all).
+        await self._release_quota(session, row)
 
         # Permanent recipient failure: suppress so no future campaign retries it.
         if result.is_permanent_failure:
