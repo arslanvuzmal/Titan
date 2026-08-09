@@ -138,6 +138,27 @@ TITAN_NVIDIA_API_KEY=<rotated key>
 TITAN_SENDER_MAILING_ADDRESS=<a real postal address>
 ```
 
+**Sending through a mailbox rather than an API provider** (`outbox-worker`
+only — no other service may hold these):
+
+```
+TITAN_EMAIL_PROVIDER=smtp
+TITAN_SMTP_HOST=mail.spacemail.com
+TITAN_SMTP_PORT=465
+TITAN_SMTP_SECURITY=ssl                    # or starttls on 587
+TITAN_SMTP_USERNAME=outreach@example.com
+TITAN_SMTP_PASSWORD=<the mailbox password>
+```
+
+Use a mailbox dedicated to outreach, never the administrative one. Cold email
+earns complaints even when it is done well, and reputation damage lands on the
+mailbox and the domain that sent it -- so the address you rely on for invoices
+and password resets must not be the address that sends campaigns.
+
+`TITAN_SMTP_SECURITY=none` is refused for anything but a loopback host, so a
+misconfiguration cannot put the mailbox password on the wire in clear. Point it
+at Mailpit (`localhost:1025`) to review rendered messages without sending.
+
 Redis is used only for distributed rate limiting. Leaving
 `TITAN_RATE_LIMIT_REDIS_URL` unset is supported — limits then apply per
 process rather than across replicas, which is fine for a single API instance
@@ -241,8 +262,16 @@ Then sign in to the Vercel URL and confirm:
 - **Nothing sends.** `TITAN_PRODUCTION_SENDING_ENABLED` is false, and turning
   it on requires the deliverability work in
   `docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` first.
-- **Each lead gets one message.** The follow-up scheduler is not built.
-- **Replies must be recorded by hand.** There is no inbound webhook yet, so
-  the stop-on-reply guard only protects leads whose reply somebody entered.
+- **Follow-ups are scheduled, not composed.** `titan.intelligence.sequencing`
+  decides which step is owed and when, and the scanner writes `next_action_at`.
+  Composing the follow-up is still the research pipeline's job, so a scheduled
+  step does not become a message until that runs.
+- **Replies are classified, but nothing collects them yet.**
+  `titan.delivery.inbound.ingest_inbound` classifies a message and stops the
+  sequence or suppresses accordingly. No webhook route and no IMAP poller feeds
+  it, so the caller is still whoever hands it an `InboundMessage`.
+- **No mailbox has been verified end to end.** SMTP auth is confirmed against
+  `mail.spacemail.com` for `projects@` and `admin@` only, and no real message
+  has been delivered through it.
 
 `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` §4 is the full list.

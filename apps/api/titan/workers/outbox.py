@@ -51,6 +51,24 @@ def build_provider() -> EmailProvider:
             ),
         )
 
+    if settings.email_provider == "smtp":
+        if settings.smtp_host is None:
+            raise RuntimeError("TITAN_EMAIL_PROVIDER=smtp but TITAN_SMTP_HOST is not set")
+        from titan.delivery.providers.smtp import SmtpProvider
+
+        return SmtpProvider(
+            settings.smtp_host,
+            settings.smtp_port,
+            username=settings.smtp_username,
+            password=(
+                settings.smtp_password.get_secret_value()
+                if settings.smtp_password
+                else None
+            ),
+            security=settings.smtp_security,
+            timeout_seconds=float(settings.smtp_timeout_seconds),
+        )
+
     if settings.email_provider == "smartlead":
         if settings.smartlead_api_key is None:
             raise RuntimeError(

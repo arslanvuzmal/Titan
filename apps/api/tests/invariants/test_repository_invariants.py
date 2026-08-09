@@ -55,6 +55,7 @@ PROVIDER_IMPORT_ALLOWLIST = {
     "titan/delivery/providers/mock.py",
     "titan/delivery/providers/resend.py",
     "titan/delivery/providers/smartlead.py",
+    "titan/delivery/providers/smtp.py",
     "titan/delivery/webhooks.py",  # verification + normalization only
     "titan/workers/outbox.py",  # the outbox worker process entrypoint
     "titan/cli.py",  # health checks and preflight
@@ -64,6 +65,7 @@ PROVIDER_MODULES = (
     "titan.delivery.providers.resend",
     "titan.delivery.providers.mock",
     "titan.delivery.providers.smartlead",
+    "titan.delivery.providers.smtp",
 )
 
 

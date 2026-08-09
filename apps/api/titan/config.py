@@ -142,8 +142,21 @@ class Settings(BaseSettings):
     agent_reach_api_key: SecretStr | None = None
     agent_reach_base_url: AnyHttpUrl | None = None
 
+    # ------------------------------------------------------------------ smtp
+    #: Used both for a real mailbox and for Mailpit, the local capture server
+    #: that accepts everything and delivers nothing. See
+    #: titan.delivery.providers.smtp for what SMTP cannot guarantee.
+    smtp_host: str | None = None
+    smtp_port: Port = 587
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    #: "ssl" (implicit TLS, port 465), "starttls" (port 587), or "none".
+    #: "none" is refused unless the host is loopback -- see the validator.
+    smtp_security: Literal["ssl", "starttls", "none"] = "ssl"
+    smtp_timeout_seconds: int = Field(default=30, ge=5, le=300)
+
     # ---------------------------------------------------------------- email
-    email_provider: Literal["mock", "resend", "smartlead"] = "mock"
+    email_provider: Literal["mock", "resend", "smartlead", "smtp"] = "mock"
     resend_api_key: SecretStr | None = None
     resend_webhook_secret: SecretStr | None = None
 
@@ -220,6 +233,9 @@ class Settings(BaseSettings):
         "resend_api_key",
         "resend_webhook_secret",
         "smartlead_api_key",
+        "smtp_host",
+        "smtp_username",
+        "smtp_password",
         "nvidia_api_key",
         "gemini_api_key",
         "openrouter_api_key",
@@ -264,6 +280,26 @@ class Settings(BaseSettings):
                 "identify and block the crawler"
             )
         return v
+
+    @model_validator(mode="after")
+    def _unencrypted_smtp_only_to_loopback(self) -> Settings:
+        """Cleartext SMTP is permitted only to a local capture server.
+
+        Mailpit speaks plain SMTP on loopback and that is fine -- nothing
+        leaves the machine. The same setting pointed at a real mail host would
+        put the mailbox password and every recipient address on the wire in
+        clear, so it is refused rather than warned about.
+        """
+        if self.smtp_security != "none" or self.smtp_host is None:
+            return self
+        host = self.smtp_host.strip().lower()
+        if host in {"localhost", "127.0.0.1", "::1", "mailpit", "titan-mailpit"}:
+            return self
+        raise ValueError(
+            f"TITAN_SMTP_SECURITY='none' is only allowed for a loopback capture "
+            f"server; host is {self.smtp_host!r}. Use 'ssl' (port 465) or "
+            "'starttls' (port 587) for a real mail server."
+        )
 
     @model_validator(mode="after")
     def _fail_closed_when_deployed(self) -> Settings:
@@ -322,6 +358,8 @@ class Settings(BaseSettings):
             errors.append("TITAN_EMAIL_PROVIDER is 'mock'; no real provider configured")
         if self.email_provider == "resend" and self.resend_api_key is None:
             errors.append("TITAN_RESEND_API_KEY is not set")
+        if self.email_provider == "smtp" and self.smtp_host is None:
+            errors.append("TITAN_SMTP_HOST is not set")
         if self.email_provider == "smartlead":
             if self.smartlead_api_key is None:
                 errors.append("TITAN_SMARTLEAD_API_KEY is not set")

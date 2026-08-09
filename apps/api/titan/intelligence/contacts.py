@@ -27,6 +27,7 @@ from titan.db.enums import (
     ContactSource,
     VerificationStatus,
 )
+from titan.intelligence.mx import MxCheck
 
 #: Local parts that indicate a shared/role mailbox rather than a person.
 ROLE_LOCAL_PARTS: frozenset[str] = frozenset(
@@ -261,12 +262,18 @@ def check_contact_eligibility(
     allowed_sources: frozenset[ContactSource],
     require_verified: bool,
     email: str,
+    mx: MxCheck | None = None,
 ) -> EligibilityResult:
     """Whether an address may receive outreach.
 
     Mirrors the contact checks in the policy engine so the UI can explain a
     blocked lead without running a full send evaluation. The policy engine
     remains authoritative at the send boundary.
+
+    ``mx`` is optional and acts in one direction only. A domain that publishes
+    no route for inbound mail disqualifies every address at it, because sending
+    there produces a hard bounce that costs sender reputation. A *positive* MX
+    result changes nothing -- see :func:`mx_presence_is_not_verification`.
     """
     reasons: list[str] = []
     normalized = normalize_email(email)
@@ -287,6 +294,13 @@ def check_contact_eligibility(
         reasons.append(
             f"verification status {verification.value} does not meet the "
             "campaign's requirement"
+        )
+    # One direction only. A failed lookup is deliberately not a disqualifier:
+    # a resolver having a bad minute must not silently discard good leads.
+    if mx is not None and mx.is_conclusively_undeliverable:
+        reasons.append(
+            f"domain {mx.domain} cannot receive mail ({mx.status.value}); "
+            "sending would hard-bounce"
         )
     return EligibilityResult(eligible=not reasons, reasons=tuple(reasons))
 
