@@ -209,6 +209,22 @@ jobs:
             exit 1
           fi
 
+  # NOTE ON THE BUILD FAILURES ON main (runs up to 2026-08-04)
+  #
+  # The image built fine every time. Publishing it did not:
+  #
+  #   failed to push ghcr.io/<owner>/titan-api:sha-<sha>
+  #   HEAD .../blobs/sha256:... -> 403 Forbidden
+  #
+  # The cause is a repository setting, not this file. Settings -> Actions ->
+  # General -> Workflow permissions was "Read repository contents permission",
+  # and a workflow cannot grant itself more than the repository default allows.
+  # The `permissions: packages: write` block below is necessary but not
+  # sufficient; the repository default must also permit writes.
+  #
+  # This is why the failure looked intermittent and tree-independent: images are
+  # only pushed from main (see `push:` below), so every branch and pull-request
+  # run passes regardless. A green PR does not prove main will build.
   build:
     name: Container builds
     runs-on: ubuntu-latest
@@ -244,10 +260,9 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/titan-api:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/titan-api:latest
             titan-api:ci
-          # Scoped per image. Both builds previously wrote the *default* gha
-          # cache scope, so the two ran over each other's manifests whenever
-          # they overlapped -- which is why an identical tree could build
-          # green on one run and fail on the next with nothing changed.
+          # Scoped per image so the two builds cannot overwrite each other's
+          # cache manifests. Hygiene, not a bug fix -- see the note on this job
+          # about what actually broke the build on main.
           cache-from: type=gha,scope=titan-api
           cache-to: type=gha,mode=max,scope=titan-api
 
