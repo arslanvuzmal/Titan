@@ -51,6 +51,26 @@ def build_provider() -> EmailProvider:
             ),
         )
 
+    if settings.email_provider == "smartlead":
+        if settings.smartlead_api_key is None:
+            raise RuntimeError(
+                "TITAN_EMAIL_PROVIDER=smartlead but TITAN_SMARTLEAD_API_KEY is not set"
+            )
+        if settings.smartlead_campaign_id is None:
+            raise RuntimeError(
+                "TITAN_EMAIL_PROVIDER=smartlead but TITAN_SMARTLEAD_CAMPAIGN_ID is "
+                "not set. Titan will not create a sending campaign implicitly: the "
+                "carrier campaign must be a single-step one an operator has seen."
+            )
+        from titan.delivery.providers.smartlead import SmartleadProvider
+
+        return SmartleadProvider(
+            settings.smartlead_api_key.get_secret_value(),
+            settings.smartlead_campaign_id,
+            base_url=str(settings.smartlead_base_url),
+            timeout_seconds=float(settings.smartlead_timeout_seconds),
+        )
+
     from titan.delivery.providers.mock import MockEmailProvider
 
     return MockEmailProvider()
