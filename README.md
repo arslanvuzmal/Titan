@@ -7,19 +7,25 @@ Titan-OS observes before it pitches, proves before it claims, and refuses to
 send when it cannot show its working. A model can draft a message; only the
 outbox worker can deliver one, and only after every gate has passed.
 
-> **Status: partial build (v0.2.0).** The safety substrate and the delivery
-> chokepoint are implemented and tested. Discovery, model reasoning, durable
-> workflows, the API surface, and the operator dashboard are **not**.
+> **Status: working build, incomplete against the mission (v0.2.0).** Phases 0–8
+> are done: the safety substrate, the delivery chokepoint, discovery, the model
+> gateway, durable workflows, the `/api/v1` surface with authentication and
+> RBAC, and the operator CRM. The follow-up scheduler, inbound reply
+> classification, an Agent Reach adapter, OTel metrics and the retention jobs are
+> **not**.
 > [`docs/audits/FINAL-PRODUCTION-VERIFICATION.md`](docs/audits/FINAL-PRODUCTION-VERIFICATION.md)
 > states exactly what runs, what was tested, and what is missing.
-> Do not enable production sending against this build.
+> Do not enable production sending against this build: without the follow-up and
+> reply paths it contacts each lead once, and no deliverability item has been
+> verified against a real sending domain.
 
 ---
 
 ## Status by component
 
-Labels mean what they say. "Live-verified" would mean a real credentialled call
-was made and its output recorded; **nothing in this build has reached that bar.**
+Labels mean what they say. **Live-verified** means a real credentialled call was
+made and its output recorded — as of 2026-08-03 the model gateway and Google
+Places have reached that bar, and nothing else has.
 
 | Component | Status |
 |---|---|
@@ -30,17 +36,25 @@ was made and its output recorded; **nothing in this build has reached that bar.*
 | Policy engine + 4 operating modes | Implemented · 51 tests |
 | Findings, scoring, playbooks, contact eligibility, message validator | Implemented · 73 tests |
 | Transactional outbox, atomic quotas, suppression | Implemented · integration-tested under concurrency |
-| Resend adapter + webhook verification/ordering | Implemented · **not live-verified** |
+| Resend adapter + webhook verification/ordering | Implemented · **not live-verified by choice** |
+| Smartlead adapter (single-step carrier campaign) + campaign management | Implemented · unit-tested · **not live-verified** |
 | Structured logging with redaction | Implemented |
-| Docker Compose stack, CI, operator CLI | Implemented · compose config validated |
-| Google Places / Agent Reach discovery | **Not implemented** |
-| Model gateway (NVIDIA / Gemini / OpenRouter / Cloudflare) | **Not implemented** |
-| Temporal workflows and worker | **Not implemented** |
-| `/api/v1` resource surface, authentication, RBAC | **Not implemented** (health/ready/preflight only) |
-| Operator dashboard | **Not rebuilt** — still the pre-0.2 demo, and it renders fabricated data |
+| Docker Compose stack, CI, operator CLI | Implemented · stack run end-to-end, 8 services healthy |
+| Google Places discovery | Implemented · **live-verified** |
+| Model gateway (NVIDIA / OpenRouter / Cloudflare routes) | Implemented · **live-verified** |
+| Temporal workflows and worker | Implemented · tested against a real Temporal server |
+| `/api/v1` resource surface, authentication, RBAC | Implemented · 38 integration tests |
+| Operator CRM (`/crm`) | Implemented · browser-verified against the running stack |
+| Agent Reach discovery | **Not implemented** |
+| Follow-up scheduler | **Not implemented** — the largest remaining gap: one message per lead |
+| Inbound reply ingestion and classification | **Schema + stop-on-reply only**; replies must be recorded by hand |
+| Metrics and tracing (OTel/Prometheus) | **Not implemented** — structured logging only |
+| Retention/purge jobs | **Schema only** |
+| Legacy demo dashboard (`/dashboard`) | **Superseded by `/crm`** — still renders fabricated data behind a DEMONSTRATION DATA banner |
 
-**274 Python tests and 14 TypeScript tests pass.** Commands and per-file counts
-are in the verification report.
+**477 Python tests and 14 TypeScript tests pass** (the Python figure excludes the
+18 workflow tests, which need a Temporal test server). Commands and per-directory
+counts are in the verification report.
 
 ---
 
@@ -59,6 +73,10 @@ are in the verification report.
   permit one.
 - **Exactly-once delivery**, proven with 8 concurrent workers and an injected
   mid-send crash.
+- **A campaign platform cannot widen the blast radius.** Titan can deliver
+  through Smartlead, but only via a carrier campaign it checks has exactly one
+  sequence step — a second step would send mail no gate here ever evaluated, so
+  the adapter refuses to run against such a campaign.
 
 ---
 
