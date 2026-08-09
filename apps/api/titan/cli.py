@@ -4,6 +4,8 @@
     titan check-providers  # live health check against configured providers
     titan env-example      # regenerate .env.example from the Settings model
     titan invariants       # print the safety invariants and where each is enforced
+    titan smartlead        # verify the Smartlead connection and carrier campaign,
+                           # or list/manage campaigns and sending accounts
 
 ``env-example`` exists so that the documented environment and the code that
 reads it cannot drift: the file is generated, never hand-maintained, which is
@@ -83,6 +85,17 @@ def cmd_check_providers(_: argparse.Namespace) -> int:
         else:
             print("  resend:        skipped (not configured)")
 
+        if settings.email_provider == "smartlead" and settings.smartlead_api_key:
+            from titan.providers.smartlead import SmartleadClient
+
+            smartlead = SmartleadClient.from_settings(settings)
+            ok, detail = await smartlead.health_check()
+            print(f"  smartlead:     {'ok' if ok else 'FAIL'} - {detail}")
+            failures += 0 if ok else 1
+            await smartlead.aclose()
+        else:
+            print("  smartlead:     skipped (not configured)")
+
         try:
             from sqlalchemy import text
 
@@ -118,6 +131,95 @@ def cmd_check_providers(_: argparse.Namespace) -> int:
     print()
     print("OK" if failures == 0 else f"{failures} check(s) failed")
     return 0 if failures == 0 else 1
+
+
+def cmd_smartlead(args: argparse.Namespace) -> int:
+    """Operator surface for the connected Smartlead account.
+
+    Read-mostly. The one mutating action, ``status``, is the same control an
+    operator has in the Smartlead UI. Nothing here can cause a send: only the
+    outbox worker hands a message over, and only after every gate has passed.
+    """
+    settings = get_settings()
+    if settings.smartlead_api_key is None:
+        print("TITAN_SMARTLEAD_API_KEY is not set. Add it to .env and retry.")
+        return 1
+
+    # Unwrapped once here rather than inside the closure: the None check above
+    # does not narrow across a nested function.
+    api_key = settings.smartlead_api_key.get_secret_value()
+
+    from titan.providers.smartlead import SmartleadClient, SmartleadError
+
+    async def run() -> int:
+        client = SmartleadClient.from_settings(settings)
+        try:
+            if args.action == "campaigns":
+                campaigns = await client.list_campaigns()
+                if not campaigns:
+                    print("No campaigns visible to this key.")
+                    return 0
+                print(f"{'ID':<10} {'STATUS':<10} NAME")
+                for campaign in sorted(campaigns, key=lambda c: c.id):
+                    marker = (
+                        " <- carrier"
+                        if campaign.id == settings.smartlead_campaign_id
+                        else ""
+                    )
+                    print(
+                        f"{campaign.id:<10} {campaign.status:<10} {campaign.name}{marker}"
+                    )
+                return 0
+
+            if args.action == "accounts":
+                accounts = await client.list_email_accounts()
+                if not accounts:
+                    print("No sending accounts on this Smartlead workspace.")
+                    return 0
+                for account in accounts:
+                    print(
+                        f"{account.get('id'):<10} {account.get('from_email', '?')}  "
+                        f"warmup={account.get('warmup_details') is not None}"
+                    )
+                return 0
+
+            if args.action == "status":
+                if args.campaign is None or args.value is None:
+                    print("usage: titan smartlead status --campaign ID --value START")
+                    return 2
+                await client.set_campaign_status(args.campaign, args.value)
+                print(f"campaign {args.campaign} set to {args.value}")
+                return 0
+
+            # verify
+            ok, detail = await client.health_check()
+            print(f"  connection:    {'ok' if ok else 'FAIL'} - {detail}")
+            if not ok:
+                return 1
+            if settings.smartlead_campaign_id is None:
+                print(
+                    "  carrier:       NOT CONFIGURED - set TITAN_SMARTLEAD_CAMPAIGN_ID "
+                    "to a single-step campaign"
+                )
+                return 1
+
+            from titan.delivery.providers.smartlead import SmartleadProvider
+
+            provider = SmartleadProvider(
+                api_key, settings.smartlead_campaign_id, client=client
+            )
+            shape_ok, shape_detail = await provider.verify_campaign_shape()
+            print(f"  carrier shape: {'ok' if shape_ok else 'FAIL'} - {shape_detail}")
+            return 0 if shape_ok else 1
+        except SmartleadError as exc:
+            print(f"FAIL - {exc}")
+            return 1
+        finally:
+            await client.aclose()
+
+    print(f"Titan-OS Smartlead ({settings.environment.value})")
+    configure_event_loop()
+    return asyncio.run(run())
 
 
 def cmd_validate_models(_: argparse.Namespace) -> int:
@@ -263,6 +365,26 @@ def main() -> int:
     sub.add_parser("invariants", help="print safety invariants").set_defaults(
         func=cmd_invariants
     )
+    smartlead_parser = sub.add_parser(
+        "smartlead", help="inspect and manage the connected Smartlead account"
+    )
+    smartlead_parser.add_argument(
+        "action",
+        nargs="?",
+        default="verify",
+        choices=["verify", "campaigns", "accounts", "status"],
+        help="verify the connection and carrier campaign, or list/manage campaigns",
+    )
+    smartlead_parser.add_argument(
+        "--campaign", type=int, default=None, help="campaign id, for 'status'"
+    )
+    smartlead_parser.add_argument(
+        "--value",
+        default=None,
+        choices=["START", "PAUSED", "STOPPED"],
+        help="new status, for 'status'",
+    )
+    smartlead_parser.set_defaults(func=cmd_smartlead)
 
     args = parser.parse_args()
     return int(args.func(args))

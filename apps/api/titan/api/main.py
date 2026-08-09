@@ -93,10 +93,11 @@ settings = get_settings()
 app = FastAPI(
     title="Titan-OS",
     version=__version__,
-    # Docs are disabled in production: the schema describes the safety controls
-    # and there is no reason to publish it to unauthenticated callers.
-    docs_url=None if settings.is_production else "/docs",
-    openapi_url=None if settings.is_production else "/openapi.json",
+    # Docs are disabled wherever the service is deployed: the schema describes
+    # the safety controls and there is no reason to publish it to
+    # unauthenticated callers, on staging any more than on production.
+    docs_url=None if settings.is_deployed else "/docs",
+    openapi_url=None if settings.is_deployed else "/openapi.json",
     lifespan=lifespan,
 )
 

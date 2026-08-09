@@ -54,6 +54,7 @@ PROVIDER_IMPORT_ALLOWLIST = {
     "titan/delivery/providers/base.py",
     "titan/delivery/providers/mock.py",
     "titan/delivery/providers/resend.py",
+    "titan/delivery/providers/smartlead.py",
     "titan/delivery/webhooks.py",  # verification + normalization only
     "titan/workers/outbox.py",  # the outbox worker process entrypoint
     "titan/cli.py",  # health checks and preflight
@@ -62,6 +63,7 @@ PROVIDER_IMPORT_ALLOWLIST = {
 PROVIDER_MODULES = (
     "titan.delivery.providers.resend",
     "titan.delivery.providers.mock",
+    "titan.delivery.providers.smartlead",
 )
 
 
@@ -176,6 +178,40 @@ def test_default_settings_report_blockers_for_sending() -> None:
     assert errors, "default settings claimed sending was permitted"
 
 
+def test_is_deployed_covers_staging_as_well_as_production() -> None:
+    """Staging is a deployed environment, not a local one.
+
+    Controls keyed off ``is_production`` alone (the passwordless local login,
+    the published OpenAPI schema) treated a networked staging host as a
+    developer laptop.
+    """
+    from titan.config import Settings
+
+    assert Settings(environment="local").is_deployed is False
+    assert Settings(environment="test").is_deployed is False
+    for deployed in ("staging", "production"):
+        settings = Settings(
+            environment=deployed,
+            auth_mode="local",
+            local_jwt_secret="not-a-real-secret",
+        )
+        assert settings.is_deployed is True
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_a_deployed_environment_refuses_to_start_without_an_auth_secret(
+    environment: str,
+) -> None:
+    from pydantic import ValidationError
+    from titan.config import Settings
+
+    with pytest.raises(ValidationError, match="TITAN_LOCAL_JWT_SECRET"):
+        Settings(environment=environment, auth_mode="local", local_jwt_secret=None)
+
+    with pytest.raises(ValidationError, match="TITAN_CLERK_ISSUER_URL"):
+        Settings(environment=environment, auth_mode="clerk", clerk_issuer_url=None)
+
+
 def test_operating_mode_defaults_to_the_most_restrictive() -> None:
     from titan.config import OperatingMode
     from titan.db.models import Campaign, CampaignPolicy, Workspace
@@ -244,6 +280,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         "titan/models/providers.py",  # build_providers hands keys to clients
         "titan/providers/browser_client.py",  # bearer token for the worker
         "titan/providers/places.py",  # from_settings() builds the Places client
+        "titan/providers/smartlead.py",  # from_settings() builds the Smartlead client
         "titan/api/security.py",  # signs and verifies session tokens
         "titan/workers/outbox.py",
         "titan/cli.py",

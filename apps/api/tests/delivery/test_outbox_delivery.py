@@ -31,6 +31,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import get_sessionmaker
+from titan.delivery import quotas
 from titan.delivery.outbox_worker import OutboxWorker
 from titan.delivery.providers.base import SendErrorKind
 from titan.delivery.providers.mock import MockEmailProvider
@@ -57,6 +58,19 @@ async def outbox_row(session, outbox_id: uuid.UUID) -> OutboxMessage:
     return (
         await session.execute(select(OutboxMessage).where(OutboxMessage.id == outbox_id))
     ).scalar_one()
+
+
+async def quota_used(
+    session, workspace_id: uuid.UUID, scope: quotas.QuotaScope, key: str
+) -> int:
+    """Units consumed in one scope today. Absent counter means none."""
+    rows = await quotas.snapshot(
+        session, workspace_id=workspace_id, window_date=NOW.date()
+    )
+    for row in rows:
+        if row["scope_type"] == scope.value and row["scope_key"] == key:
+            return int(row["used"])  # type: ignore[arg-type]
+    return 0
 
 
 # ==========================================================================
@@ -276,6 +290,82 @@ async def test_quota_exhaustion_defers_rather_than_fails(db_session, workspace) 
             # Rescheduled into the next window, spread rather than at midnight.
             assert row.next_attempt_at > NOW
             assert row.next_attempt_at.date() > NOW.date()
+
+
+@pytest.mark.asyncio
+async def test_a_message_blocked_on_deliverability_consumes_no_quota(
+    db_session, sendable
+) -> None:
+    """Quota counts sends, and a message stopped at the gate is not one.
+
+    Reserving before the deliverability check meant a blocked message still
+    spent a unit of every scope. With a recipient-domain cap of 2 a day, two
+    blocked messages closed that domain for the day having delivered nothing.
+    """
+    domain = sendable.to_email.split("@", 1)[1]
+
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+        payload = dict(row.payload)
+        # More than half capitals -> the `shouting_subject` BLOCK signal, which
+        # is a construction fault rather than a reputation one, so it blocks
+        # outright instead of deferring.
+        payload["subject"] = "URGENT ACTION REQUIRED FROM YOU TODAY"
+        await s.execute(
+            update(OutboxMessage)
+            .where(OutboxMessage.id == sendable.outbox_id)
+            .values(payload=payload)
+        )
+        await s.commit()
+
+    provider = MockEmailProvider()
+    results = await run_worker(provider)
+
+    assert [r.outcome for r in results] == ["blocked"]
+    assert provider.delivered_count == 0
+
+    async with get_sessionmaker()() as s:
+        assert (
+            await quota_used(
+                s,
+                sendable.workspace_id,
+                quotas.QuotaScope.RECIPIENT_DOMAIN,
+                domain,
+            )
+            == 0
+        ), "a blocked message consumed the recipient domain's daily allowance"
+        assert (
+            await quota_used(
+                s,
+                sendable.workspace_id,
+                quotas.QuotaScope.WORKSPACE,
+                str(sendable.workspace_id),
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_provider_rejection_gives_back_its_quota(db_session, sendable) -> None:
+    """The provider answered and refused, so nothing was sent and nothing is owed.
+
+    Without the release, six attempts against a flaky provider would spend six
+    of the day's sends while delivering none of them.
+    """
+    provider = MockEmailProvider(permanent_failure_recipients={sendable.to_email.lower()})
+    results = await run_worker(provider)
+    assert [r.outcome for r in results] == ["failed_permanent"]
+
+    async with get_sessionmaker()() as s:
+        for scope, key in (
+            (quotas.QuotaScope.WORKSPACE, str(sendable.workspace_id)),
+            (quotas.QuotaScope.CAMPAIGN, str(sendable.campaign_id)),
+            (quotas.QuotaScope.SENDER, str(sendable.sender_id)),
+            (quotas.QuotaScope.RECIPIENT_DOMAIN, sendable.to_email.split("@", 1)[1]),
+        ):
+            assert await quota_used(s, sendable.workspace_id, scope, key) == 0, (
+                f"{scope.value} quota was consumed by a message the provider refused"
+            )
 
 
 # ==========================================================================

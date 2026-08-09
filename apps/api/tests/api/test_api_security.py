@@ -564,3 +564,36 @@ async def test_no_response_leaks_a_credential_field(
         body = (await client.get(path, headers=auth(token))).text.lower()
         for field in banned:
             assert field not in body, f"{path} leaked {field}"
+
+
+# ==========================================================================
+# Passwordless local login must not survive into a deployed environment
+# ==========================================================================
+@pytest.mark.asyncio
+@pytest.mark.parametrize("environment", ["staging", "production"])
+async def test_local_token_issuance_is_refused_wherever_deployed(
+    client, monkeypatch, environment: str
+) -> None:
+    """/auth/token takes an email and a workspace slug and no password.
+
+    Gating it on production alone left staging -- same data, same reachability
+    -- issuing a token carrying that member's role to anyone who could guess an
+    address.
+    """
+    from titan.api import routes
+    from titan.config import Settings
+
+    deployed = Settings(
+        environment=environment,
+        auth_mode="local",
+        local_jwt_secret="deployed-secret-not-for-production",
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: deployed)
+
+    response = await client.post(
+        "/api/v1/auth/token",
+        json={"email": "anyone@titan.test", "workspace_slug": "any-workspace"},
+    )
+
+    assert response.status_code == 501
+    assert "access_token" not in response.text

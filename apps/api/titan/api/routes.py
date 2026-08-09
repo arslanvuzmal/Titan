@@ -98,14 +98,17 @@ async def _not_found(kind: str) -> HTTPException:
 async def login(payload: LoginRequest) -> TokenResponse:
     """Issue a session token for an existing membership.
 
-    Local development auth. There is no password step yet, so this route is
-    refused outright in production rather than shipping a bypass.
+    Local development auth. There is no password step yet: knowing an email
+    address and a workspace slug is enough to be issued a token carrying that
+    member's role. So the route is refused outright in any *deployed*
+    environment rather than shipping a bypass -- staging included, which holds
+    the same data as production and is equally reachable.
     """
     settings = get_settings()
-    if settings.is_production:
+    if settings.is_deployed:
         raise HTTPException(
             status.HTTP_501_NOT_IMPLEMENTED,
-            "local token issuance is disabled in production; configure Clerk",
+            "local token issuance is disabled outside local development; configure Clerk",
         )
 
     async with get_sessionmaker()() as session:
