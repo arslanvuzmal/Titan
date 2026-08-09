@@ -143,9 +143,23 @@ class Settings(BaseSettings):
     agent_reach_base_url: AnyHttpUrl | None = None
 
     # ---------------------------------------------------------------- email
-    email_provider: Literal["mock", "resend"] = "mock"
+    email_provider: Literal["mock", "resend", "smartlead"] = "mock"
     resend_api_key: SecretStr | None = None
     resend_webhook_secret: SecretStr | None = None
+
+    # ------------------------------------------------------------- smartlead
+    #: Smartlead is a campaign platform, not a transactional ESP: it exposes no
+    #: "send this message now" endpoint. Titan therefore hands each *already
+    #: authorized* message to a dedicated single-step campaign, so every gate
+    #: still runs here before Smartlead is involved at all. See
+    #: titan.delivery.providers.smartlead for what that costs and guarantees.
+    smartlead_api_key: SecretStr | None = None
+    smartlead_base_url: AnyHttpUrl = AnyHttpUrl("https://server.smartlead.ai/api/v1")
+    #: The campaign Titan delivers through. Its sequence must be a single step
+    #: whose subject and body are the {{titan_subject}} / {{titan_body}}
+    #: variables, so the text Titan validated is the text that is sent.
+    smartlead_campaign_id: int | None = None
+    smartlead_timeout_seconds: int = Field(default=30, ge=5, le=300)
 
     #: THE GLOBAL KILL SWITCH (invariant 8, 21).
     #: False means: no outbox row may ever be handed to a real provider,
@@ -205,6 +219,7 @@ class Settings(BaseSettings):
         "browser_worker_token",
         "resend_api_key",
         "resend_webhook_secret",
+        "smartlead_api_key",
         "nvidia_api_key",
         "gemini_api_key",
         "openrouter_api_key",
@@ -251,9 +266,14 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def _fail_closed_on_production(self) -> Settings:
-        """Production may not run with placeholder or missing security config."""
-        if self.environment is not Environment.PRODUCTION:
+    def _fail_closed_when_deployed(self) -> Settings:
+        """A deployed environment may not run with placeholder or missing config.
+
+        Staging is included: it is not production, but it is on a network with
+        real data behind it, so it may no more run without a configured identity
+        provider than production may.
+        """
+        if not self.is_deployed:
             return self
 
         missing: list[str] = []
@@ -261,12 +281,12 @@ class Settings(BaseSettings):
             missing.append("TITAN_CLERK_ISSUER_URL")
         if self.auth_mode == "local" and self.local_jwt_secret is None:
             missing.append("TITAN_LOCAL_JWT_SECRET")
-        if self.demo_mode:
+        if self.demo_mode and self.is_production:
             missing.append("TITAN_DEMO_MODE must be false in production")
         if missing:
             raise ValueError(
-                "Refusing to start in production with incomplete configuration: "
-                + ", ".join(missing)
+                f"Refusing to start in {self.environment.value} with incomplete "
+                "configuration: " + ", ".join(missing)
             )
         return self
 
@@ -274,6 +294,17 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment is Environment.PRODUCTION
+
+    @property
+    def is_deployed(self) -> bool:
+        """Whether this process is reachable by anyone other than its developer.
+
+        Controls that exist to keep a stranger out -- the passwordless local
+        login, the published OpenAPI schema -- must key off this rather than off
+        :attr:`is_production`. Keying them off production alone left a staging
+        host as an unguarded way in, holding the same data.
+        """
+        return self.environment in (Environment.STAGING, Environment.PRODUCTION)
 
     def sending_preflight_errors(self) -> list[str]:
         """Reasons the *process* is not allowed to deliver mail.
@@ -291,6 +322,14 @@ class Settings(BaseSettings):
             errors.append("TITAN_EMAIL_PROVIDER is 'mock'; no real provider configured")
         if self.email_provider == "resend" and self.resend_api_key is None:
             errors.append("TITAN_RESEND_API_KEY is not set")
+        if self.email_provider == "smartlead":
+            if self.smartlead_api_key is None:
+                errors.append("TITAN_SMARTLEAD_API_KEY is not set")
+            if self.smartlead_campaign_id is None:
+                errors.append(
+                    "TITAN_SMARTLEAD_CAMPAIGN_ID is not set (Titan will not create "
+                    "a sending campaign implicitly)"
+                )
         if not self.email_auth_preflight_acknowledged:
             errors.append(
                 "TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED is false "
