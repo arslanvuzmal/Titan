@@ -1,0 +1,20 @@
+# TEMPORARY diagnostic. Delete once CI starts again.
+#
+# Variable under test: nothing. No actions, no permissions request.
+#
+# If this run also fails at startup, the cause is account- or repo-global
+# (Actions disabled, spending limit) and has nothing to do with ci.yml.
+# If it starts, the cause is something ci.yml asks for -- which diag-b
+# and the allowlist then narrow down.
+name: diag-a-minimal
+
+on:
+  push:
+    branches: ["agent/**"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "diag-a started - no actions, no permissions request"
