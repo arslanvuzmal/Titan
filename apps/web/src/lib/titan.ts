@@ -372,10 +372,10 @@ function query(params: Record<string, string | number | boolean | undefined | nu
   return encoded ? `?${encoded}` : '';
 }
 
-export async function login(email: string, workspaceSlug: string): Promise<string> {
+export async function login(username: string, passcode: string): Promise<string> {
   const body = await call<{ access_token: string }>('/api/v1/auth/token', {
     method: 'POST',
-    body: { email, workspace_slug: workspaceSlug },
+    body: { username, passcode },
   });
   return body.access_token;
 }

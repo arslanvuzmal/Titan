@@ -20,6 +20,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from titan.api.passwords import hash_passcode
 from titan.config import OperatingMode
 from titan.db.enums import CampaignStatus, DraftStatus, Industry, WorkspaceRole
 from titan.db.models import (
@@ -57,13 +58,25 @@ async def client():
         yield http_client
 
 
+#: The passcode every test account shares, hashed once. argon2 is deliberately
+#: expensive, so hashing per user would add real seconds to the suite for no
+#: coverage -- the hashing itself is tested in tests/api/test_passwords.py.
+TEST_PASSCODE = "correct-horse-battery"
+TEST_PASSCODE_HASH = hash_passcode(TEST_PASSCODE)
+
+
 async def make_member(
     workspace_id: uuid.UUID, role: WorkspaceRole, *, tag: str
 ) -> tuple[uuid.UUID, str]:
     """Create a user with a membership; return (user_id, email)."""
     email = f"{tag}-{uuid.uuid4().hex[:8]}@titan.test"
     async with get_sessionmaker()() as session, session.begin():
-        user = User(email=email, display_name=tag)
+        user = User(
+            email=email,
+            display_name=tag,
+            username=email.split("@")[0],
+            password_hash=TEST_PASSCODE_HASH,
+        )
         session.add(user)
         await session.flush()
         session.add(
@@ -73,8 +86,20 @@ async def make_member(
 
 
 async def token_for(client: httpx.AsyncClient, email: str, slug: str) -> str:
+    """Sign in as the account `make_member` created for this email.
+
+    Kept on (email, slug) so the ~40 call sites did not have to change when
+    login moved to username and passcode. `make_member` derives the username
+    from the address, and the slug is passed through for the accounts that
+    belong to more than one workspace.
+    """
     response = await client.post(
-        "/api/v1/auth/token", json={"email": email, "workspace_slug": slug}
+        "/api/v1/auth/token",
+        json={
+            "username": email.split("@")[0],
+            "passcode": TEST_PASSCODE,
+            "workspace": slug,
+        },
     )
     assert response.status_code == 200, response.text
     return response.json()["access_token"]
@@ -173,13 +198,26 @@ async def test_garbage_token_is_rejected(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_does_not_reveal_whether_an_account_exists(client) -> None:
-    response = await client.post(
+async def test_login_does_not_reveal_whether_an_account_exists(client, workspace) -> None:
+    """An unknown username and a wrong passcode are the same answer.
+
+    A different status or a different message turns the login form into an
+    account enumerator: an attacker learns which handles are real before
+    spending a single guess on a passcode.
+    """
+    _user_id, email = await make_member(workspace, WorkspaceRole.OWNER, tag="enum")
+
+    unknown = await client.post(
         "/api/v1/auth/token",
-        json={"email": "nobody@nowhere.test", "workspace_slug": "no-such-workspace"},
+        json={"username": "no-such-operator", "passcode": "whatever-this-is"},
     )
-    assert response.status_code == 401
-    assert response.json()["detail"] == "invalid credentials"
+    wrong = await client.post(
+        "/api/v1/auth/token",
+        json={"username": email.split("@")[0], "passcode": "not-the-passcode"},
+    )
+
+    assert unknown.status_code == wrong.status_code == 401
+    assert unknown.json()["detail"] == wrong.json()["detail"] == "invalid credentials"
 
 
 @pytest.mark.asyncio
@@ -567,33 +605,144 @@ async def test_no_response_leaks_a_credential_field(
 
 
 # ==========================================================================
-# Passwordless local login must not survive into a deployed environment
+# Local login: a passcode, not an environment check
 # ==========================================================================
 @pytest.mark.asyncio
-@pytest.mark.parametrize("environment", ["staging", "production"])
-async def test_local_token_issuance_is_refused_wherever_deployed(
-    client, monkeypatch, environment: str
-) -> None:
-    """/auth/token takes an email and a workspace slug and no password.
+async def test_selecting_clerk_disables_local_token_issuance(client, monkeypatch) -> None:
+    """Configuring Clerk closes this route, everywhere.
 
-    Gating it on production alone left staging -- same data, same reachability
-    -- issuing a token carrying that member's role to anyone who could guess an
-    address.
+    The gate used to be the environment, because the route had no secret to
+    check and could not be allowed to face the internet. Now that it verifies a
+    passcode, the question it answers is "is this the configured identity
+    provider" -- and a deployment that authenticates through Clerk must not
+    also accept a second, locally-minted session.
     """
     from titan.api import routes
     from titan.config import Settings
 
-    deployed = Settings(
-        environment=environment,
-        auth_mode="local",
-        local_jwt_secret="deployed-secret-not-for-production",
+    clerk = Settings(
+        environment="production",
+        auth_mode="clerk",
+        clerk_issuer_url="https://example.clerk.accounts.dev",
     )
-    monkeypatch.setattr(routes, "get_settings", lambda: deployed)
+    monkeypatch.setattr(routes, "get_settings", lambda: clerk)
 
     response = await client.post(
         "/api/v1/auth/token",
-        json={"email": "anyone@titan.test", "workspace_slug": "any-workspace"},
+        json={"username": "anyone", "passcode": "anything-at-all"},
     )
 
     assert response.status_code == 501
     assert "access_token" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_an_account_with_no_passcode_cannot_sign_in(client, workspace) -> None:
+    """Null password_hash means "cannot sign in", not "no passcode needed".
+
+    Every user row created before passcodes existed has NULL here. If the
+    verifier treated that as a pass, enabling local login would have handed a
+    session to anyone who could guess a username.
+    """
+    email = f"nopass-{uuid.uuid4().hex[:8]}@titan.test"
+    username = email.split("@")[0]
+    async with get_sessionmaker()() as session, session.begin():
+        user = User(email=email, display_name="no passcode", username=username)
+        session.add(user)
+        await session.flush()
+        session.add(
+            WorkspaceMember(
+                workspace_id=workspace, user_id=user.id, role=WorkspaceRole.OWNER
+            )
+        )
+
+    for attempt in ("", "anything", TEST_PASSCODE):
+        response = await client.post(
+            "/api/v1/auth/token", json={"username": username, "passcode": attempt}
+        )
+        assert response.status_code == 401, attempt
+        assert "access_token" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_repeated_wrong_passcodes_lock_the_account(
+    client, workspace, monkeypatch
+) -> None:
+    """The lockout is what makes a short passcode survivable.
+
+    Six digits is a million guesses, which is minutes at HTTP speed and
+    centuries at three-attempts-then-wait. The counter must therefore survive
+    the rollback of the request that increments it -- an earlier draft wrapped
+    the handler in `session.begin()`, and the increment was discarded on every
+    failed attempt, leaving a lockout that never fired.
+    """
+    from titan.api import routes
+    from titan.config import Settings
+
+    limited = Settings(
+        auth_mode="local",
+        local_jwt_secret="test-secret-not-for-production",
+        login_max_attempts=3,
+        login_lockout_seconds=900,
+    )
+    monkeypatch.setattr(routes, "get_settings", lambda: limited)
+
+    _user_id, email = await make_member(workspace, WorkspaceRole.OWNER, tag="lockout")
+    username = email.split("@")[0]
+
+    for _ in range(3):
+        response = await client.post(
+            "/api/v1/auth/token", json={"username": username, "passcode": "wrong"}
+        )
+        assert response.status_code == 401
+
+    # The correct passcode is now refused too: the lock is on the account, not
+    # on the guess.
+    locked = await client.post(
+        "/api/v1/auth/token",
+        json={"username": username, "passcode": TEST_PASSCODE},
+    )
+    assert locked.status_code == 429
+    assert "access_token" not in locked.text
+    assert int(locked.headers["retry-after"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_a_successful_sign_in_clears_the_failure_counter(client, workspace) -> None:
+    """Otherwise failures accumulate across days and lock a legitimate user."""
+    _user_id, email = await make_member(workspace, WorkspaceRole.OWNER, tag="reset")
+    username = email.split("@")[0]
+
+    await client.post(
+        "/api/v1/auth/token", json={"username": username, "passcode": "wrong"}
+    )
+    ok = await client.post(
+        "/api/v1/auth/token",
+        json={"username": username, "passcode": TEST_PASSCODE},
+    )
+    assert ok.status_code == 200, ok.text
+
+    async with get_sessionmaker()() as session:
+        user = (
+            await session.execute(select(User).where(User.username == username))
+        ).scalar_one()
+        assert user.failed_login_count == 0
+        assert user.locked_until is None
+        assert user.last_login_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_deactivated_account_cannot_sign_in(client, workspace) -> None:
+    """is_active is checked at login, not only when a token is presented."""
+    user_id, email = await make_member(workspace, WorkspaceRole.OWNER, tag="disabled")
+    async with get_sessionmaker()() as session, session.begin():
+        user = await session.get(User, user_id)
+        assert user is not None
+        user.is_active = False
+
+    response = await client.post(
+        "/api/v1/auth/token",
+        json={"username": email.split("@")[0], "passcode": TEST_PASSCODE},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid credentials"

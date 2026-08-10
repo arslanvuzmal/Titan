@@ -6,6 +6,7 @@
     titan invariants       # print the safety invariants and where each is enforced
     titan smartlead        # verify the Smartlead connection and carrier campaign,
                            # or list/manage campaigns and sending accounts
+    titan set-passcode     # give an existing account a username and passcode
 
 ``env-example`` exists so that the documented environment and the code that
 reads it cannot drift: the file is generated, never hand-maintained, which is
@@ -345,6 +346,114 @@ def cmd_invariants(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_set_passcode(args: argparse.Namespace) -> int:
+    """Give an existing account a username and a passcode.
+
+    An operator command rather than a route. Titan has no outbound path for a
+    reset link -- the delivery layer is the thing being protected -- so a
+    self-service reset would either mail through the outreach mailbox or invent
+    a second, unaudited sender. Whoever can run this already has the database.
+
+    Creates nothing. The account and its workspace membership must exist, so
+    that granting access stays a deliberate act and a typo in a username cannot
+    conjure a member.
+    """
+    import getpass
+
+    from sqlalchemy import func, select
+
+    from titan.api.passwords import PasscodeRejected, check_strength, hash_passcode
+    from titan.db.models import User, WorkspaceMember
+    from titan.db.session import get_sessionmaker
+
+    settings = get_settings()
+
+    if args.passcode:
+        passcode = args.passcode
+    elif not sys.stdin.isatty():
+        # Scripted use: `echo 'secret' | titan set-passcode --user ...`
+        passcode = sys.stdin.readline().rstrip("\n")
+    else:
+        passcode = getpass.getpass("New passcode: ")
+        if passcode != getpass.getpass("Repeat passcode: "):
+            print("passcodes did not match", file=sys.stderr)
+            return 2
+
+    try:
+        check_strength(passcode, minimum_length=settings.min_passcode_length)
+    except PasscodeRejected as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+
+    if passcode.isdigit():
+        print(
+            f"note: an all-digit passcode of {len(passcode)} characters is "
+            f"{10 ** len(passcode):,} guesses. Online that is safe -- "
+            f"{settings.login_max_attempts} attempts then a "
+            f"{settings.login_lockout_seconds}s lock. Against a stolen "
+            "database it is not; the argon2 hash is the only thing standing "
+            "between that dump and a working login.",
+            file=sys.stderr,
+        )
+
+    username = args.username.strip().lower()
+    digest = hash_passcode(passcode)
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            user = (
+                await session.execute(
+                    select(User).where(func.lower(User.email) == args.email.lower())
+                )
+            ).scalar_one_or_none()
+            if user is None:
+                print(f"no user with email {args.email}", file=sys.stderr)
+                return 1
+
+            clash = (
+                await session.execute(
+                    select(User).where(
+                        func.lower(User.username) == username, User.id != user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if clash is not None:
+                print(f"username {username!r} is taken", file=sys.stderr)
+                return 1
+
+            members = (
+                (
+                    await session.execute(
+                        select(WorkspaceMember).where(WorkspaceMember.user_id == user.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not members:
+                # A passcode without a membership authenticates and then
+                # authorizes nothing, which reads as a broken login.
+                print(
+                    f"{args.email} has no workspace membership; add one first",
+                    file=sys.stderr,
+                )
+                return 1
+
+            user.username = username
+            user.password_hash = digest
+            user.failed_login_count = 0
+            user.locked_until = None
+            await session.commit()
+
+        print(f"{args.email} can now sign in as {username!r}.")
+        print(f"  workspaces: {len(members)}")
+        print("  the passcode is stored as an argon2id hash and is not recoverable.")
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="titan", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -385,6 +494,25 @@ def main() -> int:
         help="new status, for 'status'",
     )
     smartlead_parser.set_defaults(func=cmd_smartlead)
+
+    passcode_parser = sub.add_parser(
+        "set-passcode", help="set an existing account's username and passcode"
+    )
+    passcode_parser.add_argument(
+        "--email", required=True, help="the existing account to give a passcode"
+    )
+    passcode_parser.add_argument(
+        "--username", required=True, help="the sign-in handle (stored lowercased)"
+    )
+    passcode_parser.add_argument(
+        "--passcode",
+        default=None,
+        help=(
+            "the passcode. Omit it: the value lands in your shell history "
+            "otherwise. Prompts on a terminal, or reads one line from stdin."
+        ),
+    )
+    passcode_parser.set_defaults(func=cmd_set_passcode)
 
     args = parser.parse_args()
     return int(args.func(args))

@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 
 from titan.api import audit
 from titan.api.crm import apply_lead_filters, enrich_leads
+from titan.api.passwords import hash_passcode, verify_passcode
 from titan.api.schemas import (
     ApprovalDecisionRequest,
     ApprovalOut,
@@ -94,51 +95,145 @@ async def _not_found(kind: str) -> HTTPException:
 # ==========================================================================
 # Auth
 # ==========================================================================
+#: One message for every way a sign-in can fail. Unknown username, wrong
+#: passcode, deactivated account and never-set passcode are indistinguishable,
+#: because telling them apart is how an attacker enumerates valid accounts.
+_INVALID = "invalid credentials"
+
+
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])
 async def login(payload: LoginRequest) -> TokenResponse:
-    """Issue a session token for an existing membership.
+    """Issue a session token for a username and passcode.
 
-    Local development auth. There is no password step yet: knowing an email
-    address and a workspace slug is enough to be issued a token carrying that
-    member's role. So the route is refused outright in any *deployed*
-    environment rather than shipping a bypass -- staging included, which holds
-    the same data as production and is equally reachable.
+    This route used to take an email address and a workspace slug and no
+    secret, so it had to be refused in every deployed environment -- the
+    environment check was standing in for authentication. It now verifies an
+    argon2id hash, and the gate is what it should have been all along: this is
+    the local identity provider, so it answers only when Titan is *configured*
+    to authenticate locally. Selecting Clerk and then posting here still gets a
+    501, in local development as much as in production.
+
+    An account with no stored hash can never sign in. That covers every row
+    that predates passcodes, so enabling this could not hand anyone a session
+    they did not already have.
     """
     settings = get_settings()
-    if settings.is_deployed:
+    if settings.auth_mode != "local":
         raise HTTPException(
             status.HTTP_501_NOT_IMPLEMENTED,
-            "local token issuance is disabled outside local development; configure Clerk",
+            "this deployment authenticates through Clerk; local tokens are disabled",
+        )
+    if settings.local_jwt_secret is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "local authentication is selected but TITAN_LOCAL_JWT_SECRET is unset",
         )
 
+    username = payload.username.strip().lower()
+    now = dt.datetime.now(dt.UTC)
+
+    # Not `session.begin()`: a failed attempt has to *commit* its increment and
+    # then raise. Wrapping the whole handler in one transaction would roll the
+    # counter back on the very path that needs to record it, leaving a lockout
+    # that never locks -- the failure mode is invisible, because the happy path
+    # keeps working.
     async with get_sessionmaker()() as session:
-        row = (
+        user = (
             await session.execute(
-                select(WorkspaceMember, Workspace)
-                .join(User, User.id == WorkspaceMember.user_id)
-                .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+                select(User)
                 .where(
-                    func.lower(User.email) == payload.email.strip().lower(),
-                    Workspace.slug == payload.workspace_slug.strip().lower(),
+                    func.lower(User.username) == username,
                     User.is_active.is_(True),
                 )
+                # Serialize concurrent attempts on one account. Without it,
+                # parallel guesses read the same count and each write back
+                # "1", so the limit is per-connection rather than per-account.
+                .with_for_update()
             )
-        ).first()
+        ).scalar_one_or_none()
 
-    if row is None:
-        # Same message for unknown user and unknown workspace: distinguishing
-        # them enumerates valid accounts.
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid credentials")
+        if user is not None and user.locked_until and user.locked_until > now:
+            # Say how long, and only to someone who already got this far. The
+            # wait is not a secret -- concealing it just produces support
+            # tickets -- but it is reported identically whether or not the
+            # passcode was right, so it cannot be used as an oracle.
+            wait = int((user.locked_until - now).total_seconds())
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                f"too many failed attempts; try again in {wait}s",
+                headers={"Retry-After": str(wait)},
+            )
 
-    membership, workspace = row
-    return TokenResponse(
-        access_token=issue_token(
-            user_id=membership.user_id, workspace_id=workspace.id, settings=settings
-        ),
-        expires_in=settings.session_ttl_seconds,
-        workspace_id=workspace.id,
-        role=membership.role.value,
-    )
+        # Runs even when the username is unknown: `verify_passcode(None, ...)`
+        # spends the same time against a placeholder hash, so timing does not
+        # separate "no such account" from "wrong passcode".
+        result = verify_passcode(user.password_hash if user else None, payload.passcode)
+
+        if user is None or not result.ok:
+            if user is not None:
+                user.failed_login_count += 1
+                if user.failed_login_count >= settings.login_max_attempts:
+                    user.locked_until = now + dt.timedelta(
+                        seconds=settings.login_lockout_seconds
+                    )
+                    user.failed_login_count = 0
+                await session.commit()
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, _INVALID)
+
+        memberships = (
+            await session.execute(
+                select(WorkspaceMember, Workspace)
+                .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+                .where(WorkspaceMember.user_id == user.id)
+                .order_by(Workspace.slug)
+            )
+        ).all()
+        if not memberships:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, _INVALID)
+
+        if len(memberships) == 1 and payload.workspace is None:
+            membership, workspace = memberships[0]
+        else:
+            wanted = (payload.workspace or "").strip().lower()
+            match = next(
+                (
+                    row
+                    for row in memberships
+                    if row[1].slug == wanted or str(row[1].id) == wanted
+                ),
+                None,
+            )
+            if match is None:
+                # The passcode already checked out, so naming this operator's
+                # own workspaces reveals nothing they do not have.
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "this account belongs to several workspaces; send one of: "
+                    + ", ".join(sorted(w.slug for _m, w in memberships)),
+                )
+            membership, workspace = match
+
+        user.failed_login_count = 0
+        user.locked_until = None
+        user.last_login_at = now
+        if result.needs_rehash:
+            # Cost parameters have gone up since this hash was written, and
+            # the plaintext is in hand exactly once -- here.
+            user.password_hash = hash_passcode(payload.passcode)
+
+        response = TokenResponse(
+            access_token=issue_token(
+                user_id=user.id, workspace_id=workspace.id, settings=settings
+            ),
+            expires_in=settings.session_ttl_seconds,
+            workspace_id=workspace.id,
+            role=membership.role.value,
+        )
+        # After the token is minted, so a failure to mint one does not clear
+        # the operator's failure counter.
+        await session.commit()
+
+    return response
 
 
 @router.get("/me", response_model=dict, tags=["auth"])

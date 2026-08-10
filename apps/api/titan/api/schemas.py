@@ -32,8 +32,13 @@ class ErrorBody(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str
-    workspace_slug: str
+    username: str
+    passcode: str
+    #: Only consulted when the account belongs to more than one workspace. The
+    #: sign-in form does not show it, so the common case stays two fields; it
+    #: exists so a multi-workspace operator has a way through that is not
+    #: "the server picks one for you".
+    workspace: str | None = None
 
 
 class TokenResponse(BaseModel):
