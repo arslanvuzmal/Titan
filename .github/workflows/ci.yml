@@ -35,10 +35,24 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with: {fetch-depth: 0}
+
+      # Run gitleaks from its published image rather than the marketplace
+      # action.
+      #
+      # Settings -> Actions -> General -> "Allow select actions" permits
+      # GitHub-owned and Marketplace-verified actions only, and gitleaks is
+      # neither. An action outside the allowlist does not fail its own step --
+      # GitHub refuses the entire workflow at startup, producing a 0s run with
+      # no jobs, no logs and no relationship to the commit. Every run on every
+      # branch went red that way, including main.
+      #
+      # Docker is preinstalled on ubuntu-latest, so this needs no action at
+      # all and cannot be broken by that setting again.
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@83373cf2f8c4db6e24b41c1a9b086bb9619e9cd3 # v2.3.7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.21.2 \
+            detect --source=/repo --redact --no-banner --verbose
 
   python:
     name: Python (lint, types, tests)
