@@ -25,10 +25,10 @@ import { api, login, TitanError, type Principal, type Workspace } from '@/lib/ti
 
 const STORAGE_KEY = 'titan.session';
 
+/** Never the passcode. Only the token, which expires; the passcode does not. */
 interface StoredSession {
   token: string;
-  email: string;
-  slug: string;
+  username: string;
 }
 
 export interface SessionValue {
@@ -37,7 +37,7 @@ export interface SessionValue {
   workspace: Workspace | null;
   status: 'loading' | 'signed-out' | 'signed-in';
   error: string | null;
-  signIn: (email: string, slug: string) => Promise<void>;
+  signIn: (username: string, passcode: string) => Promise<void>;
   signOut: () => void;
   /** True when the signed-in role holds every capability listed. */
   can: (...capabilities: string[]) => boolean;
@@ -56,12 +56,13 @@ function read(): StoredSession | null {
 }
 
 /**
- * Local development sessions.
+ * Username-and-passcode sessions.
  *
- * The token is minted by `/api/v1/auth/token`, which the API refuses to serve
- * when TITAN_ENVIRONMENT=production. A deployed Titan therefore uses
- * `ClerkSessionProvider` instead -- there is no configuration under which this
- * provider talks to a production API.
+ * The token is minted by `/api/v1/auth/token`, which verifies an argon2id
+ * hash. That route used to accept an email address and a workspace slug and no
+ * secret, so it was refused in every deployed environment; it now answers
+ * wherever Titan is configured with `TITAN_AUTH_MODE=local`, and a deployment
+ * that selects Clerk uses `ClerkSessionProvider` and gets a 501 here.
  */
 export function LocalSessionProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
@@ -115,18 +116,24 @@ export function LocalSessionProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const signIn = useCallback(
-    async (email: string, slug: string) => {
+    async (username: string, passcode: string) => {
       setError(null);
       try {
-        const next = await login(email, slug);
-        await adopt({ token: next, email, slug });
+        const next = await login(username, passcode);
+        await adopt({ token: next, username });
       } catch (e) {
+        // 401 stays vague on purpose -- the API refuses to say whether the
+        // username exists, and restating it more helpfully here would leak
+        // exactly what it withheld. 429 is the one failure worth explaining,
+        // because the operator's next move is to wait rather than retry.
         const message =
           e instanceof TitanError && e.status === 401
-            ? 'No membership matches that email and workspace.'
-            : e instanceof Error
-              ? e.message
-              : 'sign-in failed';
+            ? 'Incorrect username or passcode.'
+            : e instanceof TitanError && e.status === 429
+              ? e.message || 'Too many failed attempts. Try again shortly.'
+              : e instanceof Error
+                ? e.message
+                : 'sign-in failed';
         setError(message);
         setStatus('signed-out');
         throw e;

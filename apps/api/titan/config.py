@@ -204,6 +204,15 @@ class Settings(BaseSettings):
     local_jwt_secret: SecretStr | None = None
     session_ttl_seconds: int = Field(default=3600, ge=60, le=86_400)
 
+    #: Consecutive failures before the account is locked. This is what makes a
+    #: short passcode defensible: six digits is a million guesses offline, but
+    #: five online attempts before a fifteen-minute wall is roughly a century.
+    login_max_attempts: int = Field(default=5, ge=1, le=100)
+    login_lockout_seconds: int = Field(default=900, ge=0, le=86_400)
+    #: Enforced by `titan set-passcode`, not at login -- a floor raised later
+    #: must not lock out an operator whose existing passcode is still valid.
+    min_passcode_length: int = Field(default=6, ge=6, le=128)
+
     # ---------------------------------------------------------------- owner
     owner_name: str = "Arslan Vuzmal Lone"
     owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.dev")

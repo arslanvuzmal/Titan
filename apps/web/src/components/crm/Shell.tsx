@@ -26,11 +26,20 @@ const NAV = [
   { href: '/crm/operations', label: 'Operations' },
 ];
 
+/**
+ * Two fields. The workspace is resolved from the account's membership rather
+ * than typed, because it was never a credential -- asking for it made the form
+ * look like it checked three things when it checked none.
+ */
 function SignIn() {
   const { signIn, error } = useSession();
-  const [email, setEmail] = useState('');
-  const [slug, setSlug] = useState('titan');
+  const [username, setUsername] = useState('');
+  const [passcode, setPasscode] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const field =
+    'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 ' +
+    'normal-case tracking-normal outline-none focus:border-slate-500';
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -39,7 +48,7 @@ function SignIn() {
           e.preventDefault();
           setBusy(true);
           try {
-            await signIn(email.trim(), slug.trim());
+            await signIn(username.trim(), passcode);
           } catch {
             /* the message is rendered from session state */
           } finally {
@@ -49,29 +58,33 @@ function SignIn() {
         className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
       >
         <h1 className="text-lg font-semibold text-slate-900">Titan-OS</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Sign in with a workspace membership.
-        </p>
+        <p className="mt-1 text-sm text-slate-500">Sign in to continue.</p>
 
         <label className="mt-5 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Email
+          Username
           <input
-            type="email"
             required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
             autoComplete="username"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 normal-case tracking-normal outline-none focus:border-slate-500"
+            autoCapitalize="none"
+            spellCheck={false}
+            className={field}
           />
         </label>
 
         <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Workspace slug
+          Passcode
+          {/* Not trimmed on submit: a passcode that legitimately ends in a
+              space would silently stop working. `titan set-passcode` refuses
+              to create one, so the two ends agree. */}
           <input
+            type="password"
             required
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 normal-case tracking-normal outline-none focus:border-slate-500"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            autoComplete="current-password"
+            className={field}
           />
         </label>
 
@@ -86,8 +99,8 @@ function SignIn() {
         </div>
 
         <p className="mt-4 text-xs text-slate-400">
-          Local development auth. The API refuses to issue tokens this way when
-          TITAN_ENVIRONMENT is production.
+          Five failed attempts locks the account for fifteen minutes. There is no
+          self-service reset — an operator runs <code>titan set-passcode</code>.
         </p>
       </form>
     </main>

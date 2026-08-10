@@ -34,10 +34,37 @@ Decide which of these is true, because it changes what you deploy:
 
 ---
 
-## 1. Clerk
+## 1. Authentication
 
-The API refuses to issue its own tokens when `TITAN_ENVIRONMENT=production`,
-so a deployed Titan authenticates through Clerk or not at all.
+Pick one. `TITAN_AUTH_MODE` decides which, and selecting one closes the other:
+a deployment set to `clerk` returns 501 from `/api/v1/auth/token`, so there is
+no second way in.
+
+### Option A — username and passcode (`TITAN_AUTH_MODE=local`)
+
+Titan's own identity provider. Two fields, argon2id, no external dependency.
+Suited to a system with a handful of operators, which is what this is.
+
+```
+railway run --service api titan set-passcode \
+  --email you@example.com --username you
+```
+
+It prompts for the passcode; it never takes it as an argument you would leave
+in your shell history. The account and its workspace membership must already
+exist — this command grants access to an existing member and creates nobody.
+
+What it does *not* give you: SSO, MFA, or a password-reset email. Titan has no
+outbound path for a reset link that is not the outreach mailbox itself, so
+recovery is the same command run again by someone with database access.
+
+Five consecutive failures lock the account for fifteen minutes
+(`TITAN_LOGIN_MAX_ATTEMPTS`, `TITAN_LOGIN_LOCKOUT_SECONDS`). That lockout is
+what makes a short passcode defensible online — it does nothing for a stolen
+database, where only the argon2 cost stands between the dump and a login. If
+that is your threat model, use a long passcode or use Clerk.
+
+### Option B — Clerk (`TITAN_AUTH_MODE=clerk`)
 
 1. Create a Clerk application. Note the **Frontend API URL** — it looks like
    `https://something-12.clerk.accounts.dev`. That is the issuer.
@@ -58,6 +85,10 @@ so a deployed Titan authenticates through Clerk or not at all.
    subject gets 401 — who may reach this system stays a deliberate act. On
    first sign-in the Clerk subject is bound to this row, and only if Clerk
    states the email is verified.
+
+Either way, an account with no `password_hash` cannot sign in locally. That is
+every row created before passcodes existed, so turning on local auth grants
+nobody a session they did not already have.
 
 **The role is never read from the token.** It is read from `workspace_members`
 on every request, so revoking a membership takes effect immediately rather
@@ -111,6 +142,17 @@ Do not put this in the API start command: several API replicas would race, and
 a failed migration would take the API down with it rather than failing on its
 own.
 
+**The existing deployed database is not at a revision this repository knows.**
+It reports `4c1d9b7a2e50`, which appears in no commit, and it carries two
+tables and thirteen columns the repository's models do not define — including a
+`users.username` that the passcode migration here also adds. `alembic upgrade`
+against it will fail on the missing revision before it touches anything, which
+is the correct behaviour and not a problem to work around with `stamp`.
+Reconciling it means recovering the deployed source or writing the delta as a
+migration by hand; either way it is a deliberate step, and stamping the
+database to silence the error would leave alembic's history lying about what
+the schema contains.
+
 ---
 
 ## 3. Environment variables
@@ -125,8 +167,9 @@ these fails in a way the API will not show you):
 TITAN_ENVIRONMENT=production
 TITAN_DATABASE_URL=${{Postgres.DATABASE_URL}}        # +psycopg, see below
 TITAN_RATE_LIMIT_REDIS_URL=${{Redis.REDIS_URL}}      # optional; see below
-TITAN_AUTH_MODE=clerk
-TITAN_CLERK_ISSUER_URL=https://<your>.clerk.accounts.dev
+TITAN_AUTH_MODE=local                                # or clerk; see section 1
+TITAN_LOCAL_JWT_SECRET=<32+ random bytes>            # local mode only
+TITAN_CLERK_ISSUER_URL=https://<your>.clerk.accounts.dev   # clerk mode only
 TITAN_FRONTEND_URL=https://<your-project>.vercel.app
 TITAN_TEMPORAL_HOST=<temporal endpoint>:7233
 TITAN_BROWSER_WORKER_URL=http://browser-worker.railway.internal:8800
@@ -248,6 +291,12 @@ curl -s $API/ops/sending-preflight | jq
 
 # 4. Auth actually rejects. Expect 401, not 200 and not 500.
 curl -s -o /dev/null -w '%{http_code}\n' $API/api/v1/stats
+
+# 5. Local sign-in refuses a wrong passcode and does not say why.
+#    Expect 401 {"detail":"invalid credentials"} -- the same answer an
+#    unknown username gets. A 501 here means TITAN_AUTH_MODE is clerk.
+curl -s -X POST $API/api/v1/auth/token -H 'content-type: application/json' \
+  -d '{"username":"nobody","passcode":"wrong-on-purpose"}'
 ```
 
 Then sign in to the Vercel URL and confirm:

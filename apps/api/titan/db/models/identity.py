@@ -35,13 +35,25 @@ class User(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    #: Sign-in handle for auth_mode="local". Stored lowercased so that the
+    #: unique constraint and the lookup agree -- a case-sensitive column would
+    #: let "Arslan" and "arslan" both exist and only one of them ever log in.
+    username: Mapped[str | None] = mapped_column(String(64), unique=True)
     display_name: Mapped[str | None] = mapped_column(String(200))
     #: External IdP subject (Clerk `sub`). Null for local-auth users.
     external_subject: Mapped[str | None] = mapped_column(String(255), unique=True)
-    #: Only populated in auth_mode="local"; argon2id.
+    #: Only populated in auth_mode="local"; argon2id. Null means this account
+    #: cannot sign in locally at all -- never "no passcode required".
     password_hash: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    #: Online-guessing defence. Kept on the row rather than in process memory
+    #: so the count survives a restart and holds across API replicas; an
+    #: in-memory counter is reset by the very deploy an attacker can trigger by
+    #: making the service fall over.
+    failed_login_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    locked_until: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
     memberships: Mapped[list[WorkspaceMember]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
