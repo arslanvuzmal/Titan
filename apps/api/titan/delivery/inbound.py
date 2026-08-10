@@ -45,6 +45,7 @@ from titan.db.models.lead import Lead
 from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import MessageDraft
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
+from titan.db.models.ops import Meeting
 from titan.delivery.suppression import suppress
 from titan.delivery.webhooks import record_reply
 from titan.intelligence.contacts import normalize_email
@@ -141,6 +142,9 @@ class IngestResult:
     #: Recorded in the same transaction, waiting to be pushed. The caller pushes
     #: it *after* committing -- see titan.notify.operator for why that order.
     notification: OperatorNotification | None = None
+    #: Set when the reply asked for a call. The meeting is *proposed*, with no
+    #: time on it -- see :func:`_record_meeting`.
+    meeting_id: uuid.UUID | None = None
 
     @property
     def kind(self) -> ReplyKind:
@@ -296,6 +300,15 @@ async def ingest_inbound(
         intent=intent,
     )
 
+    meeting_id = await _record_meeting(
+        session,
+        workspace_id=workspace_id,
+        lead_id=lead_id,
+        inbound_id=inbound_id,
+        message=message,
+        intent=intent,
+    )
+
     session.add(
         ReplyClassificationRow(
             workspace_id=workspace_id,
@@ -378,6 +391,7 @@ async def ingest_inbound(
             "lead_id": str(lead_id) if lead_id else None,
             "inbound_message_id": str(inbound_id),
             "notified": notification is not None,
+            "meeting_id": str(meeting_id) if meeting_id else None,
         },
     )
     return IngestResult(
@@ -387,7 +401,68 @@ async def ingest_inbound(
         inbound_message_id=inbound_id,
         intent=intent,
         notification=notification,
+        meeting_id=meeting_id,
     )
+
+
+async def _record_meeting(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    lead_id: uuid.UUID | None,
+    inbound_id: uuid.UUID,
+    message: InboundMessage,
+    intent: IntentVerdict | None,
+) -> uuid.UUID | None:
+    """Open a meeting when somebody asks to talk.
+
+    ``meetings`` is the last of the tables that had no writer, and this is the
+    moment it is for: a reply reading ``WANTS_CALL`` is a lead that reached the
+    stage the pipeline exists to reach. Without a row, that stage is visible
+    only as a notification somebody has already ticked off, and a fortnight
+    later nothing can answer "how many conversations did this campaign start".
+
+    **No time is parsed, deliberately.** Replies name times in every form
+    English allows -- "Tuesday afternoon", "the 3rd", "next week sometime",
+    "after the bank holiday" -- and each is relative to a timezone, a working
+    week and a calendar nobody here can see. A wrong ``scheduled_at`` does not
+    read as a parsing failure; it reads as a confirmed appointment, and the cost
+    lands on the operator who misses it and the prospect who was stood up. So
+    the row is ``proposed`` with the request quoted verbatim in ``notes``, and a
+    person puts the time in. ``duration_minutes`` is left null for the same
+    reason: nobody agreed to thirty minutes.
+
+    Idempotency is inherited rather than re-implemented. Everything here runs
+    only when the inbound insert was new, which the unique constraint on
+    ``(workspace_id, provider_inbound_id)`` decides -- so a re-read folder
+    cannot open a second meeting. ``external_ref`` records which message opened
+    this one, so the link survives into the CRM.
+    """
+    if lead_id is None or intent is None:
+        return None
+    if intent.reply_class is not ReplyClass.WANTS_CALL:
+        return None
+
+    request = intent.excerpt or (message.body_text or "").strip()[:300]
+    row = Meeting(
+        workspace_id=workspace_id,
+        lead_id=lead_id,
+        status="proposed",
+        scheduled_at=None,
+        duration_minutes=None,
+        location_or_link=None,
+        external_ref=f"inbound:{inbound_id}"[:255],
+        notes=(
+            f"Requested by {message.from_email or 'the recipient'} in reply to "
+            f"{message.subject[:200]!r}.\n\n"
+            f"They wrote: {request}\n\n"
+            "No time has been set: the reply was not parsed for one. Confirm a "
+            "slot with them and fill in scheduled_at."
+        ),
+    )
+    session.add(row)
+    await session.flush()
+    return row.id
 
 
 async def _suggest_reply(
@@ -524,8 +599,13 @@ async def _notify(
             f"Subject: {message.subject[:200]}\n"
             f"Read as: {intent.reply_class.value} "
             f"(confidence {intent.confidence:.2f}, {intent.detail})\n"
-            f"Signals: {', '.join(intent.signals) or 'none'}\n\n"
-            f"{(message.body_text or '')[:1500]}"
+            f"Signals: {', '.join(intent.signals) or 'none'}\n"
+            # The sentence the verdict was reached on, above the full body. An
+            # operator triaging a queue reads the first three lines of each item
+            # and decides; this puts the deciding sentence inside those lines
+            # instead of somewhere in the quoted thread below.
+            + (f"They wrote: {intent.excerpt}\n" if intent.excerpt else "")
+            + f"\n{(message.body_text or '')[:1500]}"
         ),
         lead_id=lead_id,
         # Keyed on the message, not the lead: a second reply in the same thread

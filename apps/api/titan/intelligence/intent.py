@@ -213,6 +213,13 @@ class IntentVerdict:
     signals: tuple[str, ...] = ()
     confidence: float = 0.0
     detail: str | None = None
+    #: The sentence that produced the verdict, verbatim from the reply.
+    #:
+    #: A rule name tells an operator which regex fired; this tells them what the
+    #: person wrote, which is the thing they actually need before answering. It
+    #: is quoted, never paraphrased -- a summary of somebody's words in a CRM
+    #: becomes the record of what they said, and this way the record is true.
+    excerpt: str | None = None
 
     @property
     def is_positive(self) -> bool:
@@ -255,7 +262,10 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
     # ambiguity detectable: "not interested in the SEO work, but very interested
     # in the booking fix" loses only the first "interested", and the second
     # still fires.
-    matched: list[tuple[ReplyClass, str]] = []
+    # Spans are recorded alongside each match so the winning rule can quote the
+    # sentence it fired on. Blanking below preserves length, so an offset taken
+    # from ``remaining`` still addresses the same characters in ``haystack``.
+    matched: list[tuple[ReplyClass, str, tuple[int, int]]] = []
     remaining = haystack
     for reply_class, patterns in _PATTERNS:
         if reply_class not in NEGATIVE_CLASSES:
@@ -263,7 +273,9 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
         for index, pattern in enumerate(patterns):
             found = pattern.search(remaining)
             if found:
-                matched.append((reply_class, f"{reply_class.value}:{index}"))
+                matched.append(
+                    (reply_class, f"{reply_class.value}:{index}", found.span())
+                )
                 remaining = (
                     remaining[: found.start()]
                     + " " * (found.end() - found.start())
@@ -275,8 +287,11 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
         if reply_class in NEGATIVE_CLASSES:
             continue
         for index, pattern in enumerate(patterns):
-            if pattern.search(remaining):
-                matched.append((reply_class, f"{reply_class.value}:{index}"))
+            found = pattern.search(remaining)
+            if found:
+                matched.append(
+                    (reply_class, f"{reply_class.value}:{index}", found.span())
+                )
                 break
 
     if not matched:
@@ -286,8 +301,8 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
             detail="a person replied; no intent rule matched",
         )
 
-    classes = {reply_class for reply_class, _ in matched}
-    signals = tuple(signal for _, signal in matched)
+    classes = {reply_class for reply_class, _, _ in matched}
+    signals = tuple(signal for _, signal, _ in matched)
 
     positive = classes & POSITIVE_CLASSES
     negative = classes & NEGATIVE_CLASSES
@@ -302,6 +317,10 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
             signals=signals,
             confidence=0.0,
             detail="both positive and negative signals; needs a human read",
+            # Quote the *positive* span, not the first match. An operator opening
+            # an ambiguous reply is deciding whether there is a sale in it, and
+            # the sentence that suggests there might be is the one to show them.
+            excerpt=_sentence_at(haystack, _first_span(matched, POSITIVE_CLASSES)),
         )
 
     # Single-class matches are the confident case. Several classes on the same
@@ -315,7 +334,54 @@ def detect_intent(subject: str, body: str) -> IntentVerdict:
         signals=signals,
         confidence=confidence,
         detail=f"matched {', '.join(sorted(c.value for c in classes))}",
+        excerpt=_sentence_at(haystack, matched[0][2]),
     )
+
+
+def _first_span(
+    matched: list[tuple[ReplyClass, str, tuple[int, int]]],
+    wanted: frozenset[ReplyClass],
+) -> tuple[int, int] | None:
+    for reply_class, _, span in matched:
+        if reply_class in wanted:
+            return span
+    return None  # pragma: no cover - callers only ask for a class they matched
+
+
+#: Where a quoted excerpt is allowed to stop. Newline included because plenty of
+#: replies are a single unpunctuated line.
+_SENTENCE_END = re.compile(r"[.!?\n]")
+
+#: Long enough for a real sentence, short enough that a wall of unpunctuated
+#: text does not become the CRM's record of what somebody asked for.
+MAX_EXCERPT_CHARS = 300
+
+
+def _sentence_at(text: str, span: tuple[int, int] | None) -> str | None:
+    """The sentence containing ``span``, verbatim.
+
+    Expands outwards to sentence boundaries rather than returning the regex
+    match, because the match is a fragment ("book a call") and the sentence is
+    the thing worth quoting ("Could we book a call for next week?"). Trimmed to
+    a cap on either side so a paragraph with no full stops cannot turn into the
+    whole message.
+    """
+    if span is None:
+        return None
+    start, end = span
+
+    left = 0
+    for boundary in _SENTENCE_END.finditer(text, 0, start):
+        left = boundary.end()
+    # end(), not start(): the terminator belongs to the sentence. A question
+    # mark is the difference between quoting a request and quoting a statement,
+    # and a trailing newline is stripped below anyway.
+    right_match = _SENTENCE_END.search(text, end)
+    right = right_match.end() if right_match else len(text)
+
+    left = max(left, start - MAX_EXCERPT_CHARS)
+    right = min(right, end + MAX_EXCERPT_CHARS)
+    return text[left:right].strip() or None
 
 
 #: Typographic characters mail clients substitute for the plain ASCII ones, and
@@ -384,6 +450,7 @@ def _quotable(text: str) -> str:
 
 
 __all__ = [
+    "MAX_EXCERPT_CHARS",
     "NEGATIVE_CLASSES",
     "POSITIVE_CLASSES",
     "IntentVerdict",

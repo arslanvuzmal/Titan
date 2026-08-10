@@ -19,11 +19,18 @@ from sqlalchemy import Select, func, select
 from temporalio import activity
 
 from titan.db.enums import DraftStatus, MessageState
-from titan.db.models import Lead, Message, MessageDraft, Organization, Workspace
+from titan.db.models import (
+    BusinessOpportunity,
+    Lead,
+    Message,
+    MessageDraft,
+    Organization,
+    Workspace,
+)
 from titan.db.models.compliance import SuppressionEntry
 from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
-from titan.db.models.ops import Task
+from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
@@ -156,6 +163,41 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             .where(MessageDraft.status == DraftStatus.AWAITING_APPROVAL)
         )
 
+        meetings_proposed = await count(
+            select(func.count()).select_from(Meeting).where(Meeting.created_at >= since)
+        )
+        # Also unbounded by the window, and for the same reason as the tasks
+        # above: a call somebody asked for a fortnight ago and never got a time
+        # for is the most embarrassing item this report can contain, and a
+        # seven-day window is exactly what would hide it.
+        meetings_unscheduled = await count(
+            select(func.count())
+            .select_from(Meeting)
+            .where(Meeting.status == "proposed", Meeting.scheduled_at.is_(None))
+        )
+
+        opportunities = await count(
+            select(func.count())
+            .select_from(BusinessOpportunity)
+            .where(
+                BusinessOpportunity.created_at >= since,
+                BusinessOpportunity.deliverable.is_(True),
+            )
+        )
+        # SUM over no rows is NULL, not zero. COALESCE covers it in the database
+        # and ``or 0.0`` covers it in the type checker, which cannot see that.
+        summed = (
+            await session.execute(
+                select(
+                    func.coalesce(func.sum(BusinessOpportunity.estimated_value_usd), 0.0)
+                ).where(
+                    BusinessOpportunity.created_at >= since,
+                    BusinessOpportunity.deliverable.is_(True),
+                )
+            )
+        ).scalar_one()
+        pipeline_value = float(summed or 0.0)
+
         hot = (
             await session.execute(
                 select(Organization.display_name, Task.created_at)
@@ -179,6 +221,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         replies_needing_reading=needs_reading,
         drafts_awaiting_approval=awaiting_approval,
         stalled_campaigns=stalled,
+        meetings_unscheduled=meetings_unscheduled,
         leads_discovered=leads_discovered,
         leads_researched=leads_researched,
         messages_sent=sent,
@@ -189,6 +232,9 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         positive_replies=positive,
         declined=declined,
         suppressions_added=suppressions,
+        meetings_proposed=meetings_proposed,
+        opportunities_identified=opportunities,
+        pipeline_value_usd=pipeline_value,
         health=health,
         hot_leads=tuple(
             f"{name} -- waiting since {created.date().isoformat()}"

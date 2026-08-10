@@ -77,6 +77,9 @@ class CollectionResult:
     suppressed: int = 0
     #: Operator notifications recorded this cycle.
     notified: int = 0
+    #: Replies that asked for a call, each of which opened a proposed meeting.
+    #: The number worth reporting upwards: it is the campaign's actual output.
+    meetings_opened: int = 0
     errors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -127,6 +130,7 @@ class ReplyCollector:
             "stopped_sequences": 0,
             "suppressed": 0,
             "notified": 0,
+            "meetings_opened": 0,
         }
         errors: list[str] = []
 
@@ -179,6 +183,7 @@ class ReplyCollector:
                             "stopped_sequences": result.stopped_sequences,
                             "suppressed": result.suppressed,
                             "notified": result.notified,
+                            "meetings_opened": result.meetings_opened,
                         },
                     )
             except Exception:
@@ -235,6 +240,8 @@ class ReplyCollector:
             counts["suppressed"] += 1
         if result.notification is not None:
             counts["notified"] += 1
+        if result.meeting_id is not None:
+            counts["meetings_opened"] += 1
 
         # After the commit, never inside it. The row is the guarantee; this is
         # the convenience on top, and it involves an HTTP call to a host that

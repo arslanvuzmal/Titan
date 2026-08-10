@@ -221,3 +221,41 @@ def test_needs_attention_counts_a_health_problem_as_one_item():
 
     assert quiet.needs_attention == 0
     assert unhealthy.needs_attention == 1
+
+
+# ---------------------------------------------------------------------------
+# Meetings and pipeline
+# ---------------------------------------------------------------------------
+def test_an_unscheduled_call_is_something_that_needs_a_person():
+    """Every meeting starts without a time, so this is a standing item."""
+    assert report(meetings_unscheduled=2).needs_attention == 2
+
+
+def test_the_unscheduled_call_line_says_why_there_is_no_time():
+    """Otherwise it reads like a bug rather than a deliberate refusal to guess."""
+    body = render(report(meetings_unscheduled=1))
+
+    assert "2 call" not in body
+    assert "1 call(s) requested with no time set" in body
+    assert "does not guess a time" in body
+
+
+def test_calls_requested_are_reported_as_an_outcome():
+    body = render(report(meetings_proposed=3, messages_sent=100))
+
+    assert "Calls requested: 3" in body
+
+
+def test_pipeline_value_is_stated_as_a_ceiling_not_a_forecast():
+    """It is a sum of catalogue prices for work nobody has agreed to buy."""
+    body = render(report(opportunities_identified=4, pipeline_value_usd=9400.0))
+
+    assert "4 identified" in body
+    assert "$9,400 if every one closed" in body
+
+
+def test_no_opportunities_means_no_pipeline_line():
+    """A zero-value line trains the reader to skip the section."""
+    body = render(report(opportunities_identified=0, pipeline_value_usd=0.0))
+
+    assert "Opportunities" not in body

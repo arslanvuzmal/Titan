@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
 from titan.config import get_settings
@@ -27,6 +28,7 @@ from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
     ContactSource,
     DraftStatus,
+    Industry,
     LeadStatus,
     MessageState,
     OutboxStatus,
@@ -36,6 +38,7 @@ from titan.db.enums import (
 from titan.db.models import (
     AuditFinding,
     BrowserArtifact,
+    BusinessOpportunity,
     Campaign,
     CampaignPolicy,
     Contact,
@@ -52,6 +55,7 @@ from titan.db.models import (
     Page,
     ResearchRun,
     SenderIdentity,
+    SolutionRecommendation,
     Workspace,
 )
 from titan.db.session import workspace_session, workspace_unit_of_work
@@ -64,6 +68,7 @@ from titan.intelligence.contacts import (
 from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import MessageContext, validate_message
 from titan.intelligence.mx import MxCheck, check_many
+from titan.intelligence.opportunities import DerivedOpportunity, derive_opportunities
 from titan.intelligence.playbooks import get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
@@ -283,6 +288,17 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
         page_ids = {p.url_fingerprint: p.id for p in pages}
         evidence = [PageEvidence.model_validate(p.observations) for p in pages]
 
+        # Read here rather than in the write transaction below: the playbook
+        # only constrains which offers may be proposed, and holding the unit of
+        # work open for a second lookup buys nothing.
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        org = (
+            await session.get(Organization, lead.organization_id)
+            if lead is not None
+            else None
+        )
+        industry = (org.industry if org else None) or Industry.GENERAL
+
     if not evidence:
         return AnalyseActivityResult(findings_created=0, pitchable_findings=0)
 
@@ -359,10 +375,121 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
             .values(findings_count=created, pages_crawled=len(evidence))
         )
 
+        opportunities = await _persist_opportunities(
+            session,
+            workspace_id=workspace_id,
+            lead_id=uuid.UUID(request.lead_id),
+            research_run_id=uuid.UUID(request.research_run_id),
+            industry=industry,
+            detected=detected,
+        )
+
     top = detected[0].issue_type if detected else None
+    sellable = [o for o in opportunities if o.deliverable]
     return AnalyseActivityResult(
-        findings_created=created, pitchable_findings=pitchable, top_issue_type=top
+        findings_created=created,
+        pitchable_findings=pitchable,
+        top_issue_type=top,
+        opportunities_created=len(opportunities),
+        deliverable_opportunities=len(sellable),
+        top_offer_key=sellable[0].offer_key if sellable else None,
     )
+
+
+async def _persist_opportunities(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    research_run_id: uuid.UUID,
+    industry: Industry,
+    detected: list[DetectedFinding],
+) -> list[DerivedOpportunity]:
+    """Replace this run's opportunities with what the findings now support.
+
+    **Replace, not merge.** Opportunities are a pure function of the run's
+    findings and the playbook, so re-deriving them is cheap and the previous set
+    carries no information the new one lacks. Merging would instead accumulate
+    offers from every retry, including ones a corrected finding no longer
+    justifies -- and an opportunity that outlives its evidence is precisely the
+    unfounded claim the whole pipeline exists to prevent.
+
+    That also removes the need for a unique constraint the table does not have,
+    so this ships without a migration against a schema that is already ahead of
+    the repository.
+
+    ``solution_recommendations`` has ``ON DELETE CASCADE`` on its opportunity, so
+    the delete below takes the outlines with it. Nothing is orphaned.
+    """
+    await session.execute(
+        BusinessOpportunity.__table__.delete().where(  # type: ignore[attr-defined]
+            BusinessOpportunity.__table__.c.research_run_id == research_run_id
+        )
+    )
+
+    opportunities = derive_opportunities(industry, detected)
+    if not opportunities:
+        return []
+
+    # Findings are addressed by fingerprint up to this point, because that is
+    # the only identity a detector can produce. Resolve to ids over the whole
+    # run rather than only what this call inserted: on a retry every finding
+    # already exists, ``created`` is zero, and keying off the insert would link
+    # the opportunities to nothing.
+    rows = await session.execute(
+        select(AuditFinding.finding_fingerprint, AuditFinding.id).where(
+            AuditFinding.research_run_id == research_run_id
+        )
+    )
+    finding_ids = {fp: str(fid) for fp, fid in rows.all()}
+
+    for opportunity in opportunities:
+        row = BusinessOpportunity(
+            workspace_id=workspace_id,
+            lead_id=lead_id,
+            research_run_id=research_run_id,
+            offer_key=opportunity.offer_key[:80],
+            title=opportunity.title[:300],
+            rationale=opportunity.rationale,
+            supporting_finding_ids=[
+                finding_ids[fp]
+                for fp in opportunity.supporting_fingerprints
+                if fp in finding_ids
+            ],
+            estimated_value_usd=opportunity.estimated_value_usd,
+            priority=opportunity.priority,
+            deliverable=opportunity.deliverable,
+        )
+        session.add(row)
+        await session.flush()
+
+        if opportunity.solution is None:
+            continue
+        session.add(
+            SolutionRecommendation(
+                workspace_id=workspace_id,
+                opportunity_id=row.id,
+                summary=opportunity.solution.summary,
+                implementation_outline=list(opportunity.solution.implementation_outline),
+                estimated_effort=opportunity.solution.estimated_effort,
+                prerequisites=list(opportunity.solution.prerequisites),
+                # Null on purpose: nothing here came from a model, and pointing
+                # at a model run would misattribute deterministic work.
+                model_run_id=None,
+            )
+        )
+
+    logger.info(
+        "opportunities derived",
+        extra={
+            "lead_id": str(lead_id),
+            "research_run_id": str(research_run_id),
+            "industry": industry.value,
+            "opportunities": len(opportunities),
+            "deliverable": sum(1 for o in opportunities if o.deliverable),
+        },
+    )
+    return opportunities
 
 
 # ==========================================================================

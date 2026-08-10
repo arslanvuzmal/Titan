@@ -199,3 +199,72 @@ def test_subject_line_alone_can_carry_the_intent():
     result = detect_intent("Re: pricing - yes please, sounds good", "")
 
     assert result.is_positive
+
+
+# ---------------------------------------------------------------------------
+# The quoted excerpt
+# ---------------------------------------------------------------------------
+def test_the_verdict_quotes_the_sentence_it_fired_on():
+    """An operator triaging a queue needs the words, not the rule name."""
+    result = verdict(
+        "Thanks for getting in touch.\n"
+        "Could we book a call for sometime next week?\n"
+        "Best, Sam"
+    )
+
+    assert result.reply_class is ReplyClass.WANTS_CALL
+    assert result.excerpt == "Could we book a call for sometime next week?"
+
+
+def test_the_excerpt_is_verbatim_not_paraphrased():
+    """It becomes the CRM's record of what somebody said, so it must be true."""
+    result = verdict("Honestly, we're not interested at this time.")
+
+    assert result.excerpt is not None
+    assert result.excerpt in "Honestly, we're not interested at this time."
+
+
+def test_an_ambiguous_reply_quotes_the_positive_half():
+    """The operator is deciding whether there is a sale in it.
+
+    Showing them the rejection they already assumed helps nobody; showing them
+    the sentence that might be worth answering is the whole reason to look.
+    """
+    result = verdict(
+        "Not interested in the SEO work. But we are very interested in the "
+        "booking fix you mentioned."
+    )
+
+    assert result.reply_class is ReplyClass.UNKNOWN
+    assert result.excerpt is not None
+    assert "booking fix" in result.excerpt
+
+
+def test_an_unmatched_reply_has_no_excerpt():
+    result = verdict("Got it, cheers.")
+
+    assert result.reply_class is ReplyClass.UNKNOWN
+    assert result.excerpt is None
+
+
+def test_an_excerpt_never_swallows_an_unpunctuated_wall_of_text():
+    from titan.intelligence.intent import MAX_EXCERPT_CHARS
+
+    result = verdict("x " * 900 + "happy to chat " + "y " * 900)
+
+    assert result.excerpt is not None
+    assert len(result.excerpt) <= 2 * MAX_EXCERPT_CHARS + len("happy to chat")
+
+
+def test_the_excerpt_is_drawn_from_the_reply_not_the_quoted_original():
+    """Titan's own pitch is full of the language these rules look for."""
+    result = verdict(
+        "No thanks.\n"
+        "\n"
+        "On Monday, outreach@ours.test wrote:\n"
+        "> Happy to chat whenever suits - shall we book a call?\n"
+    )
+
+    assert result.reply_class is ReplyClass.NOT_INTERESTED
+    assert result.excerpt is not None
+    assert "book a call" not in result.excerpt
