@@ -175,9 +175,21 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
         with: {node-version: "20"}
-      # No `version:` here on purpose: package.json already pins
-      # packageManager, and specifying both is a hard error in this action.
-      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+      # corepack rather than pnpm/action-setup.
+      #
+      # This repository's Actions allowlist (Settings -> Actions -> General,
+      # "Allow select actions") permits GitHub-owned and Marketplace-verified
+      # actions only, and pnpm is not a verified creator. Referencing it did
+      # not fail its own step -- GitHub rejected the whole workflow at startup,
+      # producing a 0s run with no jobs and no logs, on every branch and on
+      # main. Isolated by probing each action in its own workflow: checkout,
+      # setup-uv and docker/* all start; pnpm/action-setup alone does not.
+      #
+      # corepack ships inside Node and reads the pinned version from the same
+      # packageManager field the action was reading, so the pin is unchanged.
+      - name: Enable pnpm from the packageManager pin
+        env: {COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"}
+        run: corepack enable
       # Frozen. A lockfile that CI is allowed to ignore is not a lockfile;
       # this used to be --no-frozen-lockfile because the browser worker (an
       # npm project) was in the pnpm workspace and its entries went stale.
@@ -230,11 +242,19 @@ jobs:
   #   failed to push ghcr.io/<owner>/titan-api:sha-<sha>
   #   HEAD .../blobs/sha256:... -> 403 Forbidden
   #
-  # The cause is a repository setting, not this file. Settings -> Actions ->
-  # General -> Workflow permissions was "Read repository contents permission",
-  # and a workflow cannot grant itself more than the repository default allows.
-  # The `permissions: packages: write` block below is necessary but not
-  # sufficient; the repository default must also permit writes.
+  # The cause is a repository setting, not this file: Settings -> Actions ->
+  # General -> Workflow permissions is "Read repository contents permission".
+  #
+  # An earlier revision of this comment added that "a workflow cannot grant
+  # itself more than the repository default allows". That is wrong, and it was
+  # asserted without being tested. A probe workflow requesting
+  # `packages: write` against this repository, whose default is read, starts
+  # and is granted it: the repository setting is a default for workflows that
+  # declare no `permissions:` block, not a ceiling on those that do.
+  #
+  # So the top-level `permissions: packages: write` should be sufficient on its
+  # own, and the 403 above has some other cause. Left unresolved rather than
+  # guessed at a third time -- the next push to main will say.
   #
   # This is why the failure looked intermittent and tree-independent: images are
   # only pushed from main (see `push:` below), so every branch and pull-request
