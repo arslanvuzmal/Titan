@@ -122,6 +122,17 @@ _AUTO_SUBJECTS = (
     re.compile(r"\bthank you for (contacting|your (email|message|enquiry))\b", re.I),
 )
 
+#: RFC 3462's marker for a delivery status report, matched tolerantly.
+#:
+#: The parameter value is quoted or bare depending on who serialised the header:
+#: Python's own email policy emits ``report-type="delivery-status"``, most MTAs
+#: emit it bare, and a webhook payload may do either. A plain substring test for
+#: the bare form silently fails on the quoted one -- the DSN then falls through
+#: to the sender and subject heuristics, and a report from a host that uses
+#: neither a daemon-shaped From nor an English subject is classified as a human
+#: reply. That stops a live sequence and records a bounce as somebody answering.
+_DSN_CONTENT_TYPE = re.compile(r"report-type\s*=\s*[\"']?delivery-status[\"']?", re.I)
+
 #: A bounce announces itself in the envelope long before the body.
 _BOUNCE_SENDERS = re.compile(
     r"^(mailer-daemon|postmaster|mail delivery (subsystem|system)|"
@@ -208,7 +219,7 @@ def classify_reply(message: InboundMessage) -> ReplyClassification:
         )
 
     # ---- 3. bounce ---------------------------------------------------------
-    is_dsn = "report-type=delivery-status" in (message.content_type or "").lower()
+    is_dsn = bool(_DSN_CONTENT_TYPE.search(message.content_type or ""))
     from_matches = bool(_BOUNCE_SENDERS.match((message.from_email or "").strip()))
     subject_matches = _any(_BOUNCE_SUBJECTS, subject)
     if is_dsn or from_matches or subject_matches:

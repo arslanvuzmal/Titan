@@ -285,6 +285,10 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         "titan/providers/smartlead.py",  # from_settings() builds the Smartlead client
         "titan/api/security.py",  # signs and verifies session tokens
         "titan/workers/outbox.py",
+        # Hands the mailbox password to the IMAP client, exactly as the outbox
+        # worker hands the SMTP password to its provider. Both build a client at
+        # startup and neither logs the value.
+        "titan/workers/inbound.py",
         "titan/cli.py",
     }
     for path in python_sources():
