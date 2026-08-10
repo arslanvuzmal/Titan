@@ -118,7 +118,7 @@ async def test_a_confident_rejection_suppresses_the_address(db_session, workspac
 
     async with workspace_unit_of_work(workspace) as session:
         entry = (await session.execute(select(SuppressionEntry))).scalars().one()
-        assert entry.value == fixture.to_email
+        assert entry.normalized_value == fixture.to_email
         assert entry.reason is SuppressionReason.NOT_INTERESTED
 
 

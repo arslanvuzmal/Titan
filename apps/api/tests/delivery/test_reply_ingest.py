@@ -96,11 +96,12 @@ async def test_a_reply_is_recorded_not_just_acted_on(db_session, workspace):
 async def test_a_human_reply_is_recorded_as_unknown_not_as_interested(
     db_session, workspace
 ):
-    """The rules prove a person wrote; they do not prove what that person wants.
+    """A reply carrying no intent signal must not be assigned one.
 
-    Forcing HUMAN into INTERESTED would put a fabricated intent into the client
-    history where a reader takes it as fact. The authoritative signal that a
-    human replied is the lead status, which is set on the same path.
+    The rules prove a person wrote; where nothing indicates what they want,
+    inventing a class would put a fabricated intent into the client history
+    where a reader takes it as fact. The authoritative signal that a human
+    replied is the lead status, which is set on the same path.
     """
     fixture = await build_sendable(db_session, workspace)
 
@@ -108,7 +109,7 @@ async def test_a_human_reply_is_recorded_as_unknown_not_as_interested(
         await ingest_inbound(
             session,
             workspace_id=workspace,
-            message=human_reply(fixture.to_email),
+            message=human_reply(fixture.to_email, body="Got it, cheers."),
             lead_id=fixture.lead_id,
             provider_inbound_id="reply-002@theirs.test",
             received_at=REPLIED_AT,
@@ -265,7 +266,7 @@ async def test_a_bounce_suppresses_the_failed_recipient_not_the_daemon(
 
     async with workspace_unit_of_work(workspace) as session:
         entries = (await session.execute(select(SuppressionEntry))).scalars().all()
-        suppressed = {e.value for e in entries}
+        suppressed = {e.normalized_value for e in entries}
         assert fixture.to_email in suppressed
         assert daemon not in suppressed
         assert all(e.reason is SuppressionReason.HARD_BOUNCE for e in entries)
@@ -351,7 +352,7 @@ async def test_an_unsubscribe_suppresses_and_stops(db_session, workspace):
 
     async with workspace_unit_of_work(workspace) as session:
         entry = (await session.execute(select(SuppressionEntry))).scalars().one()
-        assert entry.value == fixture.to_email
+        assert entry.normalized_value == fixture.to_email
         assert entry.reason is SuppressionReason.UNSUBSCRIBE
 
 
