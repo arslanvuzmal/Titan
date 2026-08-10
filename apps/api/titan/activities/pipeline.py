@@ -11,6 +11,7 @@ worker re-evaluates the entire authorization chain before any provider call.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import uuid
@@ -21,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from temporalio import activity
 
-from titan.config import Settings, get_settings
+from titan.config import get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
     ContactSource,
@@ -39,6 +40,7 @@ from titan.db.models import (
     CampaignPolicy,
     Contact,
     ContactChannel,
+    ContactVerification,
     CrawlRun,
     FindingEvidence,
     Lead,
@@ -54,13 +56,15 @@ from titan.db.models import (
 )
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery.suppression import is_suppressed
+from titan.intelligence.composer import ComposerContext, compose
 from titan.intelligence.contacts import (
     check_contact_eligibility,
     extract_contacts_from_pages,
 )
 from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import MessageContext, validate_message
-from titan.intelligence.playbooks import Offer, get_playbook, select_offers
+from titan.intelligence.mx import MxCheck, check_many
+from titan.intelligence.playbooks import get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
 from titan.providers.browser_client import BrowserWorkerClient
@@ -564,20 +568,33 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
     allowed = frozenset(ContactSource(s) for s in allowed_sources)
     rejected: list[str] = []
 
+    # DNS before the write loop, never inside it: check_many blocks on the
+    # resolver, and mission section 25 forbids I/O inside a unit of work. One
+    # lookup per distinct domain, not per address, so a site publishing six
+    # mailboxes costs one query.
+    mx_checks = await _resolve_mx(
+        [c.domain for c in discovered if c.is_usable and c.domain]
+    )
+
     for candidate in discovered:
         if not candidate.is_usable:
             rejected.append(f"{candidate.normalized}: {candidate.rejection_reason}")
             continue
 
+        mx = mx_checks.get(candidate.domain)
         verdict = check_contact_eligibility(
             source=candidate.source,
-            # First-party published is the provenance; no external verification
-            # provider is configured, and MX presence would not upgrade this.
+            # First-party published is the provenance. MX is passed as a
+            # disqualifier only: a domain with no route for inbound mail hard-
+            # bounces every address at it, but a domain that *does* publish MX
+            # has proved nothing about this mailbox and never upgrades the
+            # status. See contacts.mx_presence_is_not_verification.
             verification=VerificationStatus.PUBLISHED_FIRST_PARTY,
             is_active=True,
             allowed_sources=allowed,
             require_verified=require_verified,
             email=candidate.normalized,
+            mx=mx,
         )
         if not verdict.eligible:
             rejected.append(f"{candidate.normalized}: {'; '.join(verdict.reasons)}")
@@ -630,6 +647,7 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                 .returning(ContactChannel.__table__.c.id)
             )
             channel_id = inserted.scalar_one_or_none()
+            newly_discovered = channel_id is not None
             if channel_id is None:
                 channel_id = (
                     await session.execute(
@@ -639,6 +657,23 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                         )
                     )
                 ).scalar_one()
+
+            # Only on first discovery. The table is append-only by design, so a
+            # genuinely new check should add a row -- but an activity retry is
+            # not a new check, and letting one append would turn a retry storm
+            # into a verification history that never happened.
+            if newly_discovered and mx is not None:
+                session.add(
+                    ContactVerification(
+                        workspace_id=workspace_id,
+                        channel_id=channel_id,
+                        provider="dns_mx",
+                        result=_mx_verification_status(mx),
+                        mx_present=mx.can_receive_mail,
+                        detail=mx.as_verification_detail(),
+                        verified_at=_now(),
+                    )
+                )
 
             await session.execute(
                 Lead.__table__.update()  # type: ignore[attr-defined]
@@ -652,6 +687,43 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
     return ContactActivityResult(
         eligible_channel_id=None, rejected_reasons=tuple(rejected[:8])
     )
+
+
+async def _resolve_mx(domains: list[str]) -> dict[str, MxCheck]:
+    """MX for each distinct domain, off the event loop.
+
+    ``check_many`` uses a blocking resolver. Calling it directly would stall the
+    whole worker for as long as DNS took, which on an unresponsive nameserver is
+    the full eight-second timeout per domain.
+
+    A resolver failure returns an ERROR check rather than raising: it is not
+    evidence about the domain, and letting it propagate would abandon contact
+    discovery for a lead whose address is probably fine.
+    """
+    if not domains:
+        return {}
+    try:
+        result = await asyncio.to_thread(check_many, domains)
+    except Exception as exc:
+        logger.warning(
+            "mx resolution failed for the whole batch; proceeding without it",
+            extra={"error_code": type(exc).__name__, "domains": len(set(domains))},
+        )
+        return {}
+    return dict(result.checks)
+
+
+def _mx_verification_status(mx: MxCheck) -> VerificationStatus:
+    """What an MX check is allowed to conclude about an address.
+
+    Never PUBLISHED_FIRST_PARTY or PROVIDER_VERIFIED -- neither is in
+    SENDABLE_VERIFICATION_STATUSES by accident, and DNS cannot establish that a
+    mailbox exists. A positive result is recorded as UNKNOWN precisely so it
+    cannot be mistaken for verification later.
+    """
+    if mx.is_conclusively_undeliverable:
+        return VerificationStatus.INVALID
+    return VerificationStatus.UNKNOWN
 
 
 # ==========================================================================
@@ -752,14 +824,26 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
     offers = select_offers(org_industry, {f.issue_type for f in pitchable})
     offer = offers[0] if offers else None
 
-    subject, body, claim_map = _compose(
-        org_domain=org_domain,
-        finding=headline,
-        offer=offer,
-        settings=settings,
-        mailing_address=mailing_address,
-        evidence_ids=evidenced[str(headline.id)],
+    portfolio = str(settings.owner_portfolio_url).rstrip("/")
+    composed = compose(
+        ComposerContext(
+            org_domain=org_domain,
+            finding=headline,
+            evidence_ids=evidenced[str(headline.id)],
+            owner_name=settings.owner_name,
+            portfolio_url=portfolio,
+            mailing_address=mailing_address or "",
+            unsubscribe_url=f"{portfolio}/unsubscribe",
+            solution=(
+                offer.delivers if offer else "enquiry capture and follow-up automation"
+            ),
+            # The lead, so the same lead always composes to the same message.
+            # Seeding on anything that varies between runs would produce a
+            # second, differently worded draft on an activity retry.
+            variant_seed=request.lead_id,
+        )
     )
+    subject, body, claim_map = composed.subject, composed.body, composed.claim_map
 
     report = validate_message(
         MessageContext(
@@ -811,91 +895,6 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         validation_passed=report.passed,
         violation_codes=tuple(v.code.value for v in report.violations),
     )
-
-
-def _compose(
-    *,
-    org_domain: str,
-    finding: AuditFinding,
-    offer: Offer | None,
-    settings: Settings,
-    mailing_address: str | None,
-    evidence_ids: list[str],
-) -> tuple[str, str, list[dict[str, Any]]]:
-    """Build the message from the evidence.
-
-    Deliberately template-driven rather than model-generated in this build: the
-    validator is the gate, and a deterministic composer means the claim map and
-    the sentence cannot drift apart. The model gateway is wired and available to
-    replace this once its output is held to the same claim-map contract.
-    """
-    portfolio = str(settings.owner_portfolio_url).rstrip("/")
-    address = mailing_address or ""
-    domain = org_domain
-
-    claim = (
-        f"On {domain} the {_describe(finding)}, so anyone who gets that far "
-        f"cannot complete the step."
-    )
-    # Must be a NOUN PHRASE. An imperative here reads as "I build point the
-    # button at a tested flow", and naming a page element turns the sentence
-    # into an unsupported claim about the recipient's site.
-    solution = offer.delivers if offer else "enquiry capture and follow-up automation"
-
-    # The impact line is Titan's own description of the SAME evidenced finding,
-    # so it is a claim about the recipient's site and belongs in the claim map.
-    # Omitting it made the validator reject the draft -- correctly.
-    impact = (
-        finding.business_impact
-        or "That is the step most likely to be used by someone ready to act"
-    ).rstrip(".") + "."
-    offer_line = (
-        f"I build {solution.lower()} for firms of this size, and could outline "
-        "what it would take in about ten minutes."
-    )
-
-    body = (
-        "Hi there,\n\n"
-        f"{claim}\n\n"
-        f"{impact} {offer_line}\n\n"
-        "Would a short call next week be useful?\n\n"
-        f"{settings.owner_name}\n"
-        f"{portfolio}\n"
-        f"{address}\n"
-        f"Unsubscribe: {portfolio}/unsubscribe\n"
-    )
-    subject = f"A broken step on {domain}"[:120]
-    claim_map = [
-        {
-            "sentence": claim,
-            "claim": finding.issue_type,
-            "finding_id": str(finding.id),
-            "evidence_ids": evidence_ids,
-            "source_url": finding.page_url,
-        },
-        {
-            "sentence": impact,
-            "claim": f"{finding.issue_type}:business_impact",
-            "finding_id": str(finding.id),
-            "evidence_ids": evidence_ids,
-            "source_url": finding.page_url,
-        },
-    ]
-    return subject, body, claim_map
-
-
-def _describe(finding: AuditFinding) -> str:
-    observed = (finding.observed_value or "").strip()
-    mapping = {
-        "broken_primary_cta": f"main call-to-action button returns {observed or 'nothing'}",
-        "no_booking_or_enquiry_path": "site has no booking link or enquiry form",
-        "high_friction_contact_form": f"enquiry form asks for {observed} fields",
-        "missing_mobile_viewport": "homepage has no mobile viewport tag",
-        "broken_internal_link": f"navigation links to a page that returns {observed}",
-        "javascript_console_errors": "page raises JavaScript errors on load",
-        "no_visible_phone_number": "pages carry no phone number",
-    }
-    return mapping.get(finding.issue_type, finding.title.lower())
 
 
 # ==========================================================================

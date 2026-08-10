@@ -155,6 +155,39 @@ class Settings(BaseSettings):
     smtp_security: Literal["ssl", "starttls", "none"] = "ssl"
     smtp_timeout_seconds: int = Field(default=30, ge=5, le=300)
 
+    # -------------------------------------------------------------- operator
+    #: Chat webhook (Slack/Discord-compatible) for operator alerts. Optional by
+    #: design: every notification is written to the tasks table regardless, and
+    #: this only decides whether one also arrives somewhere noisier. A missing
+    #: value degrades the channel, never the record.
+    #:
+    #: Only the headline is pushed. The body of a reply stays in the CRM rather
+    #: than being copied into a third-party chat system the prospect was never
+    #: told about.
+    operator_webhook_url: AnyHttpUrl | None = None
+
+    # ------------------------------------------------------------------ imap
+    #: The mailbox replies arrive in, read by titan.workers.inbound. Separate
+    #: from the SMTP block on purpose: sending and receiving are frequently
+    #: different hosts, and a deployment may legitimately do one without the
+    #: other. No "none" security option, unlike SMTP -- there is no local-capture
+    #: equivalent of Mailpit for *reading* mail, so plaintext here would only
+    #: ever put a real mailbox password and the full text of every reply on the
+    #: wire in clear.
+    imap_host: str | None = None
+    imap_port: Port = 993
+    imap_username: str | None = None
+    imap_password: SecretStr | None = None
+    imap_security: Literal["ssl", "starttls"] = "ssl"
+    imap_folder: str = "INBOX"
+    imap_poll_seconds: int = Field(default=60, ge=15, le=3600)
+    imap_batch_size: int = Field(default=50, ge=1, le=500)
+    #: Where to record a reply that matches no message Titan sent -- somebody
+    #: writing in cold, or answering from an address we never wrote to. Every
+    #: row in the schema is workspace-scoped, so without this such a message
+    #: cannot be stored at all and is left in the mailbox unread.
+    imap_workspace_id: str | None = None
+
     # ---------------------------------------------------------------- email
     email_provider: Literal["mock", "resend", "smartlead", "smtp"] = "mock"
     resend_api_key: SecretStr | None = None
@@ -317,6 +350,11 @@ class Settings(BaseSettings):
         "smtp_host",
         "smtp_username",
         "smtp_password",
+        "imap_host",
+        "imap_username",
+        "imap_password",
+        "imap_workspace_id",
+        "operator_webhook_url",
         "nvidia_api_key",
         "gemini_api_key",
         "openrouter_api_key",
@@ -459,6 +497,24 @@ class Settings(BaseSettings):
                 "TITAN_SENDER_MAILING_ADDRESS is not set (required in the footer "
                 "of every commercial message)"
             )
+        return errors
+
+    def reply_collection_errors(self) -> list[str]:
+        """Reasons the reply poller cannot run.
+
+        Deliberately a startup failure rather than an idle loop. A poller that
+        starts with no credentials looks healthy in every dashboard and reads
+        nothing, so the first sign of trouble is a complaint from somebody who
+        asked to be removed three weeks ago and kept hearing from us. Refusing
+        to boot puts the failure where it can be seen.
+        """
+        errors: list[str] = []
+        if not self.imap_host:
+            errors.append("TITAN_IMAP_HOST is not set")
+        if not self.imap_username:
+            errors.append("TITAN_IMAP_USERNAME is not set")
+        if self.imap_password is None:
+            errors.append("TITAN_IMAP_PASSWORD is not set")
         return errors
 
 

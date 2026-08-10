@@ -28,6 +28,23 @@ x-titan-env: &titan-env
   TITAN_RESEND_API_KEY: ${TITAN_RESEND_API_KEY:-}
   TITAN_RESEND_WEBHOOK_SECRET: ${TITAN_RESEND_WEBHOOK_SECRET:-}
   TITAN_SENDER_MAILING_ADDRESS: ${TITAN_SENDER_MAILING_ADDRESS:-}
+  # --- reply collection (inbound-worker) ---
+  # No kill switch here, unlike sending. Reading replies is how unsubscribes,
+  # complaints and bounces are honoured, so the safe default is *on* wherever
+  # credentials exist -- the dangerous state is a system that mails people and
+  # cannot hear them answer.
+  TITAN_IMAP_HOST: ${TITAN_IMAP_HOST:-}
+  TITAN_IMAP_PORT: ${TITAN_IMAP_PORT:-993}
+  TITAN_IMAP_USERNAME: ${TITAN_IMAP_USERNAME:-}
+  TITAN_IMAP_PASSWORD: ${TITAN_IMAP_PASSWORD:-}
+  TITAN_IMAP_SECURITY: ${TITAN_IMAP_SECURITY:-ssl}
+  TITAN_IMAP_FOLDER: ${TITAN_IMAP_FOLDER:-INBOX}
+  TITAN_IMAP_POLL_SECONDS: ${TITAN_IMAP_POLL_SECONDS:-60}
+  TITAN_IMAP_WORKSPACE_ID: ${TITAN_IMAP_WORKSPACE_ID:-}
+  # Optional chat webhook for operator alerts. Every notification is written to
+  # the tasks table regardless; this only decides whether one also arrives
+  # somewhere noisier. Unset degrades the channel, never the record.
+  TITAN_OPERATOR_WEBHOOK_URL: ${TITAN_OPERATOR_WEBHOOK_URL:-}
   # --- discovery ---
   TITAN_GOOGLE_PLACES_API_KEY: ${TITAN_GOOGLE_PLACES_API_KEY:-}
   TITAN_AGENT_REACH_API_KEY: ${TITAN_AGENT_REACH_API_KEY:-}
@@ -192,6 +209,33 @@ services:
       # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
       # would be permanently unhealthy and restart-looped. This checks the one
       # dependency the worker genuinely needs.
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+  # Reads the outreach mailbox and feeds replies to the ingest rules. Runs under
+  # the same profile as the outbox worker but is a separate process on purpose:
+  # this one holds a mailbox password and never sends, that one holds a provider
+  # client and never reads. Neither can do the other's job by accident.
+  #
+  # Starts only when TITAN_IMAP_HOST is set -- it refuses to boot without
+  # credentials rather than idling and looking healthy while reading nothing.
+  inbound-worker:
+    build: {context: ., dockerfile: apps/api/Dockerfile}
+    environment: *titan-env
+    command: ["python", "-m", "titan.workers.inbound"]
+    healthcheck:
       test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 30s
       timeout: 10s

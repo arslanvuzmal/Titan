@@ -18,9 +18,12 @@ What SMTP cannot give, stated plainly rather than faked:
   but that is a convention, not a guarantee. The real protection remains the
   outbox lease and the ``SENT`` status transition.
 * **No delivery status and no webhooks.** ``get_status`` returns None and
-  ``verify_webhook`` refuses, because a bounce arrives as a separate email to
-  the envelope sender, which nothing here reads yet. Guessing a state would put
-  fiction into the message state machine.
+  ``verify_webhook`` refuses. Guessing a state would put fiction into the
+  message state machine. A bounce instead arrives as a separate email to the
+  envelope sender, and is picked up out of band by
+  :mod:`titan.delivery.reply_collector` -- which reads the mailbox, matches the
+  report to the message that provoked it via the deterministic ``Message-ID``
+  built below, and suppresses the address that actually failed.
 
 Only the outbox worker may import this module; an invariant test enforces it.
 """
@@ -184,7 +187,7 @@ class SmtpProvider:
     def verify_webhook(self, *, payload: bytes, headers: dict[str, str]) -> None:
         raise WebhookVerificationError(
             "SMTP has no webhooks; bounces arrive as mail to the envelope sender "
-            "and nothing ingests them yet"
+            "and are ingested by the reply collector, not through this path"
         )
 
     def normalize_webhook(self, payload: dict[str, Any]) -> NormalizedEvent | None:

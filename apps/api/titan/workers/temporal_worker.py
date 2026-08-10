@@ -21,12 +21,16 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
+from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
+from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
+from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
@@ -60,11 +64,20 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=RESEARCH_QUEUE,
-        workflows=[LeadResearchWorkflow],
+        # The orchestrator runs on the same queue as the research children it
+        # starts, and passes its own task_queue down, so a deployment can never
+        # end up with an orchestrator whose children have no worker to run them.
+        workflows=[
+            LeadResearchWorkflow,
+            CampaignOrchestratorWorkflow,
+            WeeklyReportWorkflow,
+        ],
         activities=[
             research_activities.open_research_run,
             research_activities.requires_human_approval,
             research_activities.record_workflow_event,
+            *orchestration_activities.ALL_ORCHESTRATION_ACTIVITIES,
+            *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
         ],
         # Bounded concurrency. An unbounded worker will happily start more
@@ -88,7 +101,11 @@ async def main() -> None:
         extra={
             "task_queue": RESEARCH_QUEUE,
             "temporal_host": settings.temporal_host,
-            "workflows": ["LeadResearchWorkflow"],
+            "workflows": [
+                "LeadResearchWorkflow",
+                "CampaignOrchestratorWorkflow",
+                "WeeklyReportWorkflow",
+            ],
         },
     )
 

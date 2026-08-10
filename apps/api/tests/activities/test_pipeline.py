@@ -60,6 +60,34 @@ NOW = dt.datetime(2026, 8, 3, 12, 0, tzinfo=dt.UTC)
 SITE = "https://harborline-legal-fixture.test"
 
 
+@pytest.fixture(autouse=True)
+def _mx_present(monkeypatch):
+    """Stub DNS for the fixture domains.
+
+    Every domain in this file is an RFC 2606 ``.test`` name, which is reserved
+    precisely so that it never resolves. Against real DNS that is NXDOMAIN, and
+    the contact activity correctly disqualifies the address as undeliverable --
+    which is the right production behaviour and makes every pipeline assertion
+    here fail for a reason that has nothing to do with the pipeline.
+
+    MX has its own coverage in tests/intelligence/test_mx.py, and the
+    disqualification path is asserted directly in
+    ``test_a_domain_that_cannot_receive_mail_is_disqualified`` below. This
+    fixture keeps the rest of the file testing what it is named for.
+    """
+    from titan.intelligence.mx import BulkMxResult, MxCheck, MxStatus
+
+    def _present(domains, *, resolver=None):
+        return BulkMxResult(
+            checks={
+                domain: MxCheck(MxStatus.PRESENT, domain, hosts=("mx.fixture.test",))
+                for domain in {d.strip().lower() for d in domains if d}
+            }
+        )
+
+    monkeypatch.setattr("titan.activities.pipeline.check_many", _present)
+
+
 def crawl_payload(*, broken_cta: bool = True, with_email: bool = True) -> CrawlResult:
     """A site with a deliberately broken primary CTA and a published address."""
     home = PageEvidence(
@@ -459,6 +487,61 @@ async def test_suppressed_recipient_is_never_queued(db_session, workspace) -> No
     out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="supp-1")
     assert out["contact"].eligible_channel_id is None
     assert any("suppress" in r for r in out["contact"].rejected_reasons)
+
+
+@pytest.mark.asyncio
+async def test_a_domain_that_cannot_receive_mail_is_disqualified(
+    db_session, workspace, monkeypatch
+) -> None:
+    """The MX gate, asserted directly because the autouse fixture stubs it off.
+
+    A domain publishing no route for inbound mail hard-bounces every address at
+    it, and a bounce costs sender reputation on every attempt. This is the one
+    direction MX is allowed to act in: a *positive* result never upgrades
+    verification_status, because MX proves a domain accepts mail and says
+    nothing about whether a mailbox exists.
+    """
+    from titan.intelligence.mx import BulkMxResult, MxCheck, MxStatus
+
+    def _absent(domains, *, resolver=None):
+        return BulkMxResult(
+            checks={
+                domain: MxCheck(MxStatus.NXDOMAIN, domain, detail="NXDOMAIN")
+                for domain in {d.strip().lower() for d in domains if d}
+            }
+        )
+
+    monkeypatch.setattr("titan.activities.pipeline.check_many", _absent)
+
+    ids = await seed_lead(workspace, suffix="nomx")
+    out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="nomx-1")
+
+    assert out["contact"].eligible_channel_id is None
+    assert any(
+        "cannot receive mail" in reason for reason in out["contact"].rejected_reasons
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_resolver_failure_is_not_a_disqualifier(
+    db_session, workspace, monkeypatch
+) -> None:
+    """An unreachable resolver is our problem, not evidence about the domain.
+
+    Treating a lookup failure as undeliverable would silently discard good leads
+    whenever DNS had a bad minute, and the loss would look identical to a real
+    answer.
+    """
+
+    def _explode(domains, *, resolver=None):
+        raise OSError("resolver unreachable")
+
+    monkeypatch.setattr("titan.activities.pipeline.check_many", _explode)
+
+    ids = await seed_lead(workspace, suffix="dnsfail")
+    out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="dnsfail-1")
+
+    assert out["contact"].eligible_channel_id is not None
 
 
 @pytest.mark.asyncio

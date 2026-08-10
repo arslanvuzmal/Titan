@@ -202,6 +202,117 @@ class ResearchLeadResult:
     finished_at: str | None = None
 
 
+# ==========================================================================
+# Campaign orchestration
+# ==========================================================================
+
+
+class CycleVerdict(StrEnum):
+    """Why a planning cycle produced the work it did -- or produced none."""
+
+    #: Work was planned.
+    READY = "ready"
+    #: The campaign is paused, archived, or no longer authorized to send.
+    NOT_AUTHORIZED = "not_authorized"
+    #: Today's send allowance is spent. Normal, and not a fault.
+    BUDGET_SPENT = "budget_spent"
+    #: Authorized and funded, but no lead qualifies. This is the one worth
+    #: telling an operator about: the campaign looks alive and is doing nothing.
+    NO_WORK_AVAILABLE = "no_work_available"
+
+
+@dataclasses.dataclass(frozen=True)
+class CampaignCycleInput:
+    workspace_id: str
+    campaign_id: str
+    #: Distinguishes one cycle's activities from the next in idempotency keys.
+    cycle_key: str
+    #: Ceiling on children started this cycle, independent of the send budget.
+    #: Research is expensive whether or not the message is ever sent.
+    max_new_research: int = 25
+
+
+@dataclasses.dataclass(frozen=True)
+class PlannedLead:
+    lead_id: str
+    seed_url: str | None = None
+    #: "new" or "followup". Recorded so the orchestrator's own logs explain the
+    #: mix without a join, and so follow-ups can be prioritised.
+    kind: str = "new"
+
+
+@dataclasses.dataclass(frozen=True)
+class CampaignCyclePlan:
+    verdict: str
+    #: Leads to research this cycle, already ordered and budget-bounded.
+    leads: tuple[PlannedLead, ...] = ()
+    #: Sends still allowed today after subtracting what has already gone out.
+    remaining_budget: int = 0
+    followups_due: int = 0
+    #: Populated for every verdict except READY.
+    detail: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class CampaignOrchestratorInput:
+    workspace_id: str
+    campaign_id: str
+    #: Minutes between planning cycles.
+    interval_minutes: int = 60
+    max_new_research: int = 25
+    #: How many cycles before continue-as-new. A workflow that never
+    #: continues-as-new accumulates history until it hits Temporal's limits and
+    #: is force-terminated -- for an always-on orchestrator that is weeks away,
+    #: not years, and the failure arrives with no warning.
+    cycles_before_continue: int = 24
+    #: Carried across continue-as-new so a status query still reports lifetime
+    #: totals rather than resetting to zero every day.
+    cycles_completed: int = 0
+    leads_started: int = 0
+    #: Also carried. Rolling over is an implementation detail of staying alive,
+    #: and an operator who paused a campaign would not expect it to quietly
+    #: resume itself the next time the workflow's history filled up.
+    paused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class OrchestratorStatus:
+    campaign_id: str
+    state: str
+    cycles_completed: int
+    leads_started: int
+    last_verdict: str | None = None
+    last_cycle_at: str | None = None
+    next_cycle_at: str | None = None
+    paused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class PauseSignal:
+    reason: str
+
+
+# ==========================================================================
+# Weekly reporting
+# ==========================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class WeeklyReportInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WeeklyReportResult:
+    workspace_id: str
+    headline: str
+    body: str
+    messages_sent: int = 0
+    replies_received: int = 0
+    health: str = "insufficient_data"
+    needs_attention: int = 0
+
+
 def utc_iso(moment: dt.datetime) -> str:
     return moment.astimezone(dt.UTC).isoformat()
 
@@ -210,12 +321,19 @@ __all__ = [
     "AnalyseActivityInput",
     "AnalyseActivityResult",
     "ApprovalDecisionSignal",
+    "CampaignCycleInput",
+    "CampaignCyclePlan",
+    "CampaignOrchestratorInput",
     "ContactActivityInput",
     "ContactActivityResult",
     "CrawlActivityInput",
     "CrawlActivityResult",
+    "CycleVerdict",
     "DraftActivityInput",
     "DraftActivityResult",
+    "OrchestratorStatus",
+    "PauseSignal",
+    "PlannedLead",
     "QueueActivityInput",
     "QueueActivityResult",
     "RecordEventInput",
@@ -225,5 +343,7 @@ __all__ = [
     "ResearchStatus",
     "ScoreActivityInput",
     "ScoreActivityResult",
+    "WeeklyReportInput",
+    "WeeklyReportResult",
     "utc_iso",
 ]
