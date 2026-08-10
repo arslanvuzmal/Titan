@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import enum
 import functools
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Environment(enum.StrEnum):
@@ -174,6 +174,44 @@ class Settings(BaseSettings):
     smartlead_campaign_id: int | None = None
     smartlead_timeout_seconds: int = Field(default=30, ge=5, le=300)
 
+    # The five below were recovered from the deployed service's environment,
+    # which sets them against a build that was never pushed to this repository.
+    # `extra="ignore"` meant this Settings model read straight past them, so a
+    # deploy of this tree would silently run with Smartlead disabled and every
+    # message going to the production campaign rather than the sandbox --
+    # failing open, quietly, in the one direction that matters.
+    #
+    # Defaults are the safe end of each, not the deployed value: recovering the
+    # *name* of a switch is not a reason to arrive with it flipped on.
+
+    #: Sandbox campaign. Messages land in Smartlead without going to a stranger,
+    #: which is the only way to exercise the delivery path end to end.
+    smartlead_sandbox_campaign_id: int | None = None
+    #: Route to the production campaign rather than the sandbox. Off by default.
+    smartlead_production_enabled: bool = False
+    #: Allow importing leads into Smartlead. Off by default: an import writes
+    #: recipient data to a third party and is not undone by disabling it later.
+    smartlead_import_enabled: bool = False
+    #: Addresses that may receive sandbox sends. Anything not listed here is
+    #: refused while production routing is off, so a misconfigured test cannot
+    #: reach a real prospect.
+    #:
+    #: Accepts a comma-separated string, which is the form the deployed service
+    #: actually sets.
+    #:
+    #: `NoDecode` is load-bearing, not decoration. pydantic-settings decodes a
+    #: complex field from the environment by calling json.loads *inside the env
+    #: source*, before any field validator runs -- so a plain
+    #: `tuple[str, ...]` raises SettingsError on boot against the deployed
+    #: value and no validator can rescue it. NoDecode hands the raw string to
+    #: the validator below instead. Found by loading Settings against the real
+    #: recovered environment; reading the code would not have shown it.
+    smartlead_test_recipients: Annotated[tuple[str, ...], NoDecode] = ()
+    #: HMAC secret for verifying Smartlead webhook callbacks. Without it the
+    #: webhook route must fail closed -- an unverified callback can mark a
+    #: message replied and stop a sequence.
+    smartlead_webhook_secret: SecretStr | None = None
+
     #: THE GLOBAL KILL SWITCH (invariant 8, 21).
     #: False means: no outbox row may ever be handed to a real provider,
     #: regardless of workspace, campaign, or user configuration.
@@ -215,6 +253,13 @@ class Settings(BaseSettings):
 
     # ---------------------------------------------------------------- owner
     owner_name: str = "Arslan Vuzmal Lone"
+    #: Used in message signatures and the portfolio claims a draft may make.
+    #: Recovered from the deployed environment along with the smartlead block.
+    owner_title: str = "AI & Full-Stack Systems Engineer"
+    #: Appears in outbound copy, so it is a factual claim about the sender and
+    #: is deliberately configuration rather than a hardcoded string that goes
+    #: stale without anyone noticing.
+    owner_years_experience: int = Field(default=2, ge=0, le=80)
     owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.dev")
     owner_portfolio_fallback_url: AnyHttpUrl = AnyHttpUrl(
         "https://arslanvuzmallone.vercel.app"
@@ -234,6 +279,32 @@ class Settings(BaseSettings):
     rate_limit_redis_url: str | None = None
 
     # ------------------------------------------------------------ validators
+    @field_validator("smartlead_test_recipients", mode="before")
+    @classmethod
+    def _comma_separated_recipients(cls, value: Any) -> Any:
+        """Accept `a@x.com,b@y.com` as well as a JSON array.
+
+        One environment variable cannot hold a list, so every deployment
+        encodes one somehow. pydantic-settings assumes JSON; the deployed
+        service uses commas. Supporting both means the recovered environment
+        loads, and a JSON array still works for anyone who writes one.
+        """
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        if stripped.startswith("["):
+            # Parsed here rather than deferred to pydantic: pydantic-settings
+            # decodes JSON for values arriving from the environment but not for
+            # ones passed directly, and the field should not behave differently
+            # depending on which of those a caller used.
+            import json
+
+            try:
+                return tuple(json.loads(stripped))
+            except (ValueError, TypeError):
+                return value  # let the field's own validation report it
+        return tuple(part.strip() for part in stripped.split(",") if part.strip())
+
     @field_validator(
         "clerk_issuer_url",
         "agent_reach_base_url",
@@ -242,6 +313,7 @@ class Settings(BaseSettings):
         "resend_api_key",
         "resend_webhook_secret",
         "smartlead_api_key",
+        "smartlead_webhook_secret",
         "smtp_host",
         "smtp_username",
         "smtp_password",

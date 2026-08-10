@@ -1,0 +1,26 @@
+# Known false positives, pinned by fingerprint (commit:file:rule:line).
+#
+# Every entry below matched `generic-api-key` on an 8-character string. Real
+# credentials for these providers are 30-100+ characters, so these are the
+# detector firing on short high-entropy tokens in committed build output and a
+# test fixture -- not leaked keys.
+#
+# Fingerprints, not path globs, on purpose: excluding the whole file would also
+# suppress a genuine key committed to it later.
+#
+# The three middleware.js entries are in a Netlify build artifact that was
+# committed by accident (note the doubled apps/web/apps/web/ path). Deleting it
+# from the working tree is worth doing separately; it does not remove it from
+# history, which is what gitleaks scans.
+
+# generic-api-key  apps/api/tests/delivery/test_deliverability.py:27
+6f232429c6431de5adee9a081656fdc34e2e1bd3:apps/api/tests/delivery/test_deliverability.py:generic-api-key:27
+
+# generic-api-key  apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:46
+559bd3245a62147870eede64323ed30b7b84997f:apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:generic-api-key:46
+
+# generic-api-key  apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:48
+559bd3245a62147870eede64323ed30b7b84997f:apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:generic-api-key:48
+
+# generic-api-key  apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:49
+559bd3245a62147870eede64323ed30b7b84997f:apps/web/apps/web/.netlify/edge-functions/___netlify-edge-handler-middleware/server/middleware.js:generic-api-key:49
