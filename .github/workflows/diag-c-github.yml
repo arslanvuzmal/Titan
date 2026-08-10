@@ -1,0 +1,14 @@
+# TEMPORARY diagnostic. Delete once CI is green.
+# Variable under test: whether the Actions allowlist permits actions/checkout
+name: diag-c-github
+
+on:
+  push:
+    branches: ["agent/**"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

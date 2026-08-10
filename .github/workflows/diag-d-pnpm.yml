@@ -1,0 +1,14 @@
+# TEMPORARY diagnostic. Delete once CI is green.
+# Variable under test: whether the Actions allowlist permits pnpm/action-setup
+name: diag-d-pnpm
+
+on:
+  push:
+    branches: ["agent/**"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2

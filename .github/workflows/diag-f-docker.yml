@@ -1,0 +1,14 @@
+# TEMPORARY diagnostic. Delete once CI is green.
+# Variable under test: whether the Actions allowlist permits docker/setup-buildx-action
+name: diag-f-docker
+
+on:
+  push:
+    branches: ["agent/**"]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349
