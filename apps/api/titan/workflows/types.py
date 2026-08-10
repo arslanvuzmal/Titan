@@ -81,6 +81,13 @@ class AnalyseActivityResult:
     findings_created: int
     pitchable_findings: int
     top_issue_type: str | None = None
+    #: Commercial roll-up of the findings. Defaulted, so a history recorded
+    #: before opportunities existed still replays against this code.
+    opportunities_created: int = 0
+    #: Of those, the ones the owner sells a fix for. The rest are recorded gaps
+    #: and must never reach a message -- see titan.intelligence.opportunities.
+    deliverable_opportunities: int = 0
+    top_offer_key: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)

@@ -544,6 +544,35 @@ async def test_a_resolver_failure_is_not_a_disqualifier(
     assert out["contact"].eligible_channel_id is not None
 
 
+def clean_payload() -> CrawlResult:
+    """A well-built site: nothing for a detector to fire on."""
+    clean = PageEvidence(
+        url=f"{SITE}/",
+        final_url=f"{SITE}/",
+        depth=0,
+        http_status=200,
+        title="Clean",
+        meta_description="A well-built site.",
+        has_viewport_meta=True,
+        image_count=3,
+        images_missing_alt=0,
+        visible_phones=["+15550100"],
+        visible_emails=["hello@harborline-legal-fixture.test"],
+        forms=[FormObservation(selector="form", field_count=3, has_submit=True)],
+        structured_data_types=["LegalService"],
+        captured_at=NOW,
+    )
+    return CrawlResult(
+        request_id="r",
+        status="completed",
+        seed_url=f"{SITE}/",
+        final_url=f"{SITE}/",
+        pages=[clean],
+        pages_fetched=1,
+        worker_version="t",
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_clean_site_produces_no_pitchable_finding(db_session, workspace) -> None:
     """The false-positive control, end to end."""
@@ -588,3 +617,118 @@ async def test_research_run_records_the_policy_snapshot(db_session, workspace) -
         run = await s.get(ResearchRun, uuid.UUID(out["run_id"]))
     assert run.playbook_snapshot.get("min_lead_score") == 55
     assert run.workflow_id
+
+
+# ==========================================================================
+# Opportunities -- the commercial roll-up of the findings
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_findings_become_persisted_opportunities(db_session, workspace) -> None:
+    """``business_opportunities`` had no writer until this stage existed."""
+    from titan.db.models import BusinessOpportunity, SolutionRecommendation
+
+    ids = await seed_lead(workspace, suffix="opp")
+    out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="opp-1")
+
+    assert out["analysis"].deliverable_opportunities >= 1
+    assert out["analysis"].top_offer_key is not None
+
+    async with get_sessionmaker()() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(BusinessOpportunity).where(
+                        BusinessOpportunity.research_run_id == uuid.UUID(out["run_id"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows, "the analyse stage persisted no opportunities"
+
+        sellable = [r for r in rows if r.deliverable]
+        assert sellable
+        top = max(sellable, key=lambda r: r.priority)
+        # Every opportunity names the findings that justify it, by id.
+        assert top.supporting_finding_ids
+        assert top.estimated_value_usd is not None
+
+        outlines = (
+            (
+                await s.execute(
+                    select(SolutionRecommendation).where(
+                        SolutionRecommendation.opportunity_id == top.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(outlines) == 1
+        assert outlines[0].implementation_outline
+
+
+@pytest.mark.asyncio
+async def test_rerunning_analysis_replaces_rather_than_accumulates(
+    db_session, workspace
+) -> None:
+    """An opportunity that outlives its evidence is an unfounded claim.
+
+    Re-derivation is cheap and the previous set holds nothing the new one lacks,
+    so the run's opportunities are replaced wholesale.
+    """
+    from titan.db.models import BusinessOpportunity
+
+    ids = await seed_lead(workspace, suffix="oppidem")
+    first = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="oppidem-1"
+    )
+    second = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="oppidem-1"
+    )
+
+    assert first["analysis"].opportunities_created == (
+        second["analysis"].opportunities_created
+    )
+
+    async with get_sessionmaker()() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(BusinessOpportunity).where(
+                        BusinessOpportunity.research_run_id == uuid.UUID(first["run_id"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == second["analysis"].opportunities_created
+
+
+@pytest.mark.asyncio
+async def test_a_clean_site_produces_no_opportunity(db_session, workspace) -> None:
+    """Nothing evidenced means nothing to sell, which is the correct outcome."""
+    from titan.db.models import BusinessOpportunity
+
+    ids = await seed_lead(workspace, suffix="oppclean")
+    out = await run_pipeline(
+        workspace, ids, payload=clean_payload(), run_key="oppclean-1"
+    )
+
+    assert out["analysis"].deliverable_opportunities == 0
+
+    async with get_sessionmaker()() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(BusinessOpportunity).where(
+                        BusinessOpportunity.research_run_id == uuid.UUID(out["run_id"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [r for r in rows if r.deliverable] == []

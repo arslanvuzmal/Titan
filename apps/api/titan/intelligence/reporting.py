@@ -72,6 +72,11 @@ class WeeklyReport:
     replies_needing_reading: int = 0
     drafts_awaiting_approval: int = 0
     stalled_campaigns: int = 0
+    #: Somebody asked for a call and no time has been set. Every meeting starts
+    #: this way -- Titan does not parse a time out of a reply -- so this is a
+    #: standing item rather than an exception, and it is the one on the list that
+    #: has a person waiting on the other end of it.
+    meetings_unscheduled: int = 0
 
     # --- what happened --------------------------------------------------
     leads_discovered: int = 0
@@ -84,6 +89,14 @@ class WeeklyReport:
     positive_replies: int = 0
     declined: int = 0
     suppressions_added: int = 0
+    #: Conversations that reached a request for a call. The closest thing in
+    #: this report to an outcome.
+    meetings_proposed: int = 0
+    #: Deliverable opportunities identified this week, and what they would be
+    #: worth if every one of them closed. Reported as a ceiling, never as a
+    #: forecast -- see :func:`render`.
+    opportunities_identified: int = 0
+    pipeline_value_usd: float = 0.0
 
     health: DeliverabilityHealth | None = None
     #: Named leads worth chasing, most recent first.
@@ -104,6 +117,7 @@ class WeeklyReport:
             + self.replies_needing_reading
             + self.drafts_awaiting_approval
             + self.stalled_campaigns
+            + self.meetings_unscheduled
             + (1 if self.health and self.health.needs_action else 0)
         )
 
@@ -195,6 +209,12 @@ def render(report: WeeklyReport) -> str:
                 f"  {report.awaiting_reply} prospect(s) said yes and are waiting "
                 "on a reply. These go cold fastest."
             )
+        if report.meetings_unscheduled:
+            lines.append(
+                f"  {report.meetings_unscheduled} call(s) requested with no time "
+                "set. Titan does not guess a time out of a reply, so somebody has "
+                "to confirm the slot."
+            )
         if report.replies_needing_reading:
             lines.append(
                 f"  {report.replies_needing_reading} repl(ies) the rules could not "
@@ -238,6 +258,16 @@ def render(report: WeeklyReport) -> str:
         f"({report.reply_rate:.1%} of sent) -- {report.positive_replies} positive, "
         f"{report.declined} declined"
     )
+    if report.meetings_proposed:
+        lines.append(f"  Calls requested: {report.meetings_proposed}")
+    if report.opportunities_identified:
+        # "if every one closed", not "pipeline worth". The number is a sum of
+        # catalogue prices for work nobody has agreed to buy, and stating it as
+        # a forecast would be the one dishonest line in an evidence-first report.
+        lines.append(
+            f"  Opportunities: {report.opportunities_identified} identified, "
+            f"${report.pipeline_value_usd:,.0f} if every one closed"
+        )
     if report.suppressions_added:
         lines.append(
             f"  Suppressed: {report.suppressions_added} address(es) added to the "

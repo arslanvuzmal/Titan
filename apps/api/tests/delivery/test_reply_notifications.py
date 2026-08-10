@@ -250,3 +250,137 @@ async def test_the_notification_rolls_back_with_a_failed_ingest(db_session, work
 
     async with workspace_unit_of_work(workspace) as session:
         assert (await session.execute(select(Task))).scalars().all() == []
+
+
+# ==========================================================================
+# Meetings -- the stage the whole pipeline exists to reach
+# ==========================================================================
+async def test_a_request_for_a_call_opens_a_proposed_meeting(db_session, workspace):
+    """``meetings`` was the last table in the schema with no writer."""
+    from titan.db.models.ops import Meeting
+
+    fixture = await build_sendable(db_session, workspace)
+
+    result = await ingest(
+        workspace,
+        fixture,
+        "Sounds useful - could we book a call next week?",
+        "meeting-1@theirs.test",
+    )
+
+    assert result.meeting_id is not None
+
+    async with workspace_unit_of_work(workspace) as session:
+        meeting = (await session.execute(select(Meeting))).scalars().one()
+        assert meeting.lead_id == fixture.lead_id
+        assert meeting.status == "proposed"
+
+
+async def test_a_proposed_meeting_carries_no_invented_time(db_session, workspace):
+    """A wrong scheduled_at reads as a confirmed appointment, not a parse error.
+
+    The cost lands on the operator who misses it and the prospect who was stood
+    up, so the reply is quoted and a person fills the time in.
+    """
+    from titan.db.models.ops import Meeting
+
+    fixture = await build_sendable(db_session, workspace)
+
+    await ingest(
+        workspace,
+        fixture,
+        "Happy to chat - how about Tuesday at 3pm?",
+        "meeting-2@theirs.test",
+    )
+
+    async with workspace_unit_of_work(workspace) as session:
+        meeting = (await session.execute(select(Meeting))).scalars().one()
+        assert meeting.scheduled_at is None
+        assert meeting.duration_minutes is None
+        # But the time they asked for is not lost -- it is quoted verbatim.
+        assert meeting.notes is not None
+        assert "Tuesday at 3pm" in meeting.notes
+
+
+async def test_only_a_request_for_a_call_opens_a_meeting(db_session, workspace):
+    """Interest is not a meeting. Pricing questions are not a meeting."""
+    from titan.db.models.ops import Meeting
+
+    fixture = await build_sendable(db_session, workspace)
+
+    result = await ingest(
+        workspace,
+        fixture,
+        "Interested - how much would this cost?",
+        "no-meeting-1@theirs.test",
+    )
+
+    assert result.intent is not None
+    assert result.intent.reply_class is ReplyClass.WANTS_PRICING
+    assert result.meeting_id is None
+
+    async with workspace_unit_of_work(workspace) as session:
+        assert (await session.execute(select(Meeting))).scalars().all() == []
+
+
+async def test_a_re_read_message_does_not_open_a_second_meeting(db_session, workspace):
+    """Idempotency is inherited from the inbound unique constraint.
+
+    A poller that re-reads a folder must not double-book the operator.
+    """
+    from titan.db.models.ops import Meeting
+
+    fixture = await build_sendable(db_session, workspace)
+    body = "Keen to talk - can we set up a call?"
+
+    first = await ingest(workspace, fixture, body, "meeting-dupe@theirs.test")
+    second = await ingest(workspace, fixture, body, "meeting-dupe@theirs.test")
+
+    assert first.meeting_id is not None
+    assert second.duplicate is True
+    assert second.meeting_id is None
+
+    async with workspace_unit_of_work(workspace) as session:
+        meetings = (await session.execute(select(Meeting))).scalars().all()
+        assert len(meetings) == 1
+
+
+async def test_an_unmatched_reply_opens_no_meeting(db_session, workspace):
+    """Without a lead there is nothing to attach the meeting to."""
+    from titan.db.models.ops import Meeting
+
+    fixture = await build_sendable(db_session, workspace)
+
+    async with workspace_unit_of_work(workspace) as session:
+        result = await ingest_inbound(
+            session,
+            workspace_id=workspace,
+            message=reply(fixture.to_email, "Happy to chat, when suits?"),
+            lead_id=None,
+            provider_inbound_id="meeting-orphan@theirs.test",
+            received_at=REPLIED_AT,
+        )
+
+    assert result.meeting_id is None
+
+    async with workspace_unit_of_work(workspace) as session:
+        assert (await session.execute(select(Meeting))).scalars().all() == []
+
+
+async def test_the_notification_leads_with_the_sentence_they_wrote(db_session, workspace):
+    """Triage reads the first three lines; the deciding sentence belongs there."""
+    fixture = await build_sendable(db_session, workspace)
+
+    result = await ingest(
+        workspace,
+        fixture,
+        "Thanks for the detail.\nWe'd like to go ahead with the booking fix.\nSam",
+        "excerpt-1@theirs.test",
+    )
+
+    assert result.notification is not None
+    assert result.notification.description is not None
+    assert (
+        "They wrote: We'd like to go ahead with the booking fix."
+        in result.notification.description
+    )
