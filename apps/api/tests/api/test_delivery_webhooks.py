@@ -229,11 +229,32 @@ async def test_an_unrecognised_event_type_is_accepted(client):
 # The loop closing -- what this endpoint exists for
 # ==========================================================================
 async def seed_sent_message(workspace_id: uuid.UUID, *, provider_message_id: str) -> str:
-    """A message that has gone out, as the outbox worker would leave it."""
-    from titan.db.enums import CampaignStatus, Industry, LeadStatus
-    from titan.db.models import Campaign, Lead, Organization, SenderIdentity
+    """A message that has gone out, as the outbox worker would leave it.
+
+    The whole chain, not just the row under test: ``messages.draft_id`` is NOT
+    NULL, so every sent message traces back to the draft a human could have
+    approved. A fixture that skipped it would be testing a message shape the
+    database will not hold.
+    """
+    from titan.db.enums import (
+        CampaignStatus,
+        ContactSource,
+        DraftStatus,
+        Industry,
+        LeadStatus,
+    )
+    from titan.db.models import (
+        Campaign,
+        Contact,
+        ContactChannel,
+        Lead,
+        MessageDraft,
+        Organization,
+        SenderIdentity,
+    )
 
     recipient = f"someone-{uuid.uuid4().hex[:6]}@recipient-fixture.test"
+    now = dt.datetime.now(dt.UTC)
     async with get_sessionmaker()() as session, session.begin():
         sender = SenderIdentity(
             workspace_id=workspace_id,
@@ -261,18 +282,56 @@ async def seed_sent_message(workspace_id: uuid.UUID, *, provider_message_id: str
         session.add_all([sender, campaign, org])
         await session.flush()
 
+        contact = Contact(
+            workspace_id=workspace_id,
+            organization_id=org.id,
+            full_name="Practice Manager",
+            is_decision_maker=True,
+        )
         lead = Lead(
             workspace_id=workspace_id,
             campaign_id=campaign.id,
             organization_id=org.id,
             status=LeadStatus.CONTACTED,
         )
-        session.add(lead)
+        session.add_all([contact, lead])
+        await session.flush()
+
+        channel = ContactChannel(
+            workspace_id=workspace_id,
+            contact_id=contact.id,
+            channel_type="email",
+            value=recipient,
+            normalized_value=recipient,
+            value_domain="recipient-fixture.test",
+            source=ContactSource.FIRST_PARTY_WEBSITE,
+            source_url="https://recipient-fixture.test/contact",
+            discovered_at=now,
+            confidence=0.9,
+        )
+        session.add(channel)
+        await session.flush()
+
+        draft = MessageDraft(
+            workspace_id=workspace_id,
+            lead_id=lead.id,
+            campaign_id=campaign.id,
+            contact_channel_id=channel.id,
+            idempotency_key=f"wh-{uuid.uuid4().hex[:8]}",
+            status=DraftStatus.APPROVED,
+            subject="A broken button on your booking page",
+            body_text="Body",
+            claim_map=[],
+            validation_passed=True,
+            template_key="first_observation",
+        )
+        session.add(draft)
         await session.flush()
 
         session.add(
             Message(
                 workspace_id=workspace_id,
+                draft_id=draft.id,
                 lead_id=lead.id,
                 campaign_id=campaign.id,
                 sender_identity_id=sender.id,
