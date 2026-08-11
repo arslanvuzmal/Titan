@@ -263,6 +263,10 @@ async def seed_sent_message(workspace_id: uuid.UUID, *, provider_message_id: str
             from_name="Titan",
             reply_to_email="sender@titan-fixture.test",
             sending_domain="titan-fixture.test",
+            # Recent on purpose: authorization_errors() expires a verification
+            # after MAX_VERIFICATION_AGE, so a fixture with the flags set and
+            # no timestamp is the unverified identity the gate now refuses.
+            last_verified_at=dt.datetime.now(dt.UTC),
             mailing_address="12 Fictional Row",
             unsubscribe_mailto="mailto:unsub@titan-fixture.test",
         )

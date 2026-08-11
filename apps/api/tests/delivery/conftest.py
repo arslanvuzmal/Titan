@@ -122,6 +122,10 @@ async def build_sendable(
         spf_ok=True,
         dkim_ok=True,
         dmarc_ok=True,
+        # Recent on purpose: authorization_errors() expires a verification
+        # after MAX_VERIFICATION_AGE, so a fixture with the flags set and
+        # no timestamp is the unverified identity the gate now refuses.
+        last_verified_at=dt.datetime.now(dt.UTC),
         mailing_address="12 Fictional Row, Testville, TE1 1ST",
         unsubscribe_mailto="mailto:unsub@mail.arslanvuzmallone.dev",
         supports_one_click_unsubscribe=True,

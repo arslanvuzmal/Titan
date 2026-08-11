@@ -151,6 +151,10 @@ async def seed_lead(workspace_id: uuid.UUID, *, suffix: str) -> dict:
             spf_ok=True,
             dkim_ok=True,
             dmarc_ok=True,
+            # Recent on purpose: authorization_errors() expires a verification
+            # after MAX_VERIFICATION_AGE, so a fixture with the flags set and
+            # no timestamp is the unverified identity the gate now refuses.
+            last_verified_at=dt.datetime.now(dt.UTC),
             mailing_address="12 Fictional Row, Testville",
             unsubscribe_mailto="mailto:unsub@mail.arslanvuzmallone.dev",
         )
@@ -732,3 +736,72 @@ async def test_a_clean_site_produces_no_opportunity(db_session, workspace) -> No
             .all()
         )
     assert [r for r in rows if r.deliverable] == []
+
+
+# ==========================================================================
+# One recipient, one pending message
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_a_second_message_to_a_waiting_recipient_is_refused(
+    db_session, workspace
+) -> None:
+    """Found live: 17 recipients each holding two pending messages.
+
+    The per-draft dedupe key collapses a retry of the queue activity and
+    nothing else, so a re-run of research produced a second draft and a second
+    outbox row to the same person in the same campaign.
+    """
+    ids = await seed_lead(workspace, suffix="dupe-recip")
+    first = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="dupe-recip-1"
+    )
+    assert first["queued"] is not None
+    assert first["queued"].queued is True
+
+    # A different run key produces a genuinely different draft, exactly as a
+    # second pass of the research pipeline would.
+    second = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="dupe-recip-2"
+    )
+
+    assert second["queued"] is not None
+    assert second["queued"].queued is False
+    assert any("already queued" in reason for reason in second["queued"].refused_reasons)
+
+    async with get_sessionmaker()() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(OutboxMessage).where(
+                        OutboxMessage.lead_id == uuid.UUID(ids["lead_id"])
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1, "a second message was queued to a waiting recipient"
+
+
+@pytest.mark.asyncio
+async def test_an_unverified_sending_domain_cannot_be_used(db_session, workspace) -> None:
+    """The third delivery gate, made to mean something.
+
+    Twenty identities were found in production claiming SPF, DKIM and DMARC on
+    a domain with no DNS. Expiring the claim is what stops a flag somebody
+    typed from authorising mail forever.
+    """
+    from titan.db.models import SenderIdentity
+
+    ids = await seed_lead(workspace, suffix="stale-sender")
+
+    async with get_sessionmaker()() as s, s.begin():
+        sender = await s.get(SenderIdentity, uuid.UUID(ids["sender_id"]))
+        # Exactly the shape of the production rows: flags true, never verified.
+        sender.last_verified_at = None
+
+    async with get_sessionmaker()() as s:
+        sender = await s.get(SenderIdentity, uuid.UUID(ids["sender_id"]))
+        errors = sender.authorization_errors()
+
+    assert any("never been verified" in e for e in errors)
