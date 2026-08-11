@@ -29,14 +29,26 @@ pytestmark = pytest.mark.asyncio
 NOW = dt.datetime(2026, 8, 11, 9, 0, tzinfo=dt.UTC)
 
 
+#: Distinguishes "not specified" from "explicitly has no website". Without it
+#: ``website or default`` reads an explicit None as absence-of-argument and
+#: hands back the default URL -- which made the no-website case silently test
+#: the opposite of its name.
+_DEFAULT = object()
+
+
 def found(
-    n: int = 1, *, website: str | None = None, place_id: str | None = None
+    n: int = 1, *, website: object = _DEFAULT, place_id: str | None = None
 ) -> DiscoveredBusiness:
+    """One Places record. Pass ``website=None`` for a business without one."""
     return DiscoveredBusiness(
         place_id=place_id or f"places/found-{n}",
         display_name=f"Harborline Dental {n}",
         formatted_address=f"{n} Fictional Row, Manchester",
-        website_uri=website or f"https://harborline-{n}.test/",
+        website_uri=(
+            f"https://harborline-{n}.test/"
+            if website is _DEFAULT
+            else (website if isinstance(website, str) else None)
+        ),
         phone="+15550100",
         rating=4.7,
         review_count=90,
@@ -265,6 +277,10 @@ async def test_discovery_does_not_re_add_a_suppressed_domain(db_session, workspa
             email_or_domain="harborline-1.test",
             reason=SuppressionReason.COMPLAINT,
             source="test",
+            # Explicit: suppress() defaults to scope="email", and discovery
+            # consults only domain-scoped entries -- one colleague opting out
+            # is not the business opting out.
+            scope="domain",
             now=NOW,
         )
 
@@ -277,6 +293,32 @@ async def test_discovery_does_not_re_add_a_suppressed_domain(db_session, workspa
     async with get_sessionmaker()() as s:
         domains = (await s.execute(select(Organization.canonical_domain))).scalars().all()
         assert "harborline-1.test" not in domains
+
+
+async def test_one_persons_unsubscribe_does_not_blacklist_their_employer(
+    db_session, workspace
+):
+    """An email-scoped suppression must not remove the whole company.
+
+    Treating it as one would quietly destroy a workspace's reachable pool a
+    single unsubscribe at a time. The address itself is still refused at the
+    send gate, which is where per-address suppression belongs.
+    """
+    campaign_id = await seed_campaign(workspace, suffix="oneperson")
+
+    async with workspace_unit_of_work(workspace) as session:
+        await suppress(
+            session,
+            workspace_id=workspace,
+            email_or_domain="sam@harborline-1.test",
+            reason=SuppressionReason.UNSUBSCRIBE,
+            source="test",
+            now=NOW,
+        )
+
+    result = await run_discovery(run_for(workspace, campaign_id), places_result(found(1)))
+
+    assert result.leads_created == 1
 
 
 async def test_a_platform_page_is_never_admitted(db_session, workspace):
