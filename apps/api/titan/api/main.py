@@ -28,6 +28,7 @@ from sqlalchemy import text
 from titan import __version__
 from titan.api.crm import router as crm_router
 from titan.api.routes import router as v1_router
+from titan.api.webhooks import router as webhooks_router
 from titan.config import get_settings
 from titan.db.session import dispose_engine, get_engine
 from titan.observability.logging import configure_logging
@@ -139,6 +140,11 @@ app.include_router(v1_router)
 # The operator-facing read surface. Same prefix, same auth; kept in its
 # own module because it is assembled views rather than resources.
 app.include_router(crm_router)
+# Provider delivery events. Deliberately *not* behind the session auth the two
+# routers above use: a provider cannot hold a token, so an HMAC over the raw
+# body is the credential. See titan.api.webhooks for why that puts the whole
+# weight of the endpoint on verifying before parsing.
+app.include_router(webhooks_router)
 
 
 @app.middleware("http")
