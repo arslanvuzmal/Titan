@@ -33,6 +33,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 from titan.workflows.orchestrator import (
+    POOL_LOW_WATER_MARK,
     CampaignOrchestratorWorkflow,
     orchestrator_workflow_id,
 )
@@ -41,6 +42,8 @@ from titan.workflows.types import (
     CampaignCyclePlan,
     CampaignOrchestratorInput,
     CycleVerdict,
+    DiscoverActivityInput,
+    DiscoverActivityResult,
     OrchestratorStatus,
     PauseSignal,
     PlannedLead,
@@ -80,7 +83,10 @@ class Planner:
 
     def next_plan(self) -> CampaignCyclePlan:
         if not self.plans:
-            return CampaignCyclePlan(verdict=CycleVerdict.NO_WORK_AVAILABLE.value)
+            return CampaignCyclePlan(
+                verdict=CycleVerdict.NO_WORK_AVAILABLE.value,
+                pool_remaining=STOCKED,
+            )
         # The last plan repeats once exhausted, so a test can say "then this
         # forever" without listing one plan per cycle.
         return self.plans.pop(0) if len(self.plans) > 1 else self.plans[0]
@@ -99,11 +105,46 @@ class Planner:
         return [plan_campaign_cycle]
 
 
-def ready(*lead_ids: str) -> CampaignCyclePlan:
+@dataclass
+class Discoverer:
+    """A configurable stub for the discovery activity."""
+
+    results: list[DiscoverActivityResult] = field(default_factory=list)
+    calls: list[str] = field(default_factory=list)
+    failures: int = 0
+
+    def next_result(self) -> DiscoverActivityResult:
+        if not self.results:
+            return DiscoverActivityResult(refused_reason="nothing configured")
+        return self.results.pop(0) if len(self.results) > 1 else self.results[0]
+
+    def activities(self) -> list:
+        discoverer = self
+
+        @activity.defn(name="discover_leads")
+        async def discover_leads(
+            request: DiscoverActivityInput,
+        ) -> DiscoverActivityResult:
+            discoverer.calls.append(request.idempotency_key)
+            if discoverer.failures > 0:
+                discoverer.failures -= 1
+                raise RuntimeError("places unreachable")
+            return discoverer.next_result()
+
+        return [discover_leads]
+
+
+#: Above POOL_LOW_WATER_MARK, so a plan that says nothing about the pool does
+#: not pull discovery into every unrelated test.
+STOCKED = POOL_LOW_WATER_MARK * 3
+
+
+def ready(*lead_ids: str, pool_remaining: int = STOCKED) -> CampaignCyclePlan:
     return CampaignCyclePlan(
         verdict=CycleVerdict.READY.value,
         leads=tuple(PlannedLead(lead_id=lead) for lead in lead_ids),
         remaining_budget=len(lead_ids),
+        pool_remaining=pool_remaining,
     )
 
 
@@ -153,12 +194,14 @@ async def stop_and_collect(handle: WorkflowHandle) -> OrchestratorStatus:
     return await asyncio.wait_for(handle.result(), timeout=WORKFLOW_TIMEOUT)
 
 
-def worker_for(client: Client, planner: Planner) -> Worker:
+def worker_for(
+    client: Client, planner: Planner, discoverer: Discoverer | None = None
+) -> Worker:
     return Worker(
         client,
         task_queue=TASK_QUEUE,
         workflows=[CampaignOrchestratorWorkflow, ResearchStub],
-        activities=planner.activities(),
+        activities=planner.activities() + (discoverer or Discoverer()).activities(),
     )
 
 
@@ -438,3 +481,148 @@ async def test_the_orchestrator_id_is_one_per_campaign(env) -> None:
 
     assert first == second
     assert orchestrator_workflow_id(WORKSPACE, str(uuid.uuid4())) != first
+
+
+# ==========================================================================
+# Discovery
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_a_low_pool_triggers_discovery(env) -> None:
+    """Top up before the pool empties, not after.
+
+    A campaign that discovers only once it has stalled has already lost the
+    cycle it spent stalling.
+    """
+    planner = Planner(plans=[ready("lead-1", pool_remaining=POOL_LOW_WATER_MARK - 1)])
+    discoverer = Discoverer(results=[DiscoverActivityResult(leads_created=12)])
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(), "low-pool")
+        await wait_until(
+            env, handle, lambda s: s.leads_discovered >= 12, what="discovery"
+        )
+        status = await stop_and_collect(handle)
+
+    assert discoverer.calls
+    assert status.leads_discovered >= 12
+
+
+@pytest.mark.asyncio
+async def test_a_stocked_pool_does_not_trigger_discovery(env) -> None:
+    """Discovery costs money per request; it is not run for its own sake."""
+    planner = Planner(plans=[ready("lead-1")])
+    discoverer = Discoverer()
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(
+            env.client, make_input(cycles_before_continue=100), "stocked"
+        )
+        await wait_until(
+            env, handle, lambda s: s.cycles_completed >= 2, what="two cycles"
+        )
+        await stop_and_collect(handle)
+
+    assert discoverer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pool_discovers_then_replans_in_the_same_cycle(env) -> None:
+    """Otherwise a stalled campaign waits a full interval on leads it already has."""
+    planner = Planner(
+        plans=[
+            CampaignCyclePlan(
+                verdict=CycleVerdict.NO_WORK_AVAILABLE.value, pool_remaining=0
+            ),
+            ready("found-1", "found-2"),
+        ]
+    )
+    discoverer = Discoverer(results=[DiscoverActivityResult(leads_created=2)])
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(), "refill")
+        status = await wait_until(
+            env, handle, lambda s: s.leads_started >= 2, what="research after refill"
+        )
+        await stop_and_collect(handle)
+
+    assert status.leads_started == 2
+    # The refill re-plan is a second call, distinguishable from the first.
+    assert any(key.endswith(":refill") for key in planner.calls)
+
+
+@pytest.mark.asyncio
+async def test_discovery_that_finds_nothing_does_not_replan(env) -> None:
+    """Re-planning against an unchanged pool would return the same verdict."""
+    planner = Planner(
+        plans=[
+            CampaignCyclePlan(
+                verdict=CycleVerdict.NO_WORK_AVAILABLE.value, pool_remaining=0
+            )
+        ]
+    )
+    discoverer = Discoverer(results=[DiscoverActivityResult(leads_created=0)])
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(cycles_before_continue=100), "dry")
+        await wait_until(
+            env, handle, lambda s: s.cycles_completed >= 2, what="two cycles"
+        )
+        await stop_and_collect(handle)
+
+    assert discoverer.calls
+    assert not any(key.endswith(":refill") for key in planner.calls)
+
+
+@pytest.mark.asyncio
+async def test_a_spent_send_budget_does_not_spend_the_discovery_budget(env) -> None:
+    """Leads found today could not be written to until tomorrow anyway, by which
+    point the evidence is a day staler than it needed to be."""
+    planner = Planner(
+        plans=[
+            CampaignCyclePlan(verdict=CycleVerdict.BUDGET_SPENT.value, pool_remaining=0)
+        ]
+    )
+    discoverer = Discoverer()
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(cycles_before_continue=100), "spent")
+        await wait_until(
+            env, handle, lambda s: s.cycles_completed >= 2, what="two cycles"
+        )
+        await stop_and_collect(handle)
+
+    assert discoverer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_discovery_outage_does_not_stop_dispatch(env) -> None:
+    """A third party's outage must not stop outreach that needed nothing from it."""
+    planner = Planner(plans=[ready("lead-1", pool_remaining=0)])
+    discoverer = Discoverer(failures=99)
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(), "outage")
+        status = await wait_until(
+            env, handle, lambda s: s.leads_started >= 1, what="research despite outage"
+        )
+        await stop_and_collect(handle)
+
+    assert status.leads_started >= 1
+    assert status.leads_discovered == 0
+
+
+@pytest.mark.asyncio
+async def test_the_discovered_count_survives_continue_as_new(env) -> None:
+    """A lifetime total that resets on roll-over reads as a real number."""
+    planner = Planner(plans=[ready("lead-1", pool_remaining=0)])
+    discoverer = Discoverer(results=[DiscoverActivityResult(leads_created=3)])
+
+    async with worker_for(env.client, planner, discoverer):
+        handle = await launch(env.client, make_input(cycles_before_continue=2), "canc")
+        status = await wait_until(
+            env, handle, lambda s: s.cycles_completed >= 4, what="a roll-over"
+        )
+        await stop_and_collect(handle)
+
+    # Four cycles at three leads each; nothing was reset by the roll-over.
+    assert status.leads_discovered >= 12
