@@ -19,12 +19,14 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from titan.config import Settings
 from titan.db.enums import (
     DELIVERY_RANK,
     LeadStatus,
@@ -33,6 +35,7 @@ from titan.db.enums import (
 )
 from titan.db.models import Lead, Message, ProviderEvent
 from titan.delivery.providers.base import EmailProvider, NormalizedEvent
+from titan.delivery.providers.resend import ResendProvider
 from titan.delivery.suppression import suppress
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,33 @@ _SUPPRESSING_STATES: dict[MessageState, SuppressionReason] = {
     MessageState.COMPLAINED: SuppressionReason.COMPLAINT,
     MessageState.UNSUBSCRIBED: SuppressionReason.UNSUBSCRIBE,
 }
+
+
+def verifier_for(provider_name: str, settings: Settings) -> EmailProvider | None:
+    """The adapter that can verify this provider's webhooks, if any.
+
+    Lives here rather than in the HTTP route because invariant 1 confines
+    concrete email providers to the outbox worker and this module -- an API
+    module holding a provider instance would have ``send()`` within reach, which
+    is precisely the shape of the pre-0.2 defect that invariant exists to
+    prevent. The route gets something that can only verify.
+
+    A fixed table, not a dynamic import by name: a URL path segment must never
+    be able to choose what code runs.
+
+    Returns None when the named provider exists but is not configured, so the
+    caller can tell an unfinished deployment from a bad signature.
+    """
+    builders: dict[str, Callable[[Settings], EmailProvider | None]] = {
+        "resend": ResendProvider.for_webhook_verification,
+    }
+    builder = builders.get(provider_name.strip().lower())
+    return builder(settings) if builder else None
+
+
+def is_known_provider(provider_name: str) -> bool:
+    """Whether this name is a provider at all, configured or not."""
+    return provider_name.strip().lower() in {"resend"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,4 +329,10 @@ async def record_reply(
     )
 
 
-__all__ = ["WebhookOutcome", "ingest_event", "record_reply"]
+__all__ = [
+    "WebhookOutcome",
+    "ingest_event",
+    "is_known_provider",
+    "record_reply",
+    "verifier_for",
+]

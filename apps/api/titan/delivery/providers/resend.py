@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from titan.config import Settings
 from titan.db.enums import MessageState
 from titan.delivery.providers.base import (
     NormalizedEvent,
@@ -78,6 +79,30 @@ class ResendProvider:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    @classmethod
+    def for_webhook_verification(cls, settings: Settings) -> ResendProvider | None:
+        """An adapter that can verify webhooks, or None when it cannot.
+
+        The unwrapping happens here rather than at the call site so that raw
+        credentials stay inside the provider layer -- the boundary a repository
+        invariant test enforces, and the reason this exists instead of the HTTP
+        route reading the secret itself.
+
+        Returns None rather than raising when no secret is configured, because
+        the caller has to tell that apart from a bad signature: one is a
+        deployment that is not finished, the other is somebody knocking.
+        """
+        secret = settings.resend_webhook_secret
+        if secret is None:
+            return None
+        api_key = settings.resend_api_key
+        # Nothing on the verification path calls out to Resend, so an absent
+        # API key is not a reason to refuse an inbound event.
+        return cls(
+            api_key.get_secret_value() if api_key else "",
+            secret.get_secret_value(),
+        )
 
     # ------------------------------------------------------------- sending
     async def send(self, email: OutboundEmail) -> SendResult:
