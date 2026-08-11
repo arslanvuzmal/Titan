@@ -95,6 +95,17 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
+#: Outbox states that still represent a message on its way to somebody. SENT,
+#: CANCELLED and FAILED_PERMANENT are deliberately absent: once the first
+#: message has left (or provably will not), a second one is a follow-up rather
+#: than a duplicate, and blocking it would break the sequence.
+_UNSENT_OUTBOX_STATUSES = (
+    OutboxStatus.PENDING,
+    OutboxStatus.LEASED,
+    OutboxStatus.DEFERRED,
+)
+
+
 # ==========================================================================
 # 1. Crawl
 # ==========================================================================
@@ -1088,6 +1099,44 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
         ).scalar_one_or_none()
         if already is not None:
             return QueueActivityResult(outbox_id=str(already.id), queued=True)
+
+        # The dedupe key above is per *draft*, so it collapses a retry of this
+        # activity and nothing else. Two drafts for one lead -- which is what a
+        # re-run of the research pipeline produces -- get two keys and both
+        # queue. Found in a live outbox: seventeen recipients each holding two
+        # pending messages from the same campaign, differing only in which
+        # finding they led with.
+        #
+        # Refused rather than collapsed, because the second message is not a
+        # follow-up. A real follow-up is scheduled by FollowUpScheduler after
+        # the first has *sent* and a spacing interval has passed; two arriving
+        # together is the thing that reads as careless and generates the
+        # complaint.
+        waiting = (
+            await session.execute(
+                select(OutboxMessage.id).where(
+                    OutboxMessage.campaign_id == draft.campaign_id,
+                    OutboxMessage.to_email_normalized == channel.normalized_value,
+                    OutboxMessage.status.in_(_UNSENT_OUTBOX_STATUSES),
+                )
+            )
+        ).scalar_one_or_none()
+        if waiting is not None:
+            logger.info(
+                "refusing a second queued message to a recipient already waiting",
+                extra={
+                    "campaign_id": str(draft.campaign_id),
+                    "outbox_id": str(waiting),
+                },
+            )
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=(
+                    "a message to this recipient is already queued for this "
+                    "campaign and has not been sent",
+                ),
+            )
 
         message = Message(
             workspace_id=workspace_id,

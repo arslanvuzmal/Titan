@@ -167,12 +167,34 @@ class SenderIdentity(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     last_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
     def authorization_errors(self) -> list[str]:
-        """Reasons this identity may not be used for delivery."""
+        """Reasons this identity may not be used for delivery.
+
+        The four authentication flags are checked *together with*
+        ``last_verified_at``, because a boolean on its own is an assertion
+        rather than evidence. Twenty identities were found in production
+        claiming SPF, DKIM and DMARC on a domain with no DNS at all; every one
+        of them passed this gate, because nothing had ever asked when the claim
+        was last true.
+
+        Expiring the claim is what closes that. A flag can only be renewed by
+        ``titan.intelligence.sender_auth.check_domain_auth`` actually resolving
+        the domain, so an identity that nobody can verify stops sending on its
+        own rather than sending forever on a typo.
+        """
+        from titan.intelligence.sender_auth import MAX_VERIFICATION_AGE, is_stale
+
         errors: list[str] = []
         if not self.is_active:
             errors.append("sender identity is inactive")
         if not self.domain_verified:
             errors.append(f"sending domain {self.sending_domain} is not verified")
+        elif is_stale(self.last_verified_at):
+            days = MAX_VERIFICATION_AGE.days
+            errors.append(
+                f"sending domain {self.sending_domain} has not been verified "
+                f"in the last {days} days"
+                + ("" if self.last_verified_at else "; it has never been verified")
+            )
         for flag, name in (
             (self.spf_ok, "SPF"),
             (self.dkim_ok, "DKIM"),

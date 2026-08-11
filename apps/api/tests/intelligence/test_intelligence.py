@@ -837,3 +837,55 @@ def test_report_serialises_for_storage() -> None:
     assert payload["passed"] is False
     assert isinstance(payload["violations"], list)
     assert all("code" in v for v in payload["violations"])
+
+
+# ==========================================================================
+# Opt-out shaped addresses
+# ==========================================================================
+@pytest.mark.parametrize(
+    "local",
+    ["remove", "unsubscribe", "optout", "opt-out", "stop", "delist", "removeme"],
+)
+def test_an_opt_out_address_is_never_an_outreach_target(local: str) -> None:
+    """An address named remove@ is a standing request not to be contacted.
+
+    Writing to it is not a cold email that happens to miss; it is contacting
+    somebody who already said no, in the way most likely to be reported.
+    Found live: remove@expressestateagency.co.uk was queued twice.
+    """
+    from titan.db.enums import ContactSource, VerificationStatus
+    from titan.intelligence.contacts import check_contact_eligibility
+
+    result = check_contact_eligibility(
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        verification=VerificationStatus.PUBLISHED_FIRST_PARTY,
+        is_active=True,
+        allowed_sources=frozenset({ContactSource.FIRST_PARTY_WEBSITE}),
+        require_verified=False,
+        email=f"{local}@example.test",
+    )
+
+    assert not result.eligible
+    assert any("never an outreach target" in r for r in result.reasons)
+
+
+@pytest.mark.parametrize("local", ["info", "contact", "enquiries", "reception"])
+def test_a_shared_mailbox_is_still_a_legitimate_target(local: str) -> None:
+    """A dentist's info@ is the right address to write to.
+
+    The opt-out list must not swallow the role list: refusing these would
+    remove most small businesses from reach entirely.
+    """
+    from titan.db.enums import ContactSource, VerificationStatus
+    from titan.intelligence.contacts import check_contact_eligibility
+
+    result = check_contact_eligibility(
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        verification=VerificationStatus.PUBLISHED_FIRST_PARTY,
+        is_active=True,
+        allowed_sources=frozenset({ContactSource.FIRST_PARTY_WEBSITE}),
+        require_verified=False,
+        email=f"{local}@example.test",
+    )
+
+    assert result.eligible

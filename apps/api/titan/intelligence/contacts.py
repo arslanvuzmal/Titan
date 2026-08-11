@@ -62,13 +62,32 @@ ROLE_LOCAL_PARTS: frozenset[str] = frozenset(
 )
 
 #: Addresses that are never appropriate outreach targets regardless of source.
+#:
+#: Three kinds, all refused for the same reason -- writing to one is either
+#: pointless or actively harmful:
+#:
+#: * **Infrastructure** (postmaster, abuse, mailer-daemon). RFC 2142 reserves
+#:   these for operating the mail system, and several are monitored by
+#:   blocklist operators. A cold pitch to ``abuse@`` is how a domain gets
+#:   reported by the person whose job is reporting things.
+#: * **Unattended** (noreply, bounce). Nobody reads them.
+#: * **Opt-out** (unsubscribe, remove, optout, stop). This is the group that
+#:   matters most and the one that was incomplete: an address named ``remove@``
+#:   is a standing request not to be contacted, published in advance. Writing
+#:   to it is not a cold email that happens to miss -- it is contacting somebody
+#:   who already said no, in the one way that guarantees a complaint. Found in
+#:   a live queue: ``remove@expressestateagency.co.uk`` was scheduled to receive
+#:   two messages.
 NEVER_CONTACT_LOCAL_PARTS: frozenset[str] = frozenset(
     {
+        # Infrastructure
         "abuse",
         "postmaster",
         "hostmaster",
         "webmaster",
         "security",
+        "root",
+        # Unattended
         "noreply",
         "no-reply",
         "donotreply",
@@ -76,11 +95,24 @@ NEVER_CONTACT_LOCAL_PARTS: frozenset[str] = frozenset(
         "bounce",
         "bounces",
         "mailer-daemon",
+        "mailerdaemon",
+        # Opt-out
         "unsubscribe",
+        "unsub",
+        "remove",
+        "removeme",
+        "optout",
+        "opt-out",
+        "stop",
+        "delist",
+        "donotcontact",
+        "do-not-contact",
+        # Functions that exist to receive complaints, not enquiries
         "privacy",
         "dpo",
         "legal",
         "compliance",
+        "gdpr",
     }
 )
 
