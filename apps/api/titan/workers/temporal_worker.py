@@ -21,6 +21,7 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from titan.activities import discovery as discovery_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
@@ -77,6 +78,7 @@ async def main() -> None:
             research_activities.requires_human_approval,
             research_activities.record_workflow_event,
             *orchestration_activities.ALL_ORCHESTRATION_ACTIVITIES,
+            *discovery_activities.ALL_DISCOVERY_ACTIVITIES,
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
         ],

@@ -47,6 +47,8 @@ with workflow.unsafe.imports_passed_through():
         CampaignCyclePlan,
         CampaignOrchestratorInput,
         CycleVerdict,
+        DiscoverActivityInput,
+        DiscoverActivityResult,
         OrchestratorStatus,
         PauseSignal,
         PlannedLead,
@@ -54,6 +56,26 @@ with workflow.unsafe.imports_passed_through():
     )
 
 PLAN_TIMEOUT = timedelta(minutes=5)
+
+#: Discovery talks to Google over the network and writes a batch of rows.
+DISCOVER_TIMEOUT = timedelta(minutes=10)
+
+#: Fewer retries than planning, and slower. Each attempt can spend money: a
+#: search that succeeded at Google and then failed on the way home would be
+#: charged again on retry. The activity's idempotency key covers the case where
+#: the failure happened after its own write; this keeps the window small.
+DISCOVER_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=30),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(minutes=5),
+    maximum_attempts=3,
+    non_retryable_error_types=["ValueError"],
+)
+
+#: Top the lead pool up once it drops below this. Chosen to be a cycle's worth
+#: of work rather than zero: discovering only after a campaign has stalled means
+#: every empty pool costs a full idle interval before anything is done about it.
+POOL_LOW_WATER_MARK = 10
 
 #: The planner reads the database and writes next_action_at. Retried, but a
 #: missing campaign or a malformed id will fail identically every time.
@@ -81,6 +103,7 @@ class CampaignOrchestratorWorkflow:
         self._state: str = "starting"
         self._cycles: int = 0
         self._leads_started: int = 0
+        self._leads_discovered: int = 0
         self._last_verdict: str | None = None
         self._last_cycle_at: str | None = None
         self._next_cycle_at: str | None = None
@@ -116,6 +139,7 @@ class CampaignOrchestratorWorkflow:
             state=self._state,
             cycles_completed=self._cycles,
             leads_started=self._leads_started,
+            leads_discovered=self._leads_discovered,
             last_verdict=self._last_verdict,
             last_cycle_at=self._last_cycle_at,
             next_cycle_at=self._next_cycle_at,
@@ -130,6 +154,7 @@ class CampaignOrchestratorWorkflow:
         # totals instead of resetting to zero every time the run rolls over.
         self._cycles = request.cycles_completed
         self._leads_started = request.leads_started
+        self._leads_discovered = request.leads_discovered
         self._paused_reason = request.paused_reason
 
         interval = timedelta(minutes=request.interval_minutes)
@@ -183,6 +208,7 @@ class CampaignOrchestratorWorkflow:
                 cycles_before_continue=request.cycles_before_continue,
                 cycles_completed=self._cycles,
                 leads_started=self._leads_started,
+                leads_discovered=self._leads_discovered,
                 paused_reason=self._paused_reason,
             )
         )
@@ -196,27 +222,8 @@ class CampaignOrchestratorWorkflow:
         self._last_cycle_at = workflow.now().isoformat()
         cycle_key = f"{request.campaign_id}:{self._cycles}"
 
-        try:
-            plan: CampaignCyclePlan = await workflow.execute_activity(
-                "plan_campaign_cycle",
-                CampaignCycleInput(
-                    workspace_id=request.workspace_id,
-                    campaign_id=request.campaign_id,
-                    cycle_key=cycle_key,
-                    max_new_research=request.max_new_research,
-                ),
-                start_to_close_timeout=PLAN_TIMEOUT,
-                retry_policy=PLAN_RETRY,
-                result_type=CampaignCyclePlan,
-            )
-        except ActivityError as exc:
-            # A planner that cannot run is not a reason to end the orchestrator:
-            # the database may be briefly unreachable, and a workflow that exits
-            # on the first bad minute has to be noticed and restarted by hand,
-            # which is the opposite of what this exists for.
-            self._state = "plan_failed"
-            self._last_verdict = "plan_failed"
-            workflow.logger.warning("campaign planning failed: %s", str(exc)[:300])
+        plan = await self._plan(request, cycle_key)
+        if plan is None:
             return interval
 
         self._last_verdict = plan.verdict
@@ -224,6 +231,25 @@ class CampaignOrchestratorWorkflow:
         if plan.verdict == CycleVerdict.NOT_AUTHORIZED.value:
             self._state = "not_authorized"
             return UNAUTHORIZED_BACKOFF
+
+        # Top the pool up before it empties, and refill it when it already has.
+        # Not attempted when the day's sends are spent: discovery costs money to
+        # find leads that cannot be written to until tomorrow, by which point the
+        # evidence is a day staler than it needed to be.
+        if (
+            plan.verdict != CycleVerdict.BUDGET_SPENT.value
+            and plan.pool_remaining < POOL_LOW_WATER_MARK
+        ):
+            found = await self._discover(request, cycle_key)
+            # Only re-plan when the campaign had nothing at all to do. With work
+            # already in hand, the new leads keep until the next cycle, and
+            # planning twice in one pass would dispatch more research than the
+            # cycle's ceiling allows.
+            if found and plan.verdict == CycleVerdict.NO_WORK_AVAILABLE.value:
+                replanned = await self._plan(request, f"{cycle_key}:refill")
+                if replanned is not None:
+                    plan = replanned
+                    self._last_verdict = plan.verdict
 
         if plan.verdict != CycleVerdict.READY.value:
             # BUDGET_SPENT and NO_WORK_AVAILABLE are both normal. The planner has
@@ -239,6 +265,68 @@ class CampaignOrchestratorWorkflow:
             await self._start_research(request, lead)
 
         return interval
+
+    async def _plan(
+        self, request: CampaignOrchestratorInput, cycle_key: str
+    ) -> CampaignCyclePlan | None:
+        """Ask the planner what to work on. None when it could not be asked.
+
+        A planner that cannot run is not a reason to end the orchestrator: the
+        database may be briefly unreachable, and a workflow that exits on the
+        first bad minute has to be noticed and restarted by hand, which is the
+        opposite of what this exists for.
+        """
+        try:
+            return await workflow.execute_activity(
+                "plan_campaign_cycle",
+                CampaignCycleInput(
+                    workspace_id=request.workspace_id,
+                    campaign_id=request.campaign_id,
+                    cycle_key=cycle_key,
+                    max_new_research=request.max_new_research,
+                ),
+                start_to_close_timeout=PLAN_TIMEOUT,
+                retry_policy=PLAN_RETRY,
+                result_type=CampaignCyclePlan,
+            )
+        except ActivityError as exc:
+            self._state = "plan_failed"
+            self._last_verdict = "plan_failed"
+            workflow.logger.warning("campaign planning failed: %s", str(exc)[:300])
+            return None
+
+    async def _discover(self, request: CampaignOrchestratorInput, cycle_key: str) -> int:
+        """Search for new leads. Returns how many were created.
+
+        Failure is swallowed on purpose. Discovery is a top-up, and a campaign
+        with work in hand must keep dispatching it when Google is unreachable or
+        the key has expired -- letting this propagate would let a third party's
+        outage stop outreach that needed nothing from them. The refusal reason
+        is logged, and the cases worth a person's attention (no targeting, empty
+        results) are recorded as notifications by the activity itself.
+        """
+        self._state = "discovering"
+        try:
+            found: DiscoverActivityResult = await workflow.execute_activity(
+                "discover_leads",
+                DiscoverActivityInput(
+                    workspace_id=request.workspace_id,
+                    campaign_id=request.campaign_id,
+                    idempotency_key=f"discover:{cycle_key}",
+                    max_results=request.max_new_research,
+                ),
+                start_to_close_timeout=DISCOVER_TIMEOUT,
+                retry_policy=DISCOVER_RETRY,
+                result_type=DiscoverActivityResult,
+            )
+        except ActivityError as exc:
+            workflow.logger.warning("lead discovery failed: %s", str(exc)[:300])
+            return 0
+
+        self._leads_discovered += found.leads_created
+        if found.refused_reason is not None:
+            workflow.logger.info("lead discovery refused: %s", found.refused_reason)
+        return found.leads_created
 
     async def _start_research(
         self, request: CampaignOrchestratorInput, lead: PlannedLead

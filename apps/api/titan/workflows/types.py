@@ -210,6 +210,46 @@ class ResearchLeadResult:
 
 
 # ==========================================================================
+# Discovery
+# ==========================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class DiscoverActivityInput:
+    workspace_id: str
+    campaign_id: str
+    #: Stable across retries. Recorded on the lead_sources row so a retry finds
+    #: its own prior run instead of paying for a second billable search.
+    idempotency_key: str
+    #: Ceiling on leads created, not on results requested. Places charges per
+    #: request either way, so this bounds the pipeline rather than the bill.
+    max_results: int = 20
+
+
+@dataclasses.dataclass(frozen=True)
+class DiscoverActivityResult:
+    leads_created: int = 0
+    #: What Places returned before any admission rule ran. The gap between this
+    #: and ``leads_created`` is the whole story of a disappointing run.
+    returned: int = 0
+    #: (reason, count) pairs. A tuple rather than a dict: workflow results are
+    #: serialised into history, and a stable ordering keeps replays comparable.
+    refused_counts: tuple[tuple[str, int], ...] = ()
+    spent_usd: float = 0.0
+    lead_source_id: str | None = None
+    #: Set when the campaign could not be discovered for at all -- no targeting,
+    #: no budget left, no API key. Distinct from finding nothing.
+    refused_reason: str | None = None
+    #: True when a prior attempt on this key had already run.
+    duplicate: bool = False
+    notified: bool = False
+
+    @property
+    def ran(self) -> bool:
+        return self.refused_reason is None
+
+
+# ==========================================================================
 # Campaign orchestration
 # ==========================================================================
 
@@ -258,6 +298,11 @@ class CampaignCyclePlan:
     followups_due: int = 0
     #: Populated for every verdict except READY.
     detail: str | None = None
+    #: Researchable leads left in the pool after this plan was taken from it.
+    #: The orchestrator tops the pool up before it empties, because a campaign
+    #: that discovers only once it has stalled has already lost the cycle it
+    #: spent stalling.
+    pool_remaining: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -276,6 +321,9 @@ class CampaignOrchestratorInput:
     #: totals rather than resetting to zero every day.
     cycles_completed: int = 0
     leads_started: int = 0
+    #: Carried for the same reason as the others: a lifetime total that resets
+    #: on every roll-over is worse than no total, because it reads as one.
+    leads_discovered: int = 0
     #: Also carried. Rolling over is an implementation detail of staying alive,
     #: and an operator who paused a campaign would not expect it to quietly
     #: resume itself the next time the workflow's history filled up.
@@ -288,6 +336,7 @@ class OrchestratorStatus:
     state: str
     cycles_completed: int
     leads_started: int
+    leads_discovered: int = 0
     last_verdict: str | None = None
     last_cycle_at: str | None = None
     next_cycle_at: str | None = None
@@ -336,6 +385,8 @@ __all__ = [
     "CrawlActivityInput",
     "CrawlActivityResult",
     "CycleVerdict",
+    "DiscoverActivityInput",
+    "DiscoverActivityResult",
     "DraftActivityInput",
     "DraftActivityResult",
     "OrchestratorStatus",

@@ -148,6 +148,7 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             limit=budget,
             now=now,
         )
+        pool = await _pool_size(session, campaign_id=campaign_id)
 
     if not planned:
         detail = (
@@ -178,6 +179,7 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             remaining_budget=remaining,
             followups_due=followups_due,
             detail=detail,
+            pool_remaining=pool,
         )
 
     logger.info(
@@ -194,6 +196,10 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
         leads=tuple(planned),
         remaining_budget=remaining,
         followups_due=followups_due,
+        # Net of what this plan is about to consume: the orchestrator is asking
+        # "will there be work next cycle", and counting the leads being
+        # dispatched right now would answer a different question.
+        pool_remaining=max(0, pool - len(planned)),
     )
 
 
@@ -217,6 +223,30 @@ def _authorization_blockers(
     elif policy.daily_send_limit <= 0:
         blockers.append("campaign daily_send_limit is zero")
     return blockers
+
+
+async def _pool_size(session: AsyncSession, *, campaign_id: uuid.UUID) -> int:
+    """How many leads are still available to research for this campaign.
+
+    Deliberately ignores the score threshold. An unscored lead has never been
+    measured, and scoring happens *inside* the research pipeline -- so counting
+    only leads above the minimum would report a pool of zero for a campaign full
+    of freshly discovered work, and trigger discovery that was not needed.
+    """
+    return int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Lead)
+                .where(
+                    Lead.campaign_id == campaign_id,
+                    Lead.status.in_(RESEARCHABLE_STATUSES),
+                    Lead.replied_at.is_(None),
+                    Lead.last_contacted_at.is_(None),
+                )
+            )
+        ).scalar_one()
+    )
 
 
 async def _select_leads(
