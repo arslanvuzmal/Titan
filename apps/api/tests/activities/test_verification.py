@@ -160,23 +160,25 @@ async def test_a_domain_that_no_longer_exists_stops_sending(db_session, workspac
         assert sender.dkim_ok is False
 
 
-async def test_an_unknown_dkim_selector_does_not_stop_a_good_domain(
-    db_session, workspace
-):
-    """DKIM cannot be established from DNS, so it must not be a blocker."""
+async def test_a_domain_with_no_discoverable_dkim_fails_closed(db_session, workspace):
+    """Gmail's bulk-sender rules require DKIM, so an unknown selector refuses.
+
+    A false refusal costs one line in COMMON_DKIM_SELECTORS. Sending without
+    DKIM costs a spam folder and a domain reputation, silently.
+    """
     sender_id = await seed_sender(
         workspace, domain="nodkim.test", tag="d", last_verified_at=None
     )
 
     result = await run(workspace, {"nodkim.test": auth("nodkim.test", dkim=False)})
 
-    assert result.passing == 1
+    assert result.passing == 0
 
     async with get_sessionmaker()() as s:
         sender = await s.get(SenderIdentity, sender_id)
         assert sender.dkim_ok is False
-        assert sender.domain_verified is True
-        assert sender.authorization_errors() == []
+        assert sender.domain_verified is False
+        assert any("DKIM" in e for e in sender.authorization_errors())
 
 
 # ==========================================================================
