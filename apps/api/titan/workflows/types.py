@@ -349,6 +349,29 @@ class PauseSignal:
 
 
 # ==========================================================================
+# Sender verification
+# ==========================================================================
+
+
+@dataclasses.dataclass(frozen=True)
+class VerifySendersInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class VerifySendersResult:
+    checked: int = 0
+    #: Distinct domains looked up. Lower than ``checked`` whenever several
+    #: identities share a domain, which is the normal case.
+    domains_resolved: int = 0
+    passing: int = 0
+    failing: int = 0
+    #: Identities that could send before this run and cannot after it. The only
+    #: field here worth waking somebody for.
+    newly_broken: tuple[str, ...] = ()
+
+
+# ==========================================================================
 # Weekly reporting
 # ==========================================================================
 
@@ -401,6 +424,8 @@ __all__ = [
     "ResearchStatus",
     "ScoreActivityInput",
     "ScoreActivityResult",
+    "VerifySendersInput",
+    "VerifySendersResult",
     "WeeklyReportInput",
     "WeeklyReportResult",
     "utc_iso",
