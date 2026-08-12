@@ -24,6 +24,11 @@ no DKIM. That distinction is recorded rather than smoothed over: a
 :class:`DomainAuth` reports ``dkim_ok=False`` alongside
 ``dkim_conclusive=False``, and a caller that treats those as the same thing is
 making a claim this module refused to make.
+
+Recording the uncertainty is not the same as ignoring it. ``sendable`` still
+requires DKIM -- see the property for why an inconclusive check refuses rather
+than waves through, and what to do when a real domain's selector is not on the
+list below.
 """
 
 from __future__ import annotations
@@ -146,12 +151,24 @@ class DomainAuth:
     def sendable(self) -> bool:
         """Whether Titan may send from this domain at all.
 
-        DKIM is deliberately not required here. It cannot be conclusively
-        established from DNS alone, and refusing on an inconclusive check would
-        block correctly-configured domains whose selector this module does not
-        happen to know. SPF and DMARC *can* be established, so they are.
+        All four, DKIM included, and that is a deliberate reversal. The first
+        draft of this property left DKIM out on the grounds that an
+        undiscoverable selector would block a correctly-configured domain --
+        true, but it weighs the wrong risk. Gmail's bulk-sender rules require
+        DKIM, so the alternative to a false refusal is sending unauthenticated
+        mail into a spam folder while believing it was delivered. Failing
+        closed is also what every other gate in this system does.
+
+        It also has to agree with ``SenderIdentity.authorization_errors()``,
+        which has always required all four. Two gates disagreeing about what
+        "authenticated" means is how a system ends up with a flag that passes
+        one and not the other.
+
+        When a domain really is configured and the selector is simply unknown
+        here, the fix is to add it to :data:`COMMON_DKIM_SELECTORS` -- a
+        one-line change with a name attached, rather than a silent exemption.
         """
-        return self.resolved and self.spf_ok and self.dmarc_ok
+        return self.resolved and self.spf_ok and self.dmarc_ok and self.dkim_ok
 
     def as_detail(self) -> dict[str, object]:
         """Evidence, for the verification record. Every claim traceable."""

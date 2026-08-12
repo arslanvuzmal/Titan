@@ -26,6 +26,7 @@ from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
+from titan.activities import verification as verification_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
@@ -33,6 +34,7 @@ from titan.runtime import configure_event_loop
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
+from titan.workflows.verification import SenderVerificationWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
 
@@ -72,6 +74,7 @@ async def main() -> None:
             LeadResearchWorkflow,
             CampaignOrchestratorWorkflow,
             WeeklyReportWorkflow,
+            SenderVerificationWorkflow,
         ],
         activities=[
             research_activities.open_research_run,
@@ -80,6 +83,7 @@ async def main() -> None:
             *orchestration_activities.ALL_ORCHESTRATION_ACTIVITIES,
             *discovery_activities.ALL_DISCOVERY_ACTIVITIES,
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
+            *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
         ],
         # Bounded concurrency. An unbounded worker will happily start more
@@ -107,6 +111,7 @@ async def main() -> None:
                 "LeadResearchWorkflow",
                 "CampaignOrchestratorWorkflow",
                 "WeeklyReportWorkflow",
+                "SenderVerificationWorkflow",
             ],
         },
     )

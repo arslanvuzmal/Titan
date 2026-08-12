@@ -164,12 +164,26 @@ def test_a_missing_dkim_key_is_not_proof_that_dkim_is_absent() -> None:
     assert "not proof" in " ".join(result.notes)
 
 
-def test_an_unknown_dkim_selector_does_not_block_sending() -> None:
-    """Refusing here would block correctly-configured domains."""
+def test_an_unknown_dkim_selector_fails_closed() -> None:
+    """The alternative is sending unauthenticated mail believing it landed.
+
+    A false refusal costs one line added to COMMON_DKIM_SELECTORS. Sending
+    without DKIM costs a spam folder and a domain reputation, silently, because
+    Gmail's bulk-sender rules require it.
+    """
     result = check(dkim_at="some-vendor-specific-selector")
 
     assert result.dkim_ok is False
-    assert result.sendable is True
+    assert result.dkim_conclusive is False
+    assert result.sendable is False
+
+
+def test_sendable_agrees_with_the_identity_gate() -> None:
+    """Both require all four. Two gates disagreeing is how a flag passes one."""
+    assert check().sendable is True
+    assert check(dkim_at=None).sendable is False
+    assert check(spf=[]).sendable is False
+    assert check(dmarc=[]).sendable is False
 
 
 def test_a_non_dkim_txt_at_the_selector_is_not_a_key() -> None:
