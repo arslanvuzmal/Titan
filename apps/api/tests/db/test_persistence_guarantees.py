@@ -440,3 +440,53 @@ async def test_deleting_a_lead_leaves_suppression_intact(db_session, workspace) 
         )
     ).scalar_one_or_none()
     assert still_there is not None, "suppression must outlive the lead"
+
+
+# --------------------------------------------------------------------------
+# The migration chain describes the models it claims to
+# --------------------------------------------------------------------------
+def test_the_migration_chain_has_exactly_one_head() -> None:
+    """Two heads stop every migration, including unrelated ones.
+
+    This is what stranded production for two days: a branch applied to the live
+    database was never pushed, so the stamped revision named a file nobody had
+    and Alembic refused to move at all. A second head is easy to create by
+    accident on a branch and invisible until someone deploys.
+    """
+    from pathlib import Path
+
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "titan" / "db" / "migrations"))
+
+    heads = ScriptDirectory.from_config(config).get_heads()
+
+    assert len(heads) == 1, (
+        f"the migration chain has {len(heads)} heads: {heads}. "
+        "Merge them with `alembic merge`, or no database can be upgraded."
+    )
+
+
+async def test_every_model_table_exists_in_the_migrated_database(db_session) -> None:
+    """The models and the migrations must describe the same schema.
+
+    CI runs `alembic check`, which catches drift in the other direction. This
+    catches the case that check cannot: a table declared in the models whose
+    migration was never written, which looks fine until the first query.
+    """
+    from sqlalchemy import inspect
+
+    def table_names(connection) -> set[str]:
+        return set(inspect(connection).get_table_names())
+
+    live = await db_session.run_sync(lambda s: table_names(s.connection()))
+    expected = set(Base.metadata.tables)
+
+    missing = sorted(expected - live)
+    assert not missing, (
+        f"these tables are declared in the models but absent from the migrated "
+        f"database: {missing}"
+    )

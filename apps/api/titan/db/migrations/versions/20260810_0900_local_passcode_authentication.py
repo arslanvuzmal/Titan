@@ -34,8 +34,26 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("username", sa.String(length=64), nullable=True))
-    op.create_unique_constraint("uq_users_username", "users", ["username"])
+    # `username` is added by 4c1d9b7a2e50 as well, on the sibling branch that
+    # ran in production before this repository had the file. Both branches
+    # converge at the merge revision, so on any database that took the other
+    # path first the column is already present and a bare add_column would
+    # abort the whole upgrade -- which is exactly what it did.
+    #
+    # Guarded rather than reordered: the two branches are siblings, so neither
+    # can be said to run first, and whichever arrives second has to cope.
+    bind = op.get_bind()
+    has_username = bool(
+        bind.execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'users' AND column_name = 'username'"
+            )
+        ).scalar()
+    )
+    if not has_username:
+        op.add_column("users", sa.Column("username", sa.String(length=64), nullable=True))
+        op.create_unique_constraint("uq_users_username", "users", ["username"])
     op.add_column(
         "users",
         sa.Column(

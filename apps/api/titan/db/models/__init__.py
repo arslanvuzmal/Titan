@@ -63,6 +63,10 @@ from titan.db.models.research import (
     ResearchRun,
     SolutionRecommendation,
 )
+from titan.db.models.smartlead import (
+    SmartleadImportBatch,
+    SmartleadWebhookEvent,
+)
 
 __all__ = [
     "AuditFinding",
@@ -101,6 +105,8 @@ __all__ = [
     "ResearchRun",
     "SenderIdentity",
     "SequenceStep",
+    "SmartleadImportBatch",
+    "SmartleadWebhookEvent",
     "SolutionRecommendation",
     "SuppressionEntry",
     "Task",

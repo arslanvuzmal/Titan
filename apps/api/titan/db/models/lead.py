@@ -35,6 +35,7 @@ from titan.db.enums import (
     ContactSource,
     Industry,
     LeadStatus,
+    SmartleadImportStatus,
     VerificationStatus,
 )
 
@@ -48,11 +49,22 @@ class LeadSource(Base, WorkspaceScoped, TimestampMixin):
     """
 
     __tablename__ = "lead_sources"
+    __extra_table_args__ = (UniqueConstraint("workspace_id", "idempotency_key"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     #: "google_places" | "csv_import" | "manual" | "crm_import" | "referral"
     kind: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(200), nullable=False)
+    #: Stable key for the run that produced this batch, so a retried discovery
+    #: finds its own prior work instead of paying for a second billable search.
+    #:
+    #: The unique constraint above is the guarantee, not the convention: two
+    #: workers racing on the same key both see no row, both search, and one
+    #: loses the insert rather than both charging the account. The discovery
+    #: activity previously kept this in ``query_parameters`` because the column
+    #: was believed not to exist -- it did, in the deployed database, on a
+    #: migration this repository had lost.
+    idempotency_key: Mapped[str | None] = mapped_column(String(255))
     campaign_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="SET NULL")
     )
@@ -293,6 +305,17 @@ class Lead(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     __extra_table_args__ = (
         UniqueConstraint("workspace_id", "campaign_id", "organization_id"),
         Index("ix_leads_ws_status", "workspace_id", "status"),
+        Index("ix_leads_smartlead_status", "workspace_id", "smartlead_status"),
+        # One lead per address per Smartlead campaign. Partial by consequence
+        # rather than declaration: both columns are null for a lead that was
+        # never imported, and PostgreSQL does not consider two null tuples
+        # equal, so the 278 never-imported leads coexist freely under it.
+        Index(
+            "uq_leads_smartlead_campaign_email",
+            "smartlead_campaign_id",
+            "smartlead_normalized_email",
+            unique=True,
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -329,6 +352,42 @@ class Lead(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     followups_sent: Mapped[int] = mapped_column(default=0, nullable=False)
     next_action_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
+    )
+
+    # ---------------------------------------------------------- Smartlead
+    # State of the *lead-import* path, in which leads are pushed into a
+    # Smartlead campaign and Smartlead sends to them on a sequence. This
+    # repository does not send that way -- the outbox worker hands Smartlead
+    # one already-authorized message at a time -- but the columns and their
+    # data were recovered from the deployed database, where 17 leads had
+    # genuinely been imported. Read, never written, by current code.
+    smartlead_status: Mapped[SmartleadImportStatus] = mapped_column(
+        pg_enum(SmartleadImportStatus, "smartlead_import_status"),
+        default=SmartleadImportStatus.NOT_IMPORTED,
+        server_default=SmartleadImportStatus.NOT_IMPORTED.value,
+        nullable=False,
+    )
+    smartlead_campaign_id: Mapped[str | None] = mapped_column(String(40))
+    #: The address as it was sent to Smartlead. Stored rather than derived: the
+    #: contact channel may since have changed, and matching a webhook against
+    #: today's address would silently fail to attribute the event.
+    smartlead_normalized_email: Mapped[str | None] = mapped_column(String(320))
+    smartlead_lead_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    smartlead_import_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("smartlead_import_batches.id", ondelete="SET NULL"),
+    )
+    smartlead_imported_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    smartlead_last_synced_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    smartlead_skipped_reason: Mapped[str | None] = mapped_column(Text)
+    smartlead_last_error: Mapped[str | None] = mapped_column(Text)
+    smartlead_last_event: Mapped[str | None] = mapped_column(String(40))
+    smartlead_last_event_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
 
     def outreach_blocking_errors(self) -> list[str]:
