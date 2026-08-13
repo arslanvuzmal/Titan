@@ -185,12 +185,19 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
 async def _previous_run(
     session: AsyncSession, campaign_id: uuid.UUID, key: str
 ) -> DiscoverActivityResult | None:
-    """What a prior attempt on this key already did, if there was one."""
+    """What a prior attempt on this key already did, if there was one.
+
+    Reads the indexed column, which carries a unique constraint on
+    ``(workspace_id, idempotency_key)``. That constraint is the real guarantee:
+    two workers racing on one key both find no row and both search, and the
+    loser fails its insert rather than both charging the account. A JSON path
+    lookup could see the duplicate but never prevent it.
+    """
     row = (
         await session.execute(
             select(LeadSource).where(
                 LeadSource.campaign_id == campaign_id,
-                LeadSource.query_parameters["idempotency_key"].astext == key,
+                LeadSource.idempotency_key == key,
             )
         )
     ).scalar_one_or_none()
@@ -245,12 +252,13 @@ async def _record(
             kind=SOURCE_KIND,
             label=query_text[:200],
             campaign_id=campaign_id,
+            idempotency_key=idempotency_key,
             query_parameters={
                 "text_query": query_text,
                 "region": country_code,
-                # The idempotency key lives here rather than in a column because
-                # lead_sources has none for it, and adding one would mean a
-                # migration against a schema already ahead of the repository.
+                # Also kept in the blob, which is this run's recorded
+                # provenance. The column is what is queried and constrained;
+                # this is what a person reads when asking what the run did.
                 "idempotency_key": idempotency_key,
                 "refused": refused,
             },

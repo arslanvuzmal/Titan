@@ -402,3 +402,65 @@ class WorkflowRunStatus(enum.StrEnum):
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
     TERMINATED = "terminated"
+
+
+# ==========================================================================
+# Smartlead lead import
+# ==========================================================================
+# Recovered from the deployed database on 2026-08-11, where they existed as
+# PostgreSQL enum types created by a migration that was never pushed to this
+# repository. The labels below are the live labels, verified against pg_enum
+# rather than reconstructed from memory: a StrEnum whose values differ from the
+# type in the database produces a LookupError on read, and only for the rows
+# that happen to use the mismatched label.
+#
+# These describe the *lead-import* path, in which leads are pushed into a
+# Smartlead campaign and their state tracked there. It is not how this
+# repository sends today -- titan.delivery.providers.smartlead hands Smartlead
+# one already-authorized message at a time -- but 295 leads carry a status and
+# 17 were genuinely imported, so the vocabulary is history worth keeping
+# readable.
+
+
+class SmartleadImportStatus(enum.StrEnum):
+    """Where a lead stands with respect to Smartlead."""
+
+    #: The default, and the value 278 of 295 leads hold: never sent there.
+    NOT_IMPORTED = "not_imported"
+    #: Claimed by a batch that has not finished. Distinguishes "in flight"
+    #: from "never attempted" after a crash.
+    RESERVED = "reserved"
+    IMPORTED = "imported"
+    #: Deliberately not sent, with the reason in ``smartlead_skipped_reason``.
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class SmartleadBatchStatus(enum.StrEnum):
+    """Outcome of one import run."""
+
+    #: Counted and reported what it *would* do, without writing to Smartlead.
+    DRY_RUN = "dry_run"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    #: Some leads imported and some failed. Kept distinct from FAILED because
+    #: the two need different follow-up: retry the remainder, or investigate.
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class SmartleadEventType(enum.StrEnum):
+    """Normalized Smartlead webhook event.
+
+    ``UNKNOWN`` is deliberate: an event type this code does not recognise is
+    still recorded, because discarding it would hide a provider change until
+    somebody noticed the silence.
+    """
+
+    SENT = "sent"
+    OPENED = "opened"
+    CLICKED = "clicked"
+    REPLIED = "replied"
+    BOUNCED = "bounced"
+    UNSUBSCRIBED = "unsubscribed"
+    UNKNOWN = "unknown"
