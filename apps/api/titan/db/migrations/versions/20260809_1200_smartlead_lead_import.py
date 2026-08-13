@@ -73,6 +73,25 @@ EVENT_TYPE = postgresql.ENUM(
 )
 
 
+def _has_username() -> bool:
+    """Whether ``users.username`` is present right now.
+
+    Both this branch and 7f3c81d0a4be create the column, so neither may assume
+    its own state: on any database that took the sibling path first, the column
+    is already there on the way up and already gone on the way down.
+    """
+    return bool(
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'users' AND column_name = 'username'"
+            )
+        )
+        .scalar()
+    )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
 
@@ -296,15 +315,24 @@ def upgrade() -> None:
     )
 
     # ----------------------------------------------------------------- users
-    # Also added on this branch. 7f3c81d0a4be adds it too, on the sibling
-    # branch, and tolerates finding it already present -- see the guard there.
-    op.add_column("users", sa.Column("username", sa.String(length=64), nullable=True))
-    op.create_unique_constraint("uq_users_username", "users", ["username"])
+    # Also added on this branch, and by 7f3c81d0a4be on the sibling. Guarded on
+    # both sides rather than giving the job to whichever "runs first": Alembic
+    # picks an order among siblings, but nothing in the history says which, and
+    # a migration that depends on that choice works until the day it does not.
+    if not _has_username():
+        op.add_column("users", sa.Column("username", sa.String(length=64), nullable=True))
+        op.create_unique_constraint("uq_users_username", "users", ["username"])
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_users_username", "users", type_="unique")
-    op.drop_column("users", "username")
+    # Mirror of the guard in 7f3c81d0a4be's upgrade. Both branches create
+    # `username` and both drop it, so on the way down whichever runs second
+    # finds it already gone -- and unlike the upgrade, there is no "first"
+    # branch to give the job to, because Alembic unwinds a merge into both
+    # parents.
+    if _has_username():
+        op.drop_constraint("uq_users_username", "users", type_="unique")
+        op.drop_column("users", "username")
 
     op.drop_constraint(
         op.f("uq_lead_sources_workspace_id_idempotency_key"),

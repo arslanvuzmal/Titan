@@ -33,6 +33,25 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _has_username() -> bool:
+    """Whether ``users.username`` is present right now.
+
+    Both this branch and 4c1d9b7a2e50 create the column, so neither may assume
+    its own state: on a database that took the sibling path first, the column
+    is already there on the way up and already gone on the way down.
+    """
+    return bool(
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'users' AND column_name = 'username'"
+            )
+        )
+        .scalar()
+    )
+
+
 def upgrade() -> None:
     # `username` is added by 4c1d9b7a2e50 as well, on the sibling branch that
     # ran in production before this repository had the file. Both branches
@@ -42,16 +61,7 @@ def upgrade() -> None:
     #
     # Guarded rather than reordered: the two branches are siblings, so neither
     # can be said to run first, and whichever arrives second has to cope.
-    bind = op.get_bind()
-    has_username = bool(
-        bind.execute(
-            sa.text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = 'users' AND column_name = 'username'"
-            )
-        ).scalar()
-    )
-    if not has_username:
+    if not _has_username():
         op.add_column("users", sa.Column("username", sa.String(length=64), nullable=True))
         op.create_unique_constraint("uq_users_username", "users", ["username"])
     op.add_column(
@@ -76,5 +86,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column("users", "locked_until")
     op.drop_column("users", "failed_login_count")
-    op.drop_constraint("uq_users_username", "users", type_="unique")
-    op.drop_column("users", "username")
+    # Guarded for the same reason as the upgrade: 4c1d9b7a2e50 drops this too,
+    # and unwinding a merge runs both parents in an order the history does not
+    # fix. Whichever goes second finds the column already gone.
+    if _has_username():
+        op.drop_constraint("uq_users_username", "users", type_="unique")
+        op.drop_column("users", "username")
