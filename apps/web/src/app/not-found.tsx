@@ -14,10 +14,10 @@ export default function NotFound() {
         </p>
         <div className="pt-2">
           <Link 
-            href="/dashboard" 
+            href="/crm"
             className="inline-block bg-[#3c8dbc] hover:bg-[#367fa9] text-white px-5 py-2 rounded text-sm font-semibold transition-colors shadow-sm"
           >
-            Return to Command Center
+            Back to the CRM
           </Link>
         </div>
       </div>

@@ -282,8 +282,41 @@ export interface CrmStats {
   messages_by_state: Record<string, number>;
   suppressions_total: number;
   replied_total: number;
+  /** Counted apart from gaps: a total mixing them reads as a pipeline. */
+  opportunities_deliverable: number;
+  opportunities_unserved: number;
+  meetings_total: number;
+  meetings_unscheduled: number;
   sending_authorized: boolean;
   operating_mode: string;
+}
+
+export interface Opportunity {
+  id: string;
+  lead_id: string;
+  organization_name: string | null;
+  offer_key: string;
+  title: string;
+  rationale: string | null;
+  /** The offer's catalogue price. Null for a gap: no offer covers it. */
+  estimated_value_usd: number | null;
+  priority: number;
+  deliverable: boolean;
+  supporting_finding_count: number;
+  created_at: string;
+}
+
+export interface Meeting {
+  id: string;
+  lead_id: string;
+  organization_name: string | null;
+  status: string;
+  /** Null on every meeting Titan opens: a reply is never parsed for a time. */
+  scheduled_at: string | null;
+  duration_minutes: number | null;
+  location_or_link: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface SendingPreflight {
@@ -484,6 +517,18 @@ export const api = {
   workflows: (t: string, limit = 50) =>
     call<Page<WorkflowRun>>(`/api/v1/workflows${query({ limit })}`, { token: t }),
   usage: (t: string) => call<Usage>('/api/v1/usage', { token: t }),
+
+  opportunities: (t: string, deliverable?: boolean) =>
+    call<Opportunity[]>(
+      '/api/v1/opportunities' +
+        (deliverable === undefined ? '' : '?deliverable=' + String(deliverable)),
+      { token: t },
+    ),
+  meetings: (t: string, unscheduledOnly = false) =>
+    call<Meeting[]>(
+      '/api/v1/meetings' + (unscheduledOnly ? '?unscheduled_only=true' : ''),
+      { token: t },
+    ),
   contactSources: (t: string) =>
     call<{ eligible: string[]; never_eligible: string[] }>('/api/v1/contact-sources', {
       token: t,

@@ -271,6 +271,15 @@ class CrmStatsOut(BaseModel):
     messages_by_state: dict[str, int]
     suppressions_total: int
     replied_total: int
+    #: Opportunities the owner sells a fix for. Gaps -- problems evidenced but
+    #: not covered by any offer -- are counted separately rather than folded in,
+    #: because a total that mixes them reads as a pipeline and is not one.
+    opportunities_deliverable: int
+    opportunities_unserved: int
+    #: Calls somebody asked for, and how many still have no time on them. Every
+    #: meeting starts unscheduled: Titan does not parse a time out of a reply.
+    meetings_total: int
+    meetings_unscheduled: int
     #: Reflects the process kill switch and the workspace ceiling, so the CRM
     #: can state plainly whether anything could actually be sent right now.
     sending_authorized: bool
@@ -448,3 +457,50 @@ __all__ = [
     "WorkflowRunOut",
     "WorkspaceOut",
 ]
+
+
+class OpportunityOut(BaseModel):
+    """A commercial opportunity derived from evidenced findings.
+
+    ``estimated_value_usd`` is the offer's catalogue price, not a forecast and
+    not a probability-weighted figure. It is null for an unserved gap, because
+    attaching a number to work the owner does not do would put revenue in a
+    total nobody can deliver.
+    """
+
+    id: uuid.UUID
+    lead_id: uuid.UUID
+    organization_name: str | None = None
+    offer_key: str
+    title: str
+    rationale: str | None = None
+    estimated_value_usd: float | None = None
+    priority: int
+    #: False means no offer in the playbook covers this. Recorded so the gap is
+    #: visible; it must never be pitched.
+    deliverable: bool
+    supporting_finding_count: int = 0
+    created_at: dt.datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MeetingOut(BaseModel):
+    """A conversation somebody asked for.
+
+    ``scheduled_at`` is null on every meeting Titan opens: a reply naming a time
+    is not parsed, because a wrong time does not read as a parsing failure, it
+    reads as a confirmed appointment. A person sets it.
+    """
+
+    id: uuid.UUID
+    lead_id: uuid.UUID
+    organization_name: str | None = None
+    status: str
+    scheduled_at: dt.datetime | None = None
+    duration_minutes: int | None = None
+    location_or_link: str | None = None
+    notes: str | None = None
+    created_at: dt.datetime
+
+    model_config = ConfigDict(from_attributes=True)

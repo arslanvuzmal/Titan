@@ -1,12 +1,11 @@
 "use client";
 
 import React from 'react';
-import DashboardLayout from '@/components/layout/DashboardLayout';
 import { BookOpen, Code, ShieldCheck, Zap, HelpCircle, Terminal } from 'lucide-react';
 
 export default function DocumentationPage() {
   return (
-    <DashboardLayout>
+    <>
       <div className="max-w-5xl mx-auto py-6 space-y-8 text-gray-800">
         {/* Header */}
         <div className="border-b pb-4">
@@ -101,6 +100,6 @@ export default function DocumentationPage() {
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </>
   );
 }
