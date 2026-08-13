@@ -490,3 +490,86 @@ async def test_every_model_table_exists_in_the_migrated_database(db_session) -> 
         f"these tables are declared in the models but absent from the migrated "
         f"database: {missing}"
     )
+
+
+# --------------------------------------------------------------------------
+# Model spend is recorded
+# --------------------------------------------------------------------------
+async def test_model_calls_are_written_to_both_ledgers(db_session, workspace) -> None:
+    """``model_runs`` and ``usage_ledger`` had no writer since the first release.
+
+    The gateway has always collected calls under the comment "for the usage
+    ledger writer to persist"; nothing persisted them, so model spend was
+    invisible per lead and per campaign.
+    """
+    from titan.db.models import ModelRun, UsageLedger
+    from titan.models.recording import record_calls
+
+    calls = [
+        {
+            "task": "message",
+            "provider": "gemini",
+            "model_id": "gemini-2.0-flash",
+            "input_tokens": 800,
+            "output_tokens": 60,
+            "latency_ms": 940,
+            "cost_usd": 0.00021,
+            "used_fallback": False,
+            "request_hash": "abc123",
+            "occurred_at": dt.datetime.now(dt.UTC),
+        }
+    ]
+
+    async with workspace_unit_of_work(workspace) as session:
+        written = await record_calls(session, workspace_id=workspace, calls=calls)
+
+    assert written == 1
+    # Drained, so a gateway reused across drafts cannot re-record the first
+    # draft's calls against the second.
+    assert calls == []
+
+    async with get_sessionmaker()() as s:
+        run = (await s.execute(select(ModelRun))).scalars().one()
+        assert run.provider == "gemini"
+        assert run.cost_usd == pytest.approx(0.00021)
+        # The prompt carries the prospect's page text and the response carries a
+        # sentence about their business; neither is needed to answer what this
+        # table exists to answer.
+        assert run.request_snapshot is None
+        assert run.response_snapshot is None
+
+        entry = (await s.execute(select(UsageLedger))).scalars().one()
+        assert entry.category == "model"
+        assert entry.cost_estimated is True
+
+
+async def test_a_retried_model_call_is_not_billed_twice(db_session, workspace) -> None:
+    """A ledger that double-counts a retry reports spend nobody was charged."""
+    from titan.db.models import UsageLedger
+    from titan.models.recording import record_calls
+
+    def call() -> dict:
+        return {
+            "task": "message",
+            "provider": "gemini",
+            "model_id": "gemini-2.0-flash",
+            "cost_usd": 0.0005,
+            "request_hash": "same-request",
+            "lead_id": None,
+            "campaign_id": None,
+            "occurred_at": dt.datetime.now(dt.UTC),
+        }
+
+    async with workspace_unit_of_work(workspace) as session:
+        first = await record_calls(session, workspace_id=workspace, calls=[call()])
+    async with workspace_unit_of_work(workspace) as session:
+        second = await record_calls(session, workspace_id=workspace, calls=[call()])
+
+    assert first == 1
+    assert second == 0
+
+    async with get_sessionmaker()() as s:
+        entries = (await s.execute(select(UsageLedger))).scalars().all()
+        total = sum(e.cost_usd for e in entries)
+    assert len(entries) == 1
+    assert total == pytest.approx(0.0005)
