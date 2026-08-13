@@ -602,6 +602,9 @@ async def seed_outcomes(workspace_id: uuid.UUID, crm: dict) -> None:
             campaign_id=crm["campaign_id"],
             status="completed",
             idempotency_key=f"outcomes-{uuid.uuid4().hex[:8]}",
+            # NOT NULL: a run that never started cannot have produced findings,
+            # so the column has no meaningful default to fall back on.
+            started_at=dt.datetime.now(dt.UTC),
         )
         session.add(run)
         await session.flush()
