@@ -135,6 +135,21 @@ _METRIC_PATTERNS = (
     re.compile(r"\b(?:losing|lost|missing out on)\s+[$£€]\s?[\d,]+", re.I),
     re.compile(r"\b[$£€]\s?[\d,]{3,}\s*(?:per|/)\s*(?:month|year|week)", re.I),
     re.compile(r"\b\d+x\s+(?:more|your)\b", re.I),
+    # A share of a business outcome. The patterns above all require the number
+    # to be followed by "more"/"increase" or preceded by a currency symbol, so
+    # "30% of your bookings" and "costing you 20%" went through untouched --
+    # which is the most natural way to phrase the fabrication, and the one a
+    # model reaches for first. A bare percentage is deliberately still allowed:
+    # Titan measures page facts, and "34% of images lack alt text" is one.
+    re.compile(
+        r"\b\d{1,3}%\s+of\s+(?:your\s+|their\s+)?"
+        r"(?:bookings?|revenue|sales|leads?|customers?|enquir\w+|inquir\w+|"
+        r"traffic|conversions?|visitors?|business)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:costing|losing|cost|lose|loses)\s+(?:you|them)\s+\d{1,3}\s*%", re.I
+    ),
 )
 
 _FALSE_RELATIONSHIP = (
@@ -526,3 +541,50 @@ __all__ = [
     "ViolationCode",
     "validate_message",
 ]
+
+
+#: Pattern groups that describe content no message may contain, whoever wrote
+#: it. Exposed so a caller that produces candidate text -- the model rewriter --
+#: can reject it at the point it is produced rather than discovering it after
+#: assembling a message around it.
+#:
+#: Deliberately a reference to the same tuples validate_message scans, not a
+#: copy. Two lists of banned rhetoric drift, and the copy that drifts is always
+#: the one guarding the newer path.
+PROHIBITED_RHETORIC: tuple[
+    tuple[tuple[re.Pattern[str], ...], ViolationCode, str], ...
+] = (
+    (
+        _METRIC_PATTERNS,
+        ViolationCode.FABRICATED_METRIC,
+        "quantified business outcome Titan cannot have measured",
+    ),
+    (
+        _FALSE_RELATIONSHIP,
+        ViolationCode.FALSE_RELATIONSHIP,
+        "implies a prior conversation that did not happen",
+    ),
+    (
+        _WORK_PERFORMED,
+        ViolationCode.WORK_NOT_PERFORMED,
+        "implies work was performed for the recipient",
+    ),
+    (_FALSE_URGENCY, ViolationCode.FALSE_URGENCY, "manufactured deadline"),
+    (_FEAR_APPEAL, ViolationCode.FEAR_APPEAL, "fear-based framing"),
+    (_EXCESSIVE_PRAISE, ViolationCode.EXCESSIVE_PRAISE, "exaggerated flattery"),
+    (_AI_SPAM, ViolationCode.AI_SPAM_LANGUAGE, "generic AI-outreach phrasing"),
+)
+
+
+def prohibited_content(text: str) -> Violation | None:
+    """The first prohibited-rhetoric violation in ``text``, if any.
+
+    A cheaper, narrower check than ``validate_message``: it takes a fragment
+    rather than a whole message, so it can judge a single sentence before that
+    sentence is built into anything.
+    """
+    for patterns, code, detail in PROHIBITED_RHETORIC:
+        found = _scan(patterns, text, code, detail)
+        if found:
+            return found[0]
+    return None

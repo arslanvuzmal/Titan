@@ -136,6 +136,20 @@ class Settings(BaseSettings):
     budget_premium_share_max: float = Field(default=0.15, ge=0, le=1)
     budget_hard_stop: bool = True
 
+    #: Let a model rephrase the sentences the deterministic composer produced.
+    #:
+    #: Off by default, and the default is the safe direction rather than a
+    #: placeholder: with it off Titan sends the text it has always sent, which
+    #: passes every rule. Turning it on adds phrasing, never facts -- the claim
+    #: map is preserved sentence by sentence and a rewrite that drops an
+    #: evidenced specific is discarded (titan.intelligence.rewriter).
+    #:
+    #: Requires a model provider key. Without one the gateway raises, the
+    #: rewrite is abandoned, and the deterministic text is used -- so enabling
+    #: this on an unconfigured deployment costs a failed call per draft rather
+    #: than a failed draft.
+    model_rewrites_enabled: bool = False
+
     # ------------------------------------------------------------- discovery
     google_places_api_key: SecretStr | None = None
     google_places_base_url: AnyHttpUrl = AnyHttpUrl("https://places.googleapis.com/v1")

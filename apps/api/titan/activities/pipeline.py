@@ -72,6 +72,7 @@ from titan.intelligence.opportunities import DerivedOpportunity, derive_opportun
 from titan.intelligence.playbooks import get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
+from titan.models.recording import record_calls
 from titan.providers.browser_client import BrowserWorkerClient
 from titan.workflows.types import (
     AnalyseActivityInput,
@@ -864,6 +865,75 @@ def _mx_verification_status(mx: MxCheck) -> VerificationStatus:
     return VerificationStatus.UNKNOWN
 
 
+async def _rephrase(
+    composed: Any,
+    *,
+    org_domain: str,
+    finding: Any,
+    campaign_id: str,
+    lead_id: str,
+) -> tuple[Any, dict[str, Any] | None, list[dict[str, Any]]]:
+    """Run the model rewrite, and never let it break drafting.
+
+    Returns the message to use, what to record about the attempt, and the model
+    calls to bill. On any failure the deterministic message comes back
+    unchanged: a rewrite is an improvement to text that is already correct, and
+    nothing about it justifies failing a draft.
+
+    The provider clients are closed here rather than pooled. A draft is a
+    short-lived activity, and a leaked client is a file descriptor the worker
+    keeps until it restarts.
+    """
+    from titan.intelligence.rewriter import rewrite_message
+    from titan.models.gateway import ModelGateway
+    from titan.models.providers import build_providers
+
+    settings = get_settings()
+    providers = build_providers(settings)
+    if not providers:
+        logger.info("model rewrites enabled but no provider is configured")
+        return composed, {"attempted": False, "reason": "no provider configured"}, []
+
+    gateway = ModelGateway(providers, settings)
+    try:
+        outcome = await rewrite_message(
+            composed,
+            gateway=gateway,
+            domain=org_domain,
+            observed_value=getattr(finding, "observed_value", None),
+            source_url=getattr(finding, "page_url", None),
+            campaign_id=campaign_id,
+            lead_id=lead_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "model rewrite failed; sending the deterministic text",
+            extra={"error_code": type(exc).__name__},
+        )
+        return (
+            composed,
+            {"attempted": True, "used": False, "error": type(exc).__name__},
+            list(gateway.calls),
+        )
+    finally:
+        for provider in providers.values():
+            closer = getattr(provider, "aclose", None)
+            if closer is not None:
+                try:
+                    await closer()
+                except Exception:  # noqa: S110
+                    pass
+
+    detail = {
+        "attempted": True,
+        "used": outcome.rewritten,
+        "sentences_rewritten": outcome.sentences_rewritten,
+        "refusals": list(outcome.refusals),
+        "detail": outcome.detail,
+    }
+    return outcome.message, detail, list(gateway.calls)
+
+
 # ==========================================================================
 # 5. Generate draft
 # ==========================================================================
@@ -981,6 +1051,20 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             variant_seed=request.lead_id,
         )
     )
+    # A model may rephrase what the composer wrote, never what it asserted.
+    # Runs outside any transaction: it makes a network call, and mission
+    # section 25 keeps I/O out of a unit of work.
+    model_calls: list[dict[str, Any]] = []
+    rewrite_detail: dict[str, Any] | None = None
+    if settings.model_rewrites_enabled:
+        composed, rewrite_detail, model_calls = await _rephrase(
+            composed,
+            org_domain=org_domain,
+            finding=headline,
+            campaign_id=request.campaign_id,
+            lead_id=request.lead_id,
+        )
+
     subject, body, claim_map = composed.subject, composed.body, composed.claim_map
 
     report = validate_message(
@@ -1011,12 +1095,19 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             subject=subject,
             body_text=body,
             claim_map=claim_map,
-            validation_report=report.to_json(),
+            validation_report=(
+                {**report.to_json(), "rewrite": rewrite_detail}
+                if rewrite_detail
+                else report.to_json()
+            ),
             validation_passed=report.passed,
             template_key=request.template_key,
         )
         session.add(draft)
         await session.flush()
+        # In the same transaction as the draft the calls paid for: a rolled-back
+        # draft must not leave a charge behind for a message never written.
+        await record_calls(session, workspace_id=workspace_id, calls=model_calls)
         await session.execute(
             Lead.__table__.update()  # type: ignore[attr-defined]
             .where(Lead.id == uuid.UUID(request.lead_id))
