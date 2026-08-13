@@ -20,6 +20,8 @@ const NAV = [
   { href: '/crm', label: 'Overview', exact: true },
   { href: '/crm/leads', label: 'Leads' },
   { href: '/crm/approvals', label: 'Approvals' },
+  { href: '/crm/opportunities', label: 'Opportunities' },
+  { href: '/crm/meetings', label: 'Meetings' },
   { href: '/crm/campaigns', label: 'Campaigns' },
   { href: '/crm/messages', label: 'Delivery' },
   { href: '/crm/compliance', label: 'Compliance' },

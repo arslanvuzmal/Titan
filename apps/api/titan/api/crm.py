@@ -37,7 +37,9 @@ from titan.api.schemas import (
     CrmStatsOut,
     DraftOut,
     LeadOut,
+    MeetingOut,
     MessageOut,
+    OpportunityOut,
     OrganizationLocationOut,
     OrganizationOut,
     OrganizationSummary,
@@ -48,6 +50,7 @@ from titan.config import get_settings
 from titan.db.enums import ContactSource, LeadStatus
 from titan.db.models import (
     AuditFinding,
+    BusinessOpportunity,
     Campaign,
     CampaignPolicy,
     Contact,
@@ -55,6 +58,7 @@ from titan.db.models import (
     FindingEvidence,
     Lead,
     LeadScore,
+    Meeting,
     Message,
     MessageApproval,
     MessageDraft,
@@ -707,6 +711,25 @@ async def crm_stats(
             or 0
         )
 
+        async def opportunities(deliverable: bool) -> int:
+            return int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(BusinessOpportunity)
+                    .where(BusinessOpportunity.deliverable.is_(deliverable))
+                )
+                or 0
+            )
+
+        unscheduled = int(
+            await session.scalar(
+                select(func.count())
+                .select_from(Meeting)
+                .where(Meeting.status == "proposed", Meeting.scheduled_at.is_(None))
+            )
+            or 0
+        )
+
         return CrmStatsOut(
             leads_total=await count(Lead),
             leads_by_status=await _group_count(session, Lead.status, Lead),
@@ -723,6 +746,10 @@ async def crm_stats(
             messages_by_state=await _group_count(session, Message.state, Message),
             suppressions_total=await count(SuppressionEntry),
             replied_total=replied,
+            opportunities_deliverable=await opportunities(True),
+            opportunities_unserved=await opportunities(False),
+            meetings_total=await count(Meeting),
+            meetings_unscheduled=unscheduled,
             # Both must be true for anything to leave the building; the CRM
             # reports the conjunction rather than the workspace flag alone.
             sending_authorized=(
@@ -730,6 +757,101 @@ async def crm_stats(
             ),
             operating_mode=workspace.operating_mode.value,
         )
+
+
+# ==========================================================================
+# Outcomes
+#
+# The two tables that record what the pipeline produced rather than what it
+# did. Both were filled by the research and reply paths and had no reader:
+# opportunities since the analyse stage began deriving them, meetings since a
+# reply asking for a call began opening one.
+# ==========================================================================
+@router.get("/opportunities", response_model=list[OpportunityOut])
+async def list_opportunities(
+    deliverable: bool | None = None,
+    limit: int = 100,
+    principal: Principal = Depends(require("research:read")),
+) -> list[OpportunityOut]:
+    """Commercial opportunities, highest priority first.
+
+    ``deliverable=false`` returns the gaps: problems evidenced on a site that
+    no offer in the playbook covers. They are listed because hiding them would
+    make the audit look like the site was sound in that respect, and they carry
+    no price because there is nothing to sell against them.
+    """
+    async with workspace_session(principal.workspace_id) as session:
+        query = (
+            select(BusinessOpportunity, Organization.display_name)
+            .join(Lead, Lead.id == BusinessOpportunity.lead_id)
+            .join(Organization, Organization.id == Lead.organization_id)
+            .order_by(
+                BusinessOpportunity.priority.desc(),
+                BusinessOpportunity.created_at.desc(),
+            )
+            .limit(max(1, min(limit, 500)))
+        )
+        if deliverable is not None:
+            query = query.where(BusinessOpportunity.deliverable.is_(deliverable))
+
+        return [
+            OpportunityOut(
+                id=row.id,
+                lead_id=row.lead_id,
+                organization_name=name,
+                offer_key=row.offer_key,
+                title=row.title,
+                rationale=row.rationale,
+                estimated_value_usd=row.estimated_value_usd,
+                priority=row.priority,
+                deliverable=row.deliverable,
+                supporting_finding_count=len(row.supporting_finding_ids or []),
+                created_at=row.created_at,
+            )
+            for row, name in await session.execute(query)
+        ]
+
+
+@router.get("/meetings", response_model=list[MeetingOut])
+async def list_meetings(
+    unscheduled_only: bool = False,
+    limit: int = 100,
+    principal: Principal = Depends(require("research:read")),
+) -> list[MeetingOut]:
+    """Calls somebody asked for.
+
+    Unscheduled first, because that is the queue: every meeting Titan opens has
+    no time on it, and one that has sat there a fortnight is the most
+    embarrassing row in the system.
+    """
+    async with workspace_session(principal.workspace_id) as session:
+        query = (
+            select(Meeting, Organization.display_name)
+            .join(Lead, Lead.id == Meeting.lead_id)
+            .join(Organization, Organization.id == Lead.organization_id)
+            .order_by(
+                Meeting.scheduled_at.is_(None).desc(),
+                Meeting.created_at.desc(),
+            )
+            .limit(max(1, min(limit, 500)))
+        )
+        if unscheduled_only:
+            query = query.where(Meeting.scheduled_at.is_(None))
+
+        return [
+            MeetingOut(
+                id=row.id,
+                lead_id=row.lead_id,
+                organization_name=name,
+                status=row.status,
+                scheduled_at=row.scheduled_at,
+                duration_minutes=row.duration_minutes,
+                location_or_link=row.location_or_link,
+                notes=row.notes,
+                created_at=row.created_at,
+            )
+            for row, name in await session.execute(query)
+        ]
 
 
 __all__ = ["apply_lead_filters", "enrich_leads", "router"]

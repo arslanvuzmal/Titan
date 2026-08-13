@@ -582,3 +582,152 @@ async def test_a_viewer_can_read_the_crm_but_not_act_on_it(
         json={"decision": "approved", "draft_version": 1},
     )
     assert denied.status_code == 403
+
+
+# ==========================================================================
+# Outcomes: opportunities and meetings
+#
+# Both tables were filled by the pipeline and had no reader. These check the
+# two rules that make them safe to display: a gap is never priced, and a
+# meeting never arrives with a time Titan invented.
+# ==========================================================================
+async def seed_outcomes(workspace_id: uuid.UUID, crm: dict) -> None:
+    from titan.db.models import BusinessOpportunity, ResearchRun
+    from titan.db.models.ops import Meeting
+
+    async with get_sessionmaker()() as session, session.begin():
+        run = ResearchRun(
+            workspace_id=workspace_id,
+            lead_id=crm["lead_id"],
+            campaign_id=crm["campaign_id"],
+            status="completed",
+            idempotency_key=f"outcomes-{uuid.uuid4().hex[:8]}",
+        )
+        session.add(run)
+        await session.flush()
+
+        session.add_all(
+            [
+                BusinessOpportunity(
+                    workspace_id=workspace_id,
+                    lead_id=crm["lead_id"],
+                    research_run_id=run.id,
+                    offer_key="booking_improvement",
+                    title="Booking improvement",
+                    rationale="2 evidenced findings justify this offer.",
+                    supporting_finding_ids=[str(crm["finding_id"])],
+                    estimated_value_usd=2600.0,
+                    priority=138,
+                    deliverable=True,
+                ),
+                BusinessOpportunity(
+                    workspace_id=workspace_id,
+                    lead_id=crm["lead_id"],
+                    research_run_id=run.id,
+                    offer_key="unserved:serious_accessibility_violations",
+                    title="Unserved: accessibility violations",
+                    rationale="No offer covers this.",
+                    supporting_finding_ids=[],
+                    estimated_value_usd=None,
+                    priority=32,
+                    deliverable=False,
+                ),
+                Meeting(
+                    workspace_id=workspace_id,
+                    lead_id=crm["lead_id"],
+                    status="proposed",
+                    scheduled_at=None,
+                    notes="They wrote: could we book a call next week?",
+                ),
+            ]
+        )
+
+
+async def test_opportunities_list_the_evidence_behind_each_one(client, crm, workspace):
+    await seed_outcomes(workspace, crm)
+
+    response = await client.get("/api/v1/opportunities", headers=auth(crm["token"]))
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 2
+    # Highest priority first, so the sellable one leads.
+    assert rows[0]["deliverable"] is True
+    assert rows[0]["organization_name"]
+    assert rows[0]["supporting_finding_count"] == 1
+
+
+async def test_a_gap_is_returned_but_never_priced(client, crm, workspace):
+    """Attaching a number to work nobody sells would put it in a forecast."""
+    await seed_outcomes(workspace, crm)
+
+    response = await client.get(
+        "/api/v1/opportunities?deliverable=false", headers=auth(crm["token"])
+    )
+
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["deliverable"] is False
+    assert rows[0]["estimated_value_usd"] is None
+    assert rows[0]["offer_key"].startswith("unserved:")
+
+
+async def test_deliverable_and_gaps_are_counted_apart(client, crm, workspace):
+    """A total that mixes them reads as a pipeline, and is not one."""
+    await seed_outcomes(workspace, crm)
+
+    stats = (await client.get("/api/v1/stats", headers=auth(crm["token"]))).json()
+
+    assert stats["opportunities_deliverable"] == 1
+    assert stats["opportunities_unserved"] == 1
+
+
+async def test_a_meeting_is_returned_without_an_invented_time(client, crm, workspace):
+    await seed_outcomes(workspace, crm)
+
+    response = await client.get("/api/v1/meetings", headers=auth(crm["token"]))
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["scheduled_at"] is None
+    assert rows[0]["status"] == "proposed"
+    # The request is quoted, so an operator can set the time from what was said.
+    assert "book a call" in rows[0]["notes"]
+
+
+async def test_unscheduled_meetings_can_be_isolated(client, crm, workspace):
+    await seed_outcomes(workspace, crm)
+
+    response = await client.get(
+        "/api/v1/meetings?unscheduled_only=true", headers=auth(crm["token"])
+    )
+
+    assert len(response.json()) == 1
+    stats = (await client.get("/api/v1/stats", headers=auth(crm["token"]))).json()
+    assert stats["meetings_unscheduled"] == 1
+
+
+async def test_outcomes_are_workspace_scoped(client, crm, workspace, db_session):
+    """The isolation every read surface must hold to."""
+    from titan.db.models import Workspace
+
+    await seed_outcomes(workspace, crm)
+
+    async with get_sessionmaker()() as session, session.begin():
+        other = Workspace(
+            name="Other WS",
+            slug=f"other-{uuid.uuid4().hex[:8]}",
+            operating_mode=OperatingMode.RESEARCH_ONLY,
+        )
+        session.add(other)
+        await session.flush()
+        other_id = other.id
+
+    _, email = await make_member(other_id, WorkspaceRole.RESEARCHER, tag="other")
+    other_token = await token_for(client, email, await slug_of(other_id))
+
+    response = await client.get("/api/v1/opportunities", headers=auth(other_token))
+
+    assert response.status_code == 200
+    assert response.json() == []
