@@ -9,6 +9,7 @@
 
 import crypto from 'node:crypto';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
+import robotsParser from 'robots-parser';
 import type {
   ArtifactRef,
   CrawlResult,
@@ -69,23 +70,25 @@ async function robotsAllows(origin: string, userAgent: string, path: string): Pr
     if (!res.ok) return true; // no robots.txt means no restriction
     const body = (await res.text()).slice(0, 200_000);
 
-    // Minimal but correct-enough parse: collect Disallow rules from the
-    // wildcard group and from any group naming our agent.
-    const lines = body.split(/\r?\n/).map((l) => l.replace(/#.*$/, '').trim());
-    let applies = false;
-    const disallows: string[] = [];
-    for (const line of lines) {
-      const [rawKey, ...rest] = line.split(':');
-      if (!rest.length) continue;
-      const key = rawKey.trim().toLowerCase();
-      const value = rest.join(':').trim();
-      if (key === 'user-agent') {
-        applies = value === '*' || userAgent.toLowerCase().includes(value.toLowerCase());
-      } else if (key === 'disallow' && applies && value) {
-        disallows.push(value);
-      }
-    }
-    return !disallows.some((rule) => path.startsWith(rule));
+    // RFC 9309, via robots-parser. The hand-rolled parse this replaces was
+    // documented as "minimal but correct-enough" and was wrong in five of six
+    // cases the standard defines. Two of them mattered:
+    //
+    //   Disallow: /*.pdf$        -- startsWith() never matches a wildcard, so
+    //   Disallow: /private/*/x      the path was crawled despite being refused
+    //
+    // Under-blocking is the failure that cannot be argued away: the site said
+    // no in the one machine-readable way it has, and Titan went anyway. The
+    // other three over-blocked (no Allow support, an empty User-agent value
+    // matching everything, and a group named "bot" matching any agent whose
+    // name contains it), which cost leads rather than trust.
+    //
+    // Robots is the whole consent mechanism for a crawler that reads sites
+    // nobody asked it to read, so it is worth a tested implementation rather
+    // than twenty lines that look right.
+    const robots = robotsParser(`${origin}/robots.txt`, body);
+    // isAllowed() returns undefined when no rule addresses the path at all.
+    return robots.isAllowed(`${origin}${path}`, userAgent) ?? true;
   } catch {
     // Network failure reading robots.txt is not consent; but neither is it a
     // prohibition. Titan proceeds and records that robots was unreadable.
