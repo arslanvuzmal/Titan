@@ -31,13 +31,24 @@ from titan.db.models.research import AuditFinding
 #: What the reader is being stopped from doing. Fills: "could be making {X}
 #: harder than it needs to be", so every value must be a gerund phrase.
 _CONSEQUENCE: Final[dict[str, str]] = {
+    # Conversion path
     "broken_primary_cta": "booking an appointment",
     "no_booking_or_enquiry_path": "getting an enquiry through to you",
     "high_friction_contact_form": "getting an enquiry through to you",
+    "no_visible_phone_number": "reaching you by phone",
+    # Reachability of the page itself
     "missing_mobile_viewport": "using the site on a phone",
     "broken_internal_link": "finding the page they were after",
     "javascript_console_errors": "using the site reliably",
-    "no_visible_phone_number": "reaching you by phone",
+    "failed_network_requests": "using the parts of the page that depend on them",
+    "slow_largest_contentful_paint": "getting to the content they came for",
+    # Who can read it at all
+    "images_missing_alt_text": "reading the page with a screen reader",
+    "serious_accessibility_violations": "using the site with assistive technology",
+    # How it is found and how it presents
+    "missing_meta_description": "deciding whether to click the result",
+    "no_structured_data": "showing your details directly in search results",
+    "missing_security_headers": "protecting visitors who submit a form",
 }
 
 #: Short noun phrase naming the fault. Fills "One additional thought on {X}:"
@@ -46,10 +57,17 @@ _SHORT: Final[dict[str, str]] = {
     "broken_primary_cta": "the broken booking button",
     "no_booking_or_enquiry_path": "the missing enquiry path",
     "high_friction_contact_form": "the length of the enquiry form",
+    "no_visible_phone_number": "the missing phone number",
     "missing_mobile_viewport": "the mobile display issue",
     "broken_internal_link": "the broken navigation link",
     "javascript_console_errors": "the JavaScript errors",
-    "no_visible_phone_number": "the missing phone number",
+    "failed_network_requests": "the failed requests on the page",
+    "slow_largest_contentful_paint": "the load time of the main content",
+    "images_missing_alt_text": "the images without alt text",
+    "serious_accessibility_violations": "the accessibility failures",
+    "missing_meta_description": "the missing page description",
+    "no_structured_data": "the missing structured data",
+    "missing_security_headers": "the missing security headers",
 }
 
 #: One narrower observation for the day-8 follow-up. Must stand alone as a
@@ -83,6 +101,34 @@ _INSIGHT: Final[dict[str, str]] = {
         "a number in the header is the cheapest change here, and it captures "
         "the people who would rather not use a form at all"
     ),
+    "failed_network_requests": (
+        "a request that fails on load usually takes one feature with it rather "
+        "than the whole page, so it goes unnoticed by anyone not using that part"
+    ),
+    "slow_largest_contentful_paint": (
+        "the measurement is of the largest element on the page, so it is "
+        "usually one image or block rather than the whole site being slow"
+    ),
+    "images_missing_alt_text": (
+        "the same text is what an image search reads, so it affects how the "
+        "page is found as well as who can read it"
+    ),
+    "serious_accessibility_violations": (
+        "each one names a specific element and rule, so they can be worked "
+        "through individually rather than as a redesign"
+    ),
+    "missing_meta_description": (
+        "search engines fall back to whatever text sits nearest the top of the "
+        "page, which is rarely the sentence you would have chosen"
+    ),
+    "no_structured_data": (
+        "it is the markup that lets a result carry opening hours and reviews "
+        "rather than just a title and a line of text"
+    ),
+    "missing_security_headers": (
+        "these are response headers rather than page changes, so it is usually "
+        "a server configuration line and not site work"
+    ),
 }
 
 #: The friction in the customer's own words. Carried for templates that will
@@ -95,6 +141,13 @@ _FRICTION: Final[dict[str, str]] = {
     "broken_internal_link": "a dead end in the navigation",
     "javascript_console_errors": "a page that does not always work",
     "no_visible_phone_number": "no phone number to call",
+    "failed_network_requests": "parts of the page that quietly do not load",
+    "slow_largest_contentful_paint": "a page that takes a while to show anything",
+    "images_missing_alt_text": "images a screen reader cannot describe",
+    "serious_accessibility_violations": "a site that is hard to use without a mouse",
+    "missing_meta_description": "a search result that does not describe the page",
+    "no_structured_data": "a listing that shows less than it could",
+    "missing_security_headers": "a form without the protections browsers look for",
 }
 
 

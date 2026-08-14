@@ -8,10 +8,14 @@ about a stranger's business that nothing measured.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 from sqlalchemy.orm.attributes import set_committed_value
 from titan.db.enums import VerificationMethod
 from titan.db.models.research import AuditFinding, FindingEvidence
+from titan.intelligence import findings as findings_mod
 from titan.outreach.variables import (
     _CONSEQUENCE,
     _FRICTION,
@@ -55,11 +59,27 @@ def test_every_mapped_issue_type_yields_all_three_required_phrases(
 
 
 def test_an_unrecognised_issue_type_yields_nothing_rather_than_a_guess() -> None:
-    variables = derive_variables(finding(issue_type="images_missing_alt_text"))
+    variables = derive_variables(finding(issue_type="a_detector_added_next_week"))
     assert not variables.supported
     assert variables.consequence == ""
     assert variables.short == ""
     assert variables.insight == ""
+
+
+def test_every_issue_type_the_detectors_produce_can_be_written_about() -> None:
+    """A detector with no phrase mapping finds a fault nothing can say out loud.
+
+    That is not a crash, which is why it needs a test: the finding is stored, it
+    scores the lead, it shows in the CRM, and then the message step silently
+    falls back or refuses. Two of these -- accessibility and load time -- also
+    happen to be the only faults that mean the same thing on every kind of site,
+    so leaving them unmapped narrows what Titan can talk about the most.
+    """
+    detectors = Path(findings_mod.__file__).read_text(encoding="utf-8")
+    produced = set(re.findall(r'issue_type="([a-z_]+)"', detectors))
+    assert produced, "no issue types found; the detector module moved"
+    unmapped = sorted(produced - set(_CONSEQUENCE))
+    assert unmapped == [], f"detected but unpitchable: {unmapped}"
 
 
 def test_a_finding_that_is_not_pitchable_yields_nothing() -> None:
