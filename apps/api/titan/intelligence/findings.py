@@ -445,14 +445,17 @@ def _slow_page(page: PageEvidence) -> DetectedFinding | None:
         title=f"Main content takes {lcp / 1000:.1f}s to appear",
         severity=Severity.HIGH if lcp >= 6000 else Severity.MEDIUM,
         confidence=0.9,
-        verification_method=VerificationMethod.LIGHTHOUSE_METRIC,
+        # Measured by the page's own PerformanceObserver during the crawl, not
+        # by Lighthouse -- Titan does not run it, and naming a tool that never
+        # ran would put a false provenance behind a number shown to a stranger.
+        verification_method=VerificationMethod.BROWSER_NAVIGATION,
         page_url=page.final_url,
         observed_value=f"LCP {lcp:.0f}ms",
         expected_behavior="Largest contentful paint under 2.5s",
-        business_impact="Visitors leave before the page finishes loading",
+        business_impact="The main content takes several seconds to appear",
         recommended_solution="Compress images, defer non-critical scripts, enable caching",
         estimated_effort=MEDIUM,
-        evidence=((f"Lighthouse LCP = {lcp:.0f}ms", page.final_url),),
+        evidence=((f"Largest contentful paint = {lcp:.0f}ms", page.final_url),),
     )
 
 

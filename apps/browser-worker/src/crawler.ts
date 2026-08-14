@@ -17,7 +17,7 @@ import type {
   ResearchRequest,
 } from './contract.js';
 import { CONTRACT_VERSION, WORKER_VERSION } from './contract.js';
-import { collectPage, readSecurityHeaders } from './collect.js';
+import { collectPage, readPerformance, readSecurityHeaders, runAxe } from './collect.js';
 import { validateUrl } from './urlGuard.js';
 
 const MOBILE = { width: 390, height: 844 };
@@ -246,6 +246,17 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
         }
 
         const headers = response?.headers() ?? {};
+        // Both were hard-coded empty until now, which left two detectors
+        // (serious_accessibility_violations, slow_largest_contentful_paint)
+        // unable to fire on any site ever crawled.
+        //
+        // Axe runs on the seed page only. It is the expensive call here, and
+        // accessibility rules fail the same way across a template, so paying
+        // for it once per site buys nearly all of the signal. Timing is read
+        // per page because it is nearly free and genuinely varies.
+        const accessibilityViolations =
+          req.run_axe && item.depth === 0 ? await runAxe(page) : [];
+        const performance = await readPerformance(page);
         const evidence: PageEvidence = await collectPage(
           page,
           {
@@ -259,6 +270,8 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
             consoleErrors,
             failedRequests,
             securityHeaders: item.depth === 0 ? readSecurityHeaders(headers) : null,
+            accessibilityViolations,
+            performance,
           },
         );
         result.pages.push(evidence);
