@@ -206,7 +206,10 @@ describe('accessibility and timing collection', { concurrency: 1 }, () => {
     // The fixture is grey-on-grey text, unlabelled inputs and images with no
     // alt. It has existed since the worker was written and could never have
     // been verified: accessibility_violations was hard-coded to [].
-    const result = await runCrawl(request(`${BASE}/accessibility/`));
+    //
+    // run_axe must be asked for: the builder above defaults it off, matching
+    // the contract's own default, so a crawl that wants the check says so.
+    const result = await runCrawl(request(`${BASE}/accessibility/`, { run_axe: true }));
     assert.equal(result.status, 'completed', result.failure_reason ?? '');
 
     const home = result.pages[0];
