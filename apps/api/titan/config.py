@@ -125,8 +125,15 @@ class Settings(BaseSettings):
     #: validated against the live provider catalogue by `titan validate-models`.
     model_route_extraction: str = "nvidia:meta/llama-3.1-8b-instruct"
     model_route_research: str = "nvidia:nvidia/llama-3.3-nemotron-super-49b-v1"
-    model_route_verification: str = "gemini:gemini-2.0-flash"
-    model_route_message: str = "nvidia:moonshotai/kimi-k2-instruct"
+    model_route_verification: str = "gemini:gemini-3.7-flash"
+    #: Gemini writes the prose. It does not decide what is true: the rewriter
+    #: hands it one sentence and the claim that sentence must preserve, and
+    #: discards anything that comes back having lost the evidenced specific
+    #: (titan.intelligence.rewriter). Both routes above were pinned to models
+    #: that have since left their provider's catalogue -- `titan
+    #: validate-models` reported both as absent, so the message path could not
+    #: have run at all.
+    model_route_message: str = "gemini:gemini-3.7-flash"
     model_route_premium: str = "openrouter:anthropic/claude-sonnet-4"
 
     # --------------------------------------------------------------- budgets

@@ -198,3 +198,73 @@ describe('crawler', { concurrency: 1 }, () => {
     assert.equal(submitted, false, 'crawler submitted a form');
   });
 });
+
+describe('accessibility and timing collection', { concurrency: 1 }, () => {
+  test('axe violations are captured from the accessibility fixture', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+
+    // The fixture is grey-on-grey text, unlabelled inputs and images with no
+    // alt. It has existed since the worker was written and could never have
+    // been verified: accessibility_violations was hard-coded to [].
+    //
+    // run_axe must be asked for: the builder above defaults it off, matching
+    // the contract's own default, so a crawl that wants the check says so.
+    const result = await runCrawl(request(`${BASE}/accessibility/`, { run_axe: true }));
+    assert.equal(result.status, 'completed', result.failure_reason ?? '');
+
+    const home = result.pages[0];
+    assert.ok(
+      home.accessibility_violations.length > 0,
+      'axe produced no violations on a page built to fail it',
+    );
+
+    const ruleIds = home.accessibility_violations.map((v) => v.rule_id);
+    assert.ok(ruleIds.includes('image-alt'), `image-alt not flagged: ${ruleIds.join(', ')}`);
+
+    for (const violation of home.accessibility_violations) {
+      assert.ok(violation.rule_id.length > 0, 'a violation arrived with no rule id');
+      assert.ok(
+        violation.impact === null ||
+          ['minor', 'moderate', 'serious', 'critical'].includes(violation.impact),
+        `impact outside the contract: ${violation.impact}`,
+      );
+      assert.ok(Number.isInteger(violation.node_count), 'node_count is not an integer');
+    }
+
+    // At least one serious/critical, which is what the detector filters on.
+    const serious = home.accessibility_violations.filter(
+      (v) => v.impact === 'serious' || v.impact === 'critical',
+    );
+    assert.ok(serious.length > 0, 'nothing serious enough for the detector to fire on');
+  });
+
+  test('axe is not run when the request declines it', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+
+    const result = await runCrawl(request(`${BASE}/accessibility/`, { run_axe: false }));
+    assert.equal(result.status, 'completed', result.failure_reason ?? '');
+    assert.deepEqual(result.pages[0].accessibility_violations, []);
+  });
+
+  test('paint timing is measured', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+
+    const result = await runCrawl(request(`${BASE}/clean/`));
+    assert.equal(result.status, 'completed', result.failure_reason ?? '');
+
+    const perf = result.pages[0].performance;
+    assert.ok(perf !== null, 'no performance metrics captured');
+    assert.ok(
+      typeof perf!.largest_contentful_paint_ms === 'number',
+      'largest contentful paint not measured',
+    );
+    assert.ok(perf!.largest_contentful_paint_ms! >= 0);
+
+    // Lighthouse category scores stay null: Titan does not run Lighthouse, and
+    // a derived number here would be a measurement nobody took.
+    assert.equal(perf!.performance_score, null);
+    assert.equal(perf!.accessibility_score, null);
+    assert.equal(perf!.seo_score, null);
+    assert.equal(perf!.best_practices_score, null);
+  });
+});

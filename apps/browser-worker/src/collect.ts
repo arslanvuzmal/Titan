@@ -7,10 +7,28 @@
  * authentication attempted (mission section 7.3).
  */
 
+import { createRequire } from 'node:module';
 import type { Page } from 'playwright';
-import type { PageEvidence, SecurityHeaders } from './contract.js';
+import type {
+  AccessibilityViolation,
+  PageEvidence,
+  PerformanceMetrics,
+  SecurityHeaders,
+} from './contract.js';
 
 const MAX_TEXT = 20000;
+const MAX_AXE_VIOLATIONS = 50;
+
+//: The closed set the contract allows. Anything else axe reports is recorded as
+//: null rather than passed through, so a new impact level in a future axe
+//: release cannot widen the contract without somebody deciding to.
+const AXE_IMPACTS = new Set(['minor', 'moderate', 'serious', 'critical']);
+
+// Resolved once, from the installed package rather than a CDN: the worker runs
+// with no outbound network beyond the site being crawled, and pulling a script
+// off the internet into an untrusted page would be a supply chain step nobody
+// reviewed.
+const AXE_SOURCE_PATH = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
 
 /**
  * Pure string script evaluated inside the untrusted page DOM context.
@@ -67,12 +85,49 @@ const DOM_COLLECTOR_SCRIPT = `() => {
 
   const bodyText = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
 
+  // A mailto: href is a URI and must be decoded before it is an address:
+  // "mailto:%20info@x.com" names the mailbox "info@x.com" reached past a
+  // leading space, not one called "%20info". Undecoded, that string passed
+  // every downstream gate and hard-bounced against a real domain.
+  const decodeMailto = (href) => {
+    const raw = href.replace(/^mailto:/i, '').split('?')[0];
+    let decoded = raw;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch (err) {
+      decoded = raw;
+    }
+    return decoded.trim().toLowerCase();
+  };
   const mailtos = anchors
     .filter((a) => a.protocol === 'mailto:')
-    .map((a) => a.href.replace(/^mailto:/i, '').split('?')[0].trim().toLowerCase());
-  const textEmails = (bodyText.match(/[\\w.+-]+@[\\w-]+\\.[\\w.-]{2,}/g) || []).map((e) =>
-    e.toLowerCase(),
-  );
+    .map((a) => decodeMailto(a.href))
+    // Whitespace surviving the decode means it was inside the address rather
+    // than around it, and trimming would silently invent a different mailbox.
+    .filter((e) => e && !/\\s/.test(e));
+
+  // Read per text node, not from the flattened body. innerText puts no
+  // separator between adjacent inline elements, so "<span>0606</span><a>
+  // info@x.com</a>" flattens to "0606info@x.com" -- a syntactically perfect
+  // address that nothing downstream can distinguish from a real "07handyman@",
+  // and the second of the two shapes that reached a real send.
+  //
+  // The cost is an address deliberately split across elements, which is missed
+  // rather than mangled. Losing one is the better failure: the mailto: pass
+  // above catches most of them, and a fabricated address is billed to sender
+  // reputation while a missing one is not.
+  const emailPattern = /[a-z0-9._+-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)+/gi;
+  const skipText = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+  const textEmails = [];
+  if (document.body) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (node.parentElement && skipText.has(node.parentElement.tagName)) continue;
+      const found = (node.nodeValue || '').match(emailPattern) || [];
+      for (const hit of found) textEmails.push(hit.toLowerCase());
+    }
+  }
   const tels = anchors.filter((a) => a.protocol === 'tel:').map((a) => a.href.replace(/^tel:/i, ''));
   const textPhones = bodyText.match(/(\\+?\\d[\\d\\s().-]{7,}\\d)/g) || [];
 
@@ -199,6 +254,127 @@ export function readSecurityHeaders(headers: Record<string, string>): SecurityHe
   };
 }
 
+/**
+ * Largest Contentful Paint, as the browser measured it.
+ *
+ * Read from the page's own PerformanceObserver rather than derived from
+ * navigation timings, because LCP is defined as the render time of the largest
+ * element and nothing in the navigation entry knows which element that was.
+ * `buffered: true` replays the entries that already fired before this ran.
+ *
+ * Returns null on any failure. A missing measurement and a fast page must not
+ * look alike: the detector treats null as "not measured" and stays silent.
+ */
+export async function readPerformance(page: Page): Promise<PerformanceMetrics | null> {
+  try {
+    const measured = (await page.evaluate(`new Promise((resolve) => {
+      let lcp = null;
+      let cls = 0;
+      let seen = false;
+      try {
+        const lcpObserver = new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          if (entries.length) {
+            lcp = entries[entries.length - 1].startTime;
+            seen = true;
+          }
+        });
+        lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+
+        const clsObserver = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (!entry.hadRecentInput) cls += entry.value;
+            seen = true;
+          }
+        });
+        clsObserver.observe({ type: 'layout-shift', buffered: true });
+
+        setTimeout(() => {
+          lcpObserver.disconnect();
+          clsObserver.disconnect();
+          resolve(seen ? { lcp: lcp, cls: cls } : null);
+        }, 400);
+      } catch (err) {
+        resolve(null);
+      }
+    })`)) as { lcp: number | null; cls: number } | null;
+
+    if (measured === null) return null;
+    return {
+      // Null, and deliberately so: these four are Lighthouse category scores
+      // and Titan does not run Lighthouse. Filling them with something derived
+      // would put a number nobody measured in front of a recipient.
+      performance_score: null,
+      accessibility_score: null,
+      seo_score: null,
+      best_practices_score: null,
+      largest_contentful_paint_ms: measured.lcp,
+      total_blocking_time_ms: null,
+      cumulative_layout_shift: measured.cls,
+      speed_index_ms: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * axe-core, injected into the page and run against it.
+ *
+ * The page is untrusted, so everything that comes back is treated as data: the
+ * fields are coerced, the impact is checked against the closed set the contract
+ * allows, and both the violation list and the selector length are capped. A
+ * page that returns something enormous or malformed yields an empty list rather
+ * than propagating.
+ *
+ * Failure is silent by design. Accessibility findings are a bonus on a crawl
+ * whose main job is the conversion path, and a site that breaks axe should not
+ * cost us the rest of the evidence.
+ */
+export async function runAxe(page: Page): Promise<AccessibilityViolation[]> {
+  try {
+    await page.addScriptTag({ path: AXE_SOURCE_PATH });
+    const raw = (await page.evaluate(`
+      (typeof axe === 'undefined'
+        ? Promise.resolve(null)
+        : axe
+            .run(document, {
+              resultTypes: ['violations'],
+              performanceTimer: false,
+            })
+            .then((r) =>
+              (r.violations || []).slice(0, 50).map((v) => ({
+                rule_id: String(v.id || ''),
+                impact: v.impact == null ? null : String(v.impact),
+                description: v.help == null ? null : String(v.help),
+                node_count: Array.isArray(v.nodes) ? v.nodes.length : 0,
+                sample_selector:
+                  v.nodes && v.nodes[0] && Array.isArray(v.nodes[0].target)
+                    ? String(v.nodes[0].target[0])
+                    : null,
+              })),
+            )
+            .catch(() => null))
+    `)) as unknown;
+
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, MAX_AXE_VIOLATIONS).map((v) => {
+      const row = v as Record<string, unknown>;
+      const impact = String(row.impact ?? '');
+      return {
+        rule_id: String(row.rule_id ?? '').slice(0, 120),
+        impact: AXE_IMPACTS.has(impact) ? (impact as AccessibilityViolation['impact']) : null,
+        description: row.description == null ? null : String(row.description).slice(0, 300),
+        node_count: Number.isFinite(Number(row.node_count)) ? Number(row.node_count) : 0,
+        sample_selector:
+          row.sample_selector == null ? null : String(row.sample_selector).slice(0, 300),
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function collectPage(
   page: Page,
   base: Pick<PageEvidence, 'url' | 'final_url' | 'depth' | 'http_status' | 'content_type'>,
@@ -206,6 +382,8 @@ export async function collectPage(
     consoleErrors: string[];
     failedRequests: string[];
     securityHeaders: SecurityHeaders | null;
+    accessibilityViolations?: AccessibilityViolation[];
+    performance?: PerformanceMetrics | null;
   },
 ): Promise<PageEvidence> {
   // page.evaluate(<string>) is typed `unknown`, so the result is annotated
@@ -234,8 +412,8 @@ export async function collectPage(
     console_errors: extras.consoleErrors.slice(0, 50),
     failed_requests: extras.failedRequests.slice(0, 50),
     security_headers: extras.securityHeaders,
-    accessibility_violations: [],
-    performance: null,
+    accessibility_violations: extras.accessibilityViolations ?? [],
+    performance: extras.performance ?? null,
     captured_at: new Date().toISOString(),
   };
 }
