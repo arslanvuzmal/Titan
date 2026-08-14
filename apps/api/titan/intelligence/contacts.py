@@ -129,7 +129,42 @@ COMMON_GUESS_PATTERNS: tuple[re.Pattern[str], ...] = (
 # pattern only allowed them in the first label, which silently rejected
 # legitimate subdomain addresses.
 _LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
-EMAIL_RE = re.compile(rf"^[^@\s]{{1,64}}@{_LABEL}(?:\.{_LABEL})*\.[a-z]{{2,}}$", re.I)
+
+# The local part is a dot-atom (RFC 5322): atext runs joined by single dots,
+# with no dot leading, trailing, or doubled. The previous pattern was
+# ``[^@\s]{1,64}``, which accepted anything at all that was not whitespace or
+# an at-sign, and that is how "%20csteam@ruhdental.com" reached a real send.
+_ATEXT = r"[a-z0-9!#$%&'*+/=?^_`{|}~-]"
+_LOCAL = rf"{_ATEXT}+(?:\.{_ATEXT}+)*"
+EMAIL_RE = re.compile(rf"^{_LOCAL}@{_LABEL}(?:\.{_LABEL})*\.[a-z]{{2,}}$", re.I)
+
+#: A percent-encoding triplet surviving into an address means somebody handed us
+#: a URI they never decoded -- ``mailto:%20info@x.com`` is a leading space, not a
+#: mailbox named "%20info". Percent is legal atext, so the dot-atom rule above
+#: cannot catch this; matching the encoding shape specifically is narrow enough
+#: to leave a genuine (if eccentric) "a%b@x.com" alone.
+PERCENT_ENCODED = re.compile(r"%[0-9a-f]{2}", re.I)
+
+#: RFC 5321 section 4.5.3.1.1.
+MAX_LOCAL_PART = 64
+
+
+def is_valid_email(email: str) -> bool:
+    """Whether an address is well-formed enough to be worth sending to.
+
+    Deliberately stricter than "the string contains an @". Every address Titan
+    holds arrives from a crawler reading somebody else's markup, so the shapes
+    that matter here are the malformed ones a scrape produces rather than the
+    exotic ones a standard permits.
+    """
+    normalized = normalize_email(email)
+    if not EMAIL_RE.match(normalized):
+        return False
+    local = normalized.partition("@")[0]
+    if len(local) > MAX_LOCAL_PART:
+        return False
+    return not PERCENT_ENCODED.search(local)
+
 
 #: Addresses appearing on a site that clearly belong to someone else.
 THIRD_PARTY_DOMAINS: frozenset[str] = frozenset(
@@ -228,7 +263,7 @@ def extract_contacts_from_pages(
             normalized = normalize_email(raw)
             if normalized in out:
                 continue
-            if not EMAIL_RE.match(normalized):
+            if not is_valid_email(normalized):
                 continue
 
             domain = email_domain(normalized)
@@ -310,7 +345,7 @@ def check_contact_eligibility(
     reasons: list[str] = []
     normalized = normalize_email(email)
 
-    if not EMAIL_RE.match(normalized):
+    if not is_valid_email(normalized):
         reasons.append("address is not a syntactically valid email")
     if normalized.partition("@")[0] in NEVER_CONTACT_LOCAL_PARTS:
         reasons.append("system mailbox; never an outreach target")

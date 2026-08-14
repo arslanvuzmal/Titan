@@ -67,12 +67,49 @@ const DOM_COLLECTOR_SCRIPT = `() => {
 
   const bodyText = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
 
+  // A mailto: href is a URI and must be decoded before it is an address:
+  // "mailto:%20info@x.com" names the mailbox "info@x.com" reached past a
+  // leading space, not one called "%20info". Undecoded, that string passed
+  // every downstream gate and hard-bounced against a real domain.
+  const decodeMailto = (href) => {
+    const raw = href.replace(/^mailto:/i, '').split('?')[0];
+    let decoded = raw;
+    try {
+      decoded = decodeURIComponent(raw);
+    } catch (err) {
+      decoded = raw;
+    }
+    return decoded.trim().toLowerCase();
+  };
   const mailtos = anchors
     .filter((a) => a.protocol === 'mailto:')
-    .map((a) => a.href.replace(/^mailto:/i, '').split('?')[0].trim().toLowerCase());
-  const textEmails = (bodyText.match(/[\\w.+-]+@[\\w-]+\\.[\\w.-]{2,}/g) || []).map((e) =>
-    e.toLowerCase(),
-  );
+    .map((a) => decodeMailto(a.href))
+    // Whitespace surviving the decode means it was inside the address rather
+    // than around it, and trimming would silently invent a different mailbox.
+    .filter((e) => e && !/\\s/.test(e));
+
+  // Read per text node, not from the flattened body. innerText puts no
+  // separator between adjacent inline elements, so "<span>0606</span><a>
+  // info@x.com</a>" flattens to "0606info@x.com" -- a syntactically perfect
+  // address that nothing downstream can distinguish from a real "07handyman@",
+  // and the second of the two shapes that reached a real send.
+  //
+  // The cost is an address deliberately split across elements, which is missed
+  // rather than mangled. Losing one is the better failure: the mailto: pass
+  // above catches most of them, and a fabricated address is billed to sender
+  // reputation while a missing one is not.
+  const emailPattern = /[a-z0-9._+-]+@[a-z0-9-]+(?:\\.[a-z0-9-]+)+/gi;
+  const skipText = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+  const textEmails = [];
+  if (document.body) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (node.parentElement && skipText.has(node.parentElement.tagName)) continue;
+      const found = (node.nodeValue || '').match(emailPattern) || [];
+      for (const hit of found) textEmails.push(hit.toLowerCase());
+    }
+  }
   const tels = anchors.filter((a) => a.protocol === 'tel:').map((a) => a.href.replace(/^tel:/i, ''));
   const textPhones = bodyText.match(/(\\+?\\d[\\d\\s().-]{7,}\\d)/g) || [];
 

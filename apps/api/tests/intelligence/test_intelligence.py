@@ -889,3 +889,106 @@ def test_a_shared_mailbox_is_still_a_legitimate_target(local: str) -> None:
     )
 
     assert result.eligible
+
+
+# --------------------------------------------------------------------------
+# Contacts: malformed addresses a scrape produces
+# --------------------------------------------------------------------------
+# Both shapes below were sent to in production and bounced. They are kept as
+# literal strings rather than reduced to a pattern, so the regression is tied
+# to the thing that actually happened.
+def test_a_percent_encoded_address_is_refused() -> None:
+    """``mailto:%20csteam@...`` is a leading space, not a mailbox.
+
+    The old local-part rule was "anything but whitespace or @", so the encoded
+    space survived every gate and the send hard-bounced.
+    """
+    found = contacts_mod.extract_contacts_from_pages(
+        [page(visible_emails=["%20csteam@bellrose-dental.test"])],
+        "bellrose-dental.test",
+    )
+    assert found == []
+
+
+def test_the_eligibility_check_also_refuses_a_percent_encoded_address() -> None:
+    result = contacts_mod.check_contact_eligibility(
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        verification=VerificationStatus.PROVIDER_VERIFIED,
+        is_active=True,
+        allowed_sources=frozenset(ContactSource),
+        require_verified=True,
+        email="%20csteam@bellrose-dental.test",
+    )
+    assert not result.eligible
+    assert any("syntactically valid" in r for r in result.reasons)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        ".info@bellrose-dental.test",
+        "info.@bellrose-dental.test",
+        "in..fo@bellrose-dental.test",
+        "@bellrose-dental.test",
+        "info @bellrose-dental.test",
+        "in fo@bellrose-dental.test",
+    ],
+)
+def test_a_malformed_local_part_is_refused(malformed: str) -> None:
+    assert (
+        contacts_mod.extract_contacts_from_pages(
+            [page(visible_emails=[malformed])], "bellrose-dental.test"
+        )
+        == []
+    )
+
+
+def test_an_over_long_local_part_is_refused() -> None:
+    """RFC 5321 caps it at 64; the old pattern said so and the new one must too."""
+    assert (
+        contacts_mod.extract_contacts_from_pages(
+            [page(visible_emails=["a" * 65 + "@bellrose-dental.test"])],
+            "bellrose-dental.test",
+        )
+        == []
+    )
+    assert contacts_mod.extract_contacts_from_pages(
+        [page(visible_emails=["a" * 64 + "@bellrose-dental.test"])],
+        "bellrose-dental.test",
+    )
+
+
+@pytest.mark.parametrize(
+    "legitimate",
+    [
+        "info@bellrose-dental.test",
+        "first.last@bellrose-dental.test",
+        "hello+booking@bellrose-dental.test",
+        "manchester-rec@bellrose-dental.test",
+        "07handyman@bellrose-dental.test",
+        "o'brien@bellrose-dental.test",
+    ],
+)
+def test_tightening_the_rule_did_not_reject_real_addresses(legitimate: str) -> None:
+    """A stricter validator that drops real mailboxes has traded one silent
+    failure for a quieter one."""
+    found = contacts_mod.extract_contacts_from_pages(
+        [page(visible_emails=[legitimate])], "bellrose-dental.test"
+    )
+    assert found, f"{legitimate} should still be accepted"
+
+
+def test_a_digit_prefixed_local_part_is_still_accepted() -> None:
+    """The other production bounce, "0606info@", is NOT caught here.
+
+    A phone number glued onto a role name by ``innerText`` concatenation is a
+    syntactically perfect address, and no validator can tell it from a real
+    ``07handyman@``. It is fixed where it is created -- the browser worker now
+    reads addresses per element instead of from flattened body text -- and this
+    test records that the control plane deliberately does not guess.
+    """
+    found = contacts_mod.extract_contacts_from_pages(
+        [page(visible_emails=["0606info@bellrose-dental.test"])],
+        "bellrose-dental.test",
+    )
+    assert found and found[0].is_usable
