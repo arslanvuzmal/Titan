@@ -24,12 +24,16 @@ counts near the bottom and only uses rates once there is enough to divide by.
 Getting that backwards would condemn a domain on one bounce that was really one
 wrong address.
 
-**On hard versus soft.** Titan does not yet distinguish them on the message row:
-``bounced_at`` is set for both, and only the suppression path consults
-``is_hard_bounce``. So the counter here is named ``bounced`` rather than
-``hard_bounced``, which is what it actually holds. That imprecision is the
-reason the thresholds below are set where they are, and closing it is the
-soft-bounce work that ``REPEATED_SOFT_BOUNCE`` is still waiting for.
+**On hard versus soft.** ``messages.bounce_kind`` now records which a bounce was,
+and this still counts both, which is deliberate rather than left over. The
+distinction matters enormously for an *address* -- a full mailbox will accept
+mail next week, so ``titan.delivery.bounces`` waits rather than suppressing -- and
+much less for a *domain*, where a server refusing our mail for any reason is the
+thing being measured. The counter is therefore named ``bounced`` and means it.
+
+The thresholds below were set while every bounce read as hard, and they are
+deliberately unchanged: they were tuned to the mixture, not to the label. Should
+they ever be split, the column is there to split them on.
 """
 
 from __future__ import annotations

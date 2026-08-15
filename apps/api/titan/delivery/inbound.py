@@ -46,6 +46,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import MessageDraft
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting
+from titan.delivery.bounces import BounceKind, record_bounce
 from titan.delivery.suppression import suppress
 from titan.delivery.webhooks import record_reply
 from titan.intelligence.contacts import normalize_email
@@ -323,9 +324,35 @@ async def ingest_inbound(
 
     suppressed = False
     reason = _SUPPRESSION_REASONS.get(classification.kind)
-    should_suppress = classification.requires_suppression or is_hard_bounce(
-        classification
-    )
+
+    # A bounce is decided by titan.delivery.bounces, which the webhook path also
+    # calls. Both used to answer "suppress or not" for themselves, and a soft
+    # bounce fell out of both -- correct the first time, wrong by the fifth. The
+    # escalation rule now lives in one place and this defers to it, then falls
+    # through to the ordinary notification and logging below.
+    bounce_target = suppression_target or message.from_email
+    is_bounce = classification.kind is ReplyKind.BOUNCE and bool(bounce_target)
+    if is_bounce:
+        outcome = await record_bounce(
+            session,
+            workspace_id=workspace_id,
+            to_email=bounce_target,
+            kind=(BounceKind.HARD if is_hard_bounce(classification) else BounceKind.SOFT),
+            source="inbound_email",
+            message_id=in_reply_to_message_id,
+            lead_id=lead_id,
+            detail={
+                "signals": list(classification.signals),
+                "subject": message.subject[:200],
+                "inbound_message_id": str(inbound_id),
+                "envelope_sender": normalize_email(message.from_email or ""),
+            },
+            now=moment,
+        )
+        suppressed = outcome.suppressed
+        reason = outcome.reason
+
+    should_suppress = classification.requires_suppression and not is_bounce
 
     # A confident "not interested" also suppresses, so a person who declined one
     # campaign is not approached by the next one. Ambiguity never does.

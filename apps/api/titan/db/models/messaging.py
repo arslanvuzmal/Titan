@@ -214,6 +214,20 @@ class Message(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         UniqueConstraint("workspace_id", "dedupe_key"),
         Index("ix_messages_ws_state", "workspace_id", "state"),
         Index("ix_messages_provider_msg", "provider_message_id"),
+        CheckConstraint(
+            "bounce_kind IS NULL OR bounce_kind IN ('hard', 'soft')",
+            name="bounce_kind_allowed",
+        ),
+        # The soft-bounce counter's read path: every soft bounce for one address
+        # inside a window. Partial, because the overwhelming majority of rows
+        # have no bounce at all and indexing them would be paying to store nulls.
+        Index(
+            "ix_messages_soft_bounces",
+            "workspace_id",
+            "to_email_normalized",
+            "bounced_at",
+            postgresql_where=text("bounce_kind = 'soft'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -268,6 +282,17 @@ class Message(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     delivered_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     first_opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     bounced_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    #: "hard" | "soft", set when a bounce is ingested. Null means no bounce, or
+    #: a bounce recorded before this column existed.
+    #:
+    #: A plain string with a check constraint rather than a native enum: two
+    #: values that will not grow, and the alternative costs a PostgreSQL type
+    #: plus a migration for a vocabulary nobody expects to change. Both bounce
+    #: paths already knew which kind they had -- resend reads the provider's
+    #: flag, the IMAP parser reads the DSN status code -- and both discarded it,
+    #: so soft bounces could not be counted and titan.intelligence.domain_health
+    #: had to treat every bounce as hard.
+    bounce_kind: Mapped[str | None] = mapped_column(String(4))
     complained_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     #: Body retained only until the retention window expires.
     body_retained_until: Mapped[dt.datetime | None] = mapped_column(
