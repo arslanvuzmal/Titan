@@ -244,16 +244,70 @@ class VerificationStatus(enum.StrEnum):
     PUBLISHED_FIRST_PARTY = "published_first_party"
     PROVIDER_VERIFIED = "provider_verified"
     RISKY = "risky"
+    #: The domain accepts mail for every local part, so the server's acceptance
+    #: of *this* address proves nothing about it. Distinct from RISKY and from
+    #: UNKNOWN: something conclusive was learned, and what was learned is that
+    #: no mailbox-level answer is obtainable from this domain at any price.
+    CATCH_ALL = "catch_all"
     INVALID = "invalid"
     UNKNOWN = "unknown"
 
 
+#: Statuses that permit sending on their own, whatever the provenance.
 SENDABLE_VERIFICATION_STATUSES = frozenset(
     {
         VerificationStatus.PUBLISHED_FIRST_PARTY,
         VerificationStatus.PROVIDER_VERIFIED,
     }
 )
+
+#: Provenances strong enough to carry a CATCH_ALL address. See
+#: :func:`verification_permits_sending` for why this exists at all.
+#: Deliberately narrower than ELIGIBLE_CONTACT_SOURCES. A directory listing or
+#: a Places record is a third party asserting an address; only these three are
+#: someone with direct knowledge of the mailbox putting it in front of us.
+_CATCH_ALL_TRUSTED_SOURCES = frozenset(
+    {
+        ContactSource.FIRST_PARTY_WEBSITE,
+        ContactSource.MANUAL_ENTRY,
+        ContactSource.EXISTING_CRM_RELATIONSHIP,
+    }
+)
+
+
+def verification_permits_sending(
+    status: VerificationStatus, source: ContactSource
+) -> bool:
+    """Whether verification and provenance together permit a send.
+
+    A frozenset was enough while every status could be judged alone. CATCH_ALL
+    cannot be, and collapsing it into either bucket gets a real population
+    wrong:
+
+    * Treat it as sendable and Titan mails guessed addresses at domains that
+      accept everything and bounce nothing -- the mail lands in a spam trap or
+      vanishes, and neither outcome is visible as a bounce, so the list quality
+      problem never surfaces.
+    * Treat it as unsendable and Titan refuses ``enquiries@`` addresses that the
+      business published on its own contact page. Catch-all is the default on
+      most small-business hosting, which is precisely the population Titan
+      targets: this would discard a large share of legitimate leads for a
+      property of their mail server they have never thought about.
+
+    What separates the two is not the mail server -- it is identical in both
+    cases -- but who put the address in front of us. A human publishing an
+    address on their own website is asserting that somebody reads it. That
+    assertion is the evidence; the catch-all configuration merely means the
+    server will not confirm it independently.
+
+    So provenance decides, which is the same rule invariant 6 already applies to
+    the address itself.
+    """
+    if status in SENDABLE_VERIFICATION_STATUSES:
+        return True
+    if status is VerificationStatus.CATCH_ALL:
+        return source in _CATCH_ALL_TRUSTED_SOURCES
+    return False
 
 
 class DraftStatus(enum.StrEnum):
