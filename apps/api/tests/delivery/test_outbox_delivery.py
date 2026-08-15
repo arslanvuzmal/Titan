@@ -897,3 +897,75 @@ async def test_an_eastern_business_at_the_same_moment_is_sent(
     assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
         "sent"
     ]
+
+
+# --------------------------------------------------------------------------
+# The local frame, stamped at send time
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_send_records_the_recipients_local_hour(db_session, sendable) -> None:
+    """Without this the columns stay null forever and the timing question
+    cannot be asked -- which is the state this replaced."""
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)  # 13:30 Europe/London
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]
+
+    async with get_sessionmaker()() as s:
+        message = await s.get(Message, sendable.message_id)
+    assert message.sent_timezone == "Europe/London"
+    assert message.local_sent_hour == 13
+    assert message.local_sent_weekday == 0  # Monday
+
+
+@pytest.mark.asyncio
+async def test_two_coasts_at_one_instant_record_different_hours(
+    db_session, workspace
+) -> None:
+    """The whole point of recording it in their frame rather than ours."""
+    from titan.db.enums import Region
+    from titan.db.models.lead import OrganizationLocation
+
+    async def place(fixture, *, admin_area: str, longitude: float):
+        async with get_sessionmaker()() as s, s.begin():
+            org_id = (
+                await s.execute(
+                    select(Lead.organization_id).where(Lead.id == fixture.lead_id)
+                )
+            ).scalar_one()
+            await s.execute(
+                update(OrganizationLocation)
+                .where(OrganizationLocation.organization_id == org_id)
+                .values(
+                    timezone=None,
+                    country_code="US",
+                    region=admin_area,
+                    longitude=longitude,
+                )
+            )
+            await s.execute(
+                update(Campaign)
+                .where(Campaign.id == fixture.campaign_id)
+                .values(region=Region.USA)
+            )
+
+    async with get_sessionmaker()() as s:
+        west = await build_sendable(s, workspace, suffix="frameW")
+        east = await build_sendable(s, workspace, suffix="frameE")
+    await place(west, admin_area="California", longitude=-118.24)
+    await place(east, admin_area="Georgia", longitude=-84.39)
+
+    # 16:00 UTC = 09:00 Pacific and 12:00 Eastern, inside both windows.
+    moment = dt.datetime(2026, 8, 3, 16, 0, tzinfo=dt.UTC)
+    await run_worker(MockEmailProvider(), now_fn=lambda: moment)
+
+    async with get_sessionmaker()() as s:
+        west_row = await s.get(Message, west.message_id)
+        east_row = await s.get(Message, east.message_id)
+
+    assert west_row.local_sent_hour == 9
+    assert east_row.local_sent_hour == 12
+    assert west_row.sent_timezone == "America/Los_Angeles"
+    assert east_row.sent_timezone == "America/New_York"

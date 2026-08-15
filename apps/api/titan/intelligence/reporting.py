@@ -105,6 +105,10 @@ class WeeklyReport:
     #: forty campaign rows are not a portfolio, they are the same problem in a
     #: longer form.
     portfolio: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    #: What the recipient's own week says about when to write. One line:
+    #: almost every slot is below the sample floor and saying so at length
+    #: would fill the report with the word unknown.
+    timing: str = ""
     #: (label, grade, detail) per discovery batch, worst first. Graded rather
     #: than merely counted: lead_sources already records what a search cost and
     #: how many rows it returned, and neither says whether the leads were good.
@@ -256,6 +260,12 @@ def render(report: WeeklyReport) -> str:
         lines.append("PORTFOLIO")
         for region, detail in report.portfolio:
             lines.append(f"  {region}: {detail}")
+        lines.append("")
+
+    # ---- when to write ---------------------------------------------------
+    if report.timing:
+        lines.append("TIMING")
+        lines.append(f"  {report.timing}")
         lines.append("")
 
     # ---- where the leads came from --------------------------------------

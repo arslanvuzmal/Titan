@@ -33,7 +33,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
-from titan.intelligence import lead_sources, portfolio
+from titan.intelligence import lead_sources, portfolio, timing
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
     WeeklyReport,
@@ -56,6 +56,11 @@ MAX_HOT_LEADS = 8
 #: by Friday, and grading only this week's searches would report UNKNOWN for
 #: every one of them forever.
 SOURCE_LOOKBACK = dt.timedelta(days=90)
+
+#: How far back the timing question looks. A quarter: one slot needs about a
+#: month of one campaign's sending to be judgeable at all, so anything
+#: shorter reports the whole week as unknown.
+TIMING_LOOKBACK = dt.timedelta(days=90)
 
 #: Sources shown in the report. Ranked worst first, so the truncated tail is the
 #: part nobody needed to read.
@@ -226,8 +231,10 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
 
         source_windows = await _lead_source_windows(session, workspace_id, now)
         region_slices = await _portfolio_slices(session, workspace_id, since)
+        slot_outcomes = await _timing_slots(session, workspace_id, now)
 
     standing = portfolio.summarise(region_slices)
+    timing_report = timing.learn(slot_outcomes)
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -260,6 +267,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             (window.region.value, portfolio.describe(window, standing))
             for window in standing.slices
         ),
+        timing=timing.describe(timing_report),
         lead_sources=tuple(
             (
                 window.label or window.kind,
@@ -472,6 +480,74 @@ async def _portfolio_slices(
             contacted=int(row.contacted or 0),
             sent=int(row.sent or 0),
             bounced=int(row.bounced or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _timing_slots(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[timing.SlotOutcome]:
+    """Sends and replies by local weekday and hour.
+
+    Not windowed to the report period. A single hour of a single weekday takes
+    about a month of one campaign's sending to reach the sample floor, so a
+    seven-day window would report every slot as unknown forever -- which is
+    accurate and useless.
+
+    Replies are counted per lead, and attributed to the slot of the message that
+    prompted them: the *first* message sent to that lead. A reply follows a
+    conversation rather than a single send, and attributing it to the most
+    recent follow-up would credit the last message for work the first one did.
+
+    Rows with no local hour are excluded rather than defaulted. A null means the
+    clock could not be resolved, and treating it as midnight would invent a
+    thousand sends at 3am and then act on them.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    WITH first_send AS (
+                        SELECT DISTINCT ON (lead_id)
+                               lead_id,
+                               local_sent_weekday AS weekday,
+                               local_sent_hour    AS hour
+                          FROM messages
+                         WHERE workspace_id = :workspace
+                           AND sent_at IS NOT NULL
+                           AND local_sent_hour IS NOT NULL
+                           AND created_at >= :since
+                         ORDER BY lead_id, sent_at
+                    )
+                    SELECT f.weekday                                AS weekday,
+                           f.hour                                   AS hour,
+                           count(*)                                 AS sent,
+                           count(*) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                        AS replied
+                      FROM first_send f
+                      JOIN leads l ON l.id = f.lead_id
+                     WHERE l.workspace_id = :workspace
+                     GROUP BY f.weekday, f.hour
+                    """
+                ),
+                {"workspace": workspace_id, "since": now - TIMING_LOOKBACK},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "timing slots unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        timing.SlotOutcome(
+            slot=timing.Slot(weekday=int(row.weekday), hour=int(row.hour)),
+            sent=int(row.sent or 0),
             replied=int(row.replied or 0),
         )
         for row in rows

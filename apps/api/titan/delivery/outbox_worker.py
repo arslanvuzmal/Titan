@@ -87,6 +87,40 @@ logger = logging.getLogger(__name__)
 BACKOFF_SCHEDULE = (30, 120, 600, 1800, 7200, 21600)
 
 
+def _local_frame(ctx: SendContext | None, now: dt.datetime) -> dict[str, object]:
+    """When this send landed in the recipient's own day.
+
+    Stamped here because it cannot be recovered later: the clock depends on the
+    recipient's timezone, the band their address falls in and the campaign's
+    market, and all three can change afterwards. See the migration.
+
+    Every field is None when the clock could not be resolved. Null reads as
+    "unknown" to the learning query; a default of midnight would read as a
+    thousand messages sent at 3am and would be acted on.
+    """
+    empty: dict[str, object] = {
+        "local_sent_hour": None,
+        "local_sent_weekday": None,
+        "sent_timezone": None,
+    }
+    if ctx is None:
+        return empty
+    timezone = resolve_timezone(
+        ctx.recipient_timezone,
+        ctx.campaign_region,
+        recipient_subregion=ctx.recipient_subregion,
+        campaign_subregion=ctx.campaign_subregion,
+    )
+    local = local_time(now, timezone)
+    if local is None:
+        return empty
+    return {
+        "local_sent_hour": local.hour,
+        "local_sent_weekday": local.weekday(),
+        "sent_timezone": timezone,
+    }
+
+
 def worker_identity() -> str:
     """Stable-per-process lease owner, so a crashed worker is identifiable."""
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
@@ -383,7 +417,7 @@ class OutboxWorker:
             await self._schedule_retry(session, row, f"{type(exc).__name__}: {exc}")
             return ProcessResult(row.id, "retried", str(exc))
 
-        return await self._record(session, row, result)
+        return await self._record(session, row, result, ctx)
 
     async def _recipient_domain_health(
         self, session: AsyncSession, row: OutboxMessage
@@ -890,7 +924,11 @@ class OutboxWorker:
         )
 
     async def _record(
-        self, session: AsyncSession, row: OutboxMessage, result: SendResult
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        result: SendResult,
+        ctx: SendContext | None = None,
     ) -> ProcessResult:
         now = self._now()
         if result.accepted:
@@ -907,6 +945,7 @@ class OutboxWorker:
                     state_event_at=now,
                     provider_message_id=result.provider_message_id,
                     sent_at=now,
+                    **_local_frame(ctx, now),
                 )
             )
             await session.execute(
