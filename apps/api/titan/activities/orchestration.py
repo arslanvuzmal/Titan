@@ -24,10 +24,20 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
+from titan.autonomy.actuator import (
+    Actuation,
+    Bounds,
+    effective_daily_limit,
+    effective_min_lead_score,
+)
+from titan.autonomy.apply import apply_all
+from titan.autonomy.health import CampaignWindow
+from titan.autonomy.health import classify as classify_campaign
+from titan.autonomy.manager import ManagedState, plan
 from titan.db.enums import (
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
@@ -35,7 +45,8 @@ from titan.db.enums import (
     MessageState,
 )
 from titan.db.models import Campaign, CampaignPolicy, Lead, Message, Organization
-from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
+from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import (
@@ -46,6 +57,10 @@ from titan.workflows.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: The window the manager judges a campaign over. The same trailing thirty
+#: days the sender and recipient-domain judgements use.
+MANAGER_WINDOW_DAYS = 30
 
 #: Lead statuses that still need the research pipeline run over them. A lead
 #: already DRAFTED or QUEUED has a message waiting on a human or on the outbox;
@@ -105,6 +120,11 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             )
         assert policy is not None  # narrowed by _authorization_blockers
 
+        configured_limit = policy.daily_send_limit
+        configured_score = policy.min_lead_score
+        managed_limit = policy.managed_daily_send_limit
+        managed_score = policy.managed_min_lead_score
+
         # Midnight UTC, not a rolling 24 hours. The quota engine counts the same
         # way, and two components disagreeing about where "today" starts is how
         # a limit gets silently exceeded around the boundary.
@@ -120,8 +140,32 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
                 )
             )
         ).scalar_one()
-        remaining = max(0, policy.daily_send_limit - int(spent))
-        min_score = policy.min_lead_score
+        outcomes = await _campaign_outcomes(session, campaign_id, now)
+        leads_available = await _pool_size(session, campaign_id=campaign_id)
+
+    # The manager runs before the budget is read, so a decision made now governs
+    # this cycle rather than the next one. It is deliberately *after* the
+    # authorization check above: a campaign that may not send is not a campaign
+    # worth tuning, and running the manager on one would fill the audit trail
+    # with decisions about mail that was never going out.
+    effective_limit, effective_score = await _run_manager(
+        workspace_id=workspace_id,
+        campaign_id=campaign_id,
+        status=campaign.status,
+        bounds=Bounds(
+            configured_daily_limit=configured_limit,
+            configured_min_lead_score=configured_score,
+        ),
+        managed_limit=managed_limit,
+        managed_score=managed_score,
+        outcomes=outcomes,
+        leads_available=leads_available,
+        now=now,
+    )
+
+    async with workspace_session(workspace_id) as session:
+        remaining = max(0, effective_limit - int(spent))
+        min_score = effective_score
 
     if remaining == 0:
         return CampaignCyclePlan(
@@ -345,3 +389,136 @@ __all__ = [
     "RESEARCHABLE_STATUSES",
     "plan_campaign_cycle",
 ]
+
+
+async def _campaign_outcomes(
+    session: AsyncSession, campaign_id: uuid.UUID, now: dt.datetime
+) -> dict[str, int]:
+    """This campaign's recent delivery record, over the reputation window.
+
+    The same trailing thirty days the sender and domain judgements use. A
+    campaign judged on a different window from the gate that stops its mail
+    would be answering a different question and calling it the same one.
+    """
+    since = now - dt.timedelta(days=MANAGER_WINDOW_DAYS)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                       count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                       count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                       count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
+                       count(DISTINCT lead_id) FILTER (
+                           WHERE sent_at IS NOT NULL
+                       )                                                 AS contacted
+                  FROM messages
+                 WHERE workspace_id = :workspace
+                   AND campaign_id = :campaign
+                   AND created_at >= :since
+                """
+            ),
+            {
+                "workspace": session.info.get(WORKSPACE_KEY),
+                "campaign": campaign_id,
+                "since": since,
+            },
+        )
+    ).one()
+    replied = (
+        await session.execute(
+            select(func.count())
+            .select_from(Lead)
+            .where(Lead.campaign_id == campaign_id, Lead.replied_at >= since)
+        )
+    ).scalar_one()
+    return {
+        "sent": int(row.sent or 0),
+        "delivered": int(row.delivered or 0),
+        "bounced": int(row.bounced or 0),
+        "complained": int(row.complained or 0),
+        "contacted": int(row.contacted or 0),
+        "replied": int(replied or 0),
+    }
+
+
+async def _run_manager(
+    *,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    status: CampaignStatus,
+    bounds: Bounds,
+    managed_limit: int | None,
+    managed_score: int | None,
+    outcomes: dict[str, int],
+    leads_available: int,
+    now: dt.datetime,
+) -> tuple[int, int]:
+    """Let the manager adjust this campaign, and return what it may now use.
+
+    Fails soft to the *configured* values, not to the managed ones. If the
+    manager cannot run, the campaign falls back to what a human approved rather
+    than to whatever the manager last decided -- an autonomous adjustment should
+    not outlive the ability to review it.
+    """
+    effective_limit = effective_daily_limit(bounds.configured_daily_limit, managed_limit)
+    effective_score = effective_min_lead_score(
+        bounds.configured_min_lead_score, managed_score
+    )
+
+    window = CampaignWindow(
+        campaign_id=str(campaign_id),
+        status=status,
+        window=ReputationWindow(
+            sent=outcomes["sent"],
+            delivered=outcomes["delivered"],
+            hard_bounced=outcomes["bounced"],
+            complained=outcomes["complained"],
+        ),
+        contacted=outcomes["contacted"],
+        replied=outcomes["replied"],
+        configured_limit=bounds.configured_daily_limit,
+        effective_limit=effective_limit,
+        leads_available=leads_available,
+    )
+    health = classify_campaign(window)
+    state = ManagedState(
+        campaign_id=str(campaign_id),
+        bounds=bounds,
+        managed_daily_limit=managed_limit,
+        managed_min_lead_score=managed_score,
+    )
+
+    try:
+        proposals = plan(state, window)
+        if not proposals:
+            return effective_limit, effective_score
+        async with workspace_unit_of_work(workspace_id) as session:
+            verdicts = await apply_all(
+                session,
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                health=health,
+                proposals=proposals,
+                bounds=bounds,
+                now=now,
+            )
+    except Exception as exc:
+        logger.warning(
+            "campaign manager could not run; the configured limits stand",
+            extra={"campaign_id": str(campaign_id), "error_code": type(exc).__name__},
+        )
+        return bounds.configured_daily_limit, bounds.configured_min_lead_score
+
+    for verdict in verdicts:
+        if not verdict.changes_anything:
+            continue
+        if verdict.proposal.actuation is Actuation.SET_DAILY_LIMIT:
+            effective_limit = effective_daily_limit(
+                bounds.configured_daily_limit, verdict.applied_value
+            )
+        elif verdict.proposal.actuation is Actuation.SET_MIN_LEAD_SCORE:
+            effective_score = effective_min_lead_score(
+                bounds.configured_min_lead_score, verdict.applied_value
+            )
+    return effective_limit, effective_score

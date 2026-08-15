@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -186,6 +187,19 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     approval_ttl_hours: Mapped[int] = mapped_column(default=168, nullable=False)
 
     daily_send_limit: Mapped[int] = mapped_column(default=25, nullable=False)
+
+    #: What the campaign manager has set, if anything. Kept apart from the two
+    #: columns above rather than overwriting them, because those are the human's
+    #: numbers and they are the bound every managed value is clamped against.
+    #: Writing to them directly would make next cycle's ceiling the manager's own
+    #: previous answer, with nothing left to measure drift against.
+    #:
+    #: Null means the manager has no opinion and the configured value stands.
+    #: See titan.autonomy.actuator for how the pair resolve: the effective limit
+    #: is the *lower* of the two and the effective score the *higher*, so a
+    #: managed value can only ever be more conservative than what was approved.
+    managed_daily_send_limit: Mapped[int | None] = mapped_column(Integer)
+    managed_min_lead_score: Mapped[int | None] = mapped_column(Integer)
     recipient_domain_daily_limit: Mapped[int] = mapped_column(default=2, nullable=False)
     min_spacing_seconds: Mapped[int] = mapped_column(default=90, nullable=False)
     max_followups: Mapped[int] = mapped_column(default=3, nullable=False)

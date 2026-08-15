@@ -511,6 +511,62 @@ def test_the_sendability_rule_has_exactly_one_implementation() -> None:
     )
 
 
+#: Everything the campaign manager must not be able to touch. Not "must not
+#: touch" -- must not be *able* to, which is a property of what it imports.
+FORBIDDEN_TO_THE_MANAGER = (
+    "titan.delivery.suppression",
+    "titan.delivery.outbox_worker",
+    "titan.delivery.providers.resend",
+    "titan.delivery.providers.smartlead",
+    "titan.delivery.providers.smtp",
+    "titan.intelligence.composer",
+    "titan.intelligence.message_validator",
+)
+
+
+def test_the_campaign_manager_cannot_reach_a_delivery_gate() -> None:
+    """Bounded autonomy, as a property of the import graph.
+
+    Written down, the boundary is a paragraph saying the manager may optimise
+    but must not bypass suppression, approval, evidence or the delivery gates.
+    Meant, it is a package that cannot import any of them -- so the refusal is
+    not a check that could be forgotten but a capability that does not exist.
+
+    The bounds in ``titan.autonomy.actuator`` stop it exceeding a human's
+    numbers. This stops it reaching anything else at all.
+    """
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if not rel.startswith("titan/autonomy/"):
+            continue
+        modules = imported_modules(parse(path))
+        for forbidden in FORBIDDEN_TO_THE_MANAGER:
+            if forbidden in modules:
+                offenders.append(f"{rel} imports {forbidden}")
+
+    assert not offenders, (
+        "the campaign manager reached past its actuator: "
+        f"{offenders}. Everything it may change goes through "
+        "titan.autonomy.actuator, and everything else is not its to change."
+    )
+
+
+def test_the_manager_writes_to_no_column_a_human_owns() -> None:
+    """The other half of the boundary. The manager has its own columns, and the
+    human's numbers are the bound it is clamped against -- writing to those
+    directly would make next cycle's ceiling the manager's own last answer.
+    """
+    from titan.autonomy.apply import _COLUMN_FOR
+
+    assert set(_COLUMN_FOR.values()) == {
+        "managed_daily_send_limit",
+        "managed_min_lead_score",
+    }
+    forbidden = {"daily_send_limit", "min_lead_score", "sending_authorized"}
+    assert not (set(_COLUMN_FOR.values()) & forbidden)
+
+
 @pytest.mark.parametrize(
     "module,symbol",
     [
@@ -519,6 +575,8 @@ def test_the_sendability_rule_has_exactly_one_implementation() -> None:
         ("titan.delivery.suppression", "is_suppressed"),
         ("titan.intelligence.message_validator", "validate_message"),
         ("titan.intelligence.bounce_risk", "assess"),
+        ("titan.autonomy.actuator", "evaluate"),
+        ("titan.autonomy.apply", "apply_all"),
         ("titan.db.enums", "verification_permits_sending"),
         ("titan.security.url_guard", "validate_url"),
     ],
