@@ -702,3 +702,45 @@ def test_the_browser_worker_gets_no_application_credentials() -> None:
         "the browser worker is given the application env_file; it must hold no "
         "database, email, or model credential"
     )
+
+
+def test_every_cron_workflow_is_actually_scheduled() -> None:
+    """A workflow declaring a cron must appear in the installer's plan.
+
+    This is the exact failure the scheduler was written to fix, and it is one
+    that recurs silently. Four workflows were registered with the worker so they
+    *could* run, each carrying a cron expression and a workflow-id convention,
+    and nothing ever started one -- the loop was an arc for as long as it took
+    somebody to notice a report had never arrived.
+
+    Declaring DEFAULT_CRON is the statement "this runs on a timer". Nothing else
+    in the repository makes that true, so the two are checked against each other.
+    """
+    import uuid as _uuid
+
+    from titan.workflows import schedules
+
+    sources = {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in (TITAN / "workflows").glob("*.py")
+    }
+    declares_cron = {
+        module
+        for module, text in sources.items()
+        if re.search(r"^DEFAULT_CRON\s*[:=]", text, re.M)
+    }
+    assert declares_cron, "no cron workflows found; this invariant stopped looking"
+
+    scheduled = {
+        module
+        for job in schedules.plan_schedules(_uuid.uuid4(), task_queue="q")
+        for module, text in sources.items()
+        if f"class {job.workflow}" in text
+    }
+
+    missing = declares_cron - scheduled
+    assert not missing, (
+        f"these workflow modules declare a cron but nothing installs a schedule "
+        f"for them: {sorted(missing)}. A cron nobody installs is a workflow that "
+        f"never runs."
+    )
