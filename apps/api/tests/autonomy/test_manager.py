@@ -238,29 +238,38 @@ def test_a_paused_campaign_is_left_alone() -> None:
     assert plan(state(), window(status=CampaignStatus.PAUSED)) == []
 
 
-def test_a_degrading_campaign_is_cut_and_made_choosier() -> None:
+def test_a_degrading_campaign_is_made_choosier() -> None:
     bad = window(
         window=ReputationWindow(sent=400, delivered=300, hard_bounced=40, complained=0)
     )
     proposals = plan(state(), bad)
-    by_actuation = {p.actuation: p for p in proposals}
 
-    assert by_actuation[Actuation.SET_DAILY_LIMIT].proposed < 40
-    assert by_actuation[Actuation.SET_MIN_LEAD_SCORE].proposed > 70
-
-
-def test_a_recovered_campaign_climbs_back_toward_its_ceiling() -> None:
-    recovering = window(effective_limit=10)
-    proposals = plan(state(managed_daily_limit=10), recovering)
-    limit = next(p for p in proposals if p.actuation is Actuation.SET_DAILY_LIMIT)
-
-    assert 10 < limit.proposed <= 40
+    assert [p.actuation for p in proposals] == [Actuation.SET_MIN_LEAD_SCORE]
+    assert proposals[0].proposed > 70
 
 
-def test_recovery_stops_at_the_ceiling_and_proposes_nothing_further() -> None:
-    """There is no state in which the manager proposes more than a person
-    approved."""
-    assert plan(state(managed_daily_limit=40), window()) == []
+def test_volume_is_not_decided_here() -> None:
+    """One authority per knob.
+
+    How much a campaign sends became a question about every campaign at once as
+    soon as they shared a workspace limit, and titan.autonomy.allocation answers
+    it. Two authorities writing the same column would fight over it every cycle.
+    """
+    cases = [
+        window(),
+        window(effective_limit=10),
+        window(window=ReputationWindow(400, 300, 40, 0)),
+        window(effective_limit=20, replied=30, contacted=300),
+    ]
+    for case in cases:
+        for st in (state(), state(managed_daily_limit=10)):
+            assert all(
+                p.actuation is not Actuation.SET_DAILY_LIMIT for p in plan(st, case)
+            )
+
+
+def test_a_healthy_campaign_at_its_configured_bar_proposes_nothing() -> None:
+    assert plan(state(), window()) == []
 
 
 def test_the_bar_is_returned_in_one_step() -> None:

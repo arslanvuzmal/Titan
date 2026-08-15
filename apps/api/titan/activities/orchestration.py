@@ -31,11 +31,14 @@ from temporalio import activity
 from titan.autonomy.actuator import (
     Actuation,
     Bounds,
+    Proposal,
     effective_daily_limit,
     effective_min_lead_score,
 )
+from titan.autonomy.allocation import CampaignDemand, allocate
+from titan.autonomy.allocation import explain as explain_share
 from titan.autonomy.apply import apply_all
-from titan.autonomy.health import CampaignWindow
+from titan.autonomy.health import CampaignHealth, CampaignWindow
 from titan.autonomy.health import classify as classify_campaign
 from titan.autonomy.manager import ManagedState, plan
 from titan.db.enums import (
@@ -44,7 +47,14 @@ from titan.db.enums import (
     LeadStatus,
     MessageState,
 )
-from titan.db.models import Campaign, CampaignPolicy, Lead, Message, Organization
+from titan.db.models import (
+    Campaign,
+    CampaignPolicy,
+    Lead,
+    Message,
+    Organization,
+    Workspace,
+)
 from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
@@ -148,6 +158,13 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
     # authorization check above: a campaign that may not send is not a campaign
     # worth tuning, and running the manager on one would fill the audit trail
     # with decisions about mail that was never going out.
+    # Capacity is a portfolio question, so it is answered for the whole
+    # workspace whenever any part of it cycles. Writing sibling campaigns'
+    # limits from this campaign's cycle looks surprising and is the honest
+    # shape of the problem: one workspace limit, many campaigns, and no
+    # division of it possible from inside any single one.
+    await _reallocate_capacity(workspace_id, now)
+
     effective_limit, effective_score = await _run_manager(
         workspace_id=workspace_id,
         campaign_id=campaign_id,
@@ -522,3 +539,127 @@ async def _run_manager(
                 bounds.configured_min_lead_score, verdict.applied_value
             )
     return effective_limit, effective_score
+
+
+async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> None:
+    """Divide the workspace's daily sending between the campaigns competing for it.
+
+    Campaign limits were never a division of anything: each has its own, and in
+    the live database twenty active campaigns hold a hundred sends a day between
+    them against a workspace cap of five. The cap is real and enforced at send
+    time, so what happened was that whichever campaign the outbox worker claimed
+    from first consumed the whole allowance -- by claim order, not by merit.
+
+    Fails soft and silently. An allocation that cannot be computed leaves every
+    campaign on the limit it already had, which is the state the system ran in
+    before this existed and is safe by construction: those limits are already
+    bounded by the human's configuration.
+    """
+    try:
+        async with workspace_session(workspace_id) as session:
+            workspace = await session.get(Workspace, workspace_id)
+            if workspace is None:
+                return
+            rows = (
+                await session.execute(
+                    select(Campaign, CampaignPolicy)
+                    .join(CampaignPolicy, CampaignPolicy.campaign_id == Campaign.id)
+                    .where(Campaign.status == CampaignStatus.ACTIVE)
+                )
+            ).all()
+            if not rows:
+                return
+
+            demands: list[CampaignDemand] = []
+            states: dict[str, tuple[uuid.UUID, CampaignPolicy, CampaignHealth]] = {}
+            for campaign, policy in rows:
+                outcomes = await _campaign_outcomes(session, campaign.id, now)
+                current = effective_daily_limit(
+                    policy.daily_send_limit, policy.managed_daily_send_limit
+                )
+                leads = await _pool_size(session, campaign_id=campaign.id)
+                health = classify_campaign(
+                    CampaignWindow(
+                        campaign_id=str(campaign.id),
+                        status=campaign.status,
+                        window=ReputationWindow(
+                            sent=outcomes["sent"],
+                            delivered=outcomes["delivered"],
+                            hard_bounced=outcomes["bounced"],
+                            complained=outcomes["complained"],
+                        ),
+                        contacted=outcomes["contacted"],
+                        replied=outcomes["replied"],
+                        configured_limit=policy.daily_send_limit,
+                        effective_limit=current,
+                        leads_available=leads,
+                    )
+                )
+                demands.append(
+                    CampaignDemand(
+                        campaign_id=str(campaign.id),
+                        health=health,
+                        configured_limit=policy.daily_send_limit,
+                        leads_available=leads,
+                    )
+                )
+                states[str(campaign.id)] = (campaign.id, policy, health)
+
+            allocation = allocate(demands, workspace.daily_send_limit)
+    except Exception as exc:
+        logger.warning(
+            "capacity could not be reallocated; existing limits stand",
+            extra={"workspace_id": str(workspace_id), "error_code": type(exc).__name__},
+        )
+        return
+
+    for demand in demands:
+        campaign_id, policy, health = states[demand.campaign_id]
+        share = allocation.per_campaign.get(demand.campaign_id, 0)
+        current = effective_daily_limit(
+            policy.daily_send_limit, policy.managed_daily_send_limit
+        )
+        if share == current:
+            continue
+        try:
+            async with workspace_unit_of_work(workspace_id) as session:
+                await apply_all(
+                    session,
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    health=health,
+                    proposals=[
+                        Proposal(
+                            actuation=Actuation.SET_DAILY_LIMIT,
+                            campaign_id=demand.campaign_id,
+                            current=current,
+                            proposed=share,
+                            reason=f"portfolio allocation: {explain_share(demand, allocation)}",
+                            confidence=1.0,
+                            evidence={
+                                "health": health.value,
+                                "workspace_limit": allocation.workspace_limit,
+                                "allocated": share,
+                                "configured_limit": demand.configured_limit,
+                                "leads_available": demand.leads_available,
+                                "share_of_allocated": round(
+                                    allocation.share_of(demand.campaign_id), 4
+                                ),
+                                "unallocated": allocation.unallocated,
+                            },
+                        )
+                    ],
+                    bounds=Bounds(
+                        configured_daily_limit=policy.daily_send_limit,
+                        configured_min_lead_score=policy.min_lead_score,
+                    ),
+                    now=now,
+                )
+        except Exception as exc:
+            logger.warning(
+                "could not apply a capacity allocation",
+                extra={
+                    "campaign_id": str(campaign_id),
+                    "error_code": type(exc).__name__,
+                },
+            )

@@ -6,14 +6,18 @@ touches no row, and cannot apply anything itself. Applying is
 module can be wrong without being dangerous -- the worst a mistaken proposal
 achieves is a clamped number and a row in the audit trail saying so.
 
-**It moves one direction at a time.** A degrading campaign has its volume cut
-*and* its lead bar raised, and both are the same intent: send less, to better
-people. A recovering one gets volume back gradually and its bar returned in one
-step, because a bar that is too high costs leads without protecting anything.
+**Volume is not decided here.** It was, until capacity became something
+campaigns share: a workspace's daily limit is one number and its campaigns
+between them are configured for many times it, so how much any single campaign
+sends is a question about all of them at once.
+:mod:`titan.autonomy.allocation` answers that. This module decides the one thing
+that is genuinely per-campaign -- how good a lead has to be -- and the two
+authorities never touch the same column.
 
-**Recovery is a return, never a raise.** Every proposal that increases volume
-targets the human's configured number and stops there. There is no state in
-which this module proposes more than a person approved.
+**The bar moves in one direction under trouble and back in one step.** A
+degrading campaign gets choosier. A recovered one returns to the human's
+configured minimum immediately, because a bar left too high costs qualified
+leads and protects nothing.
 
 **It proposes nothing it cannot justify.** LEARNING produces no proposals at
 all: a campaign below the sample floor has no rates, and acting on the ones it
@@ -26,17 +30,6 @@ from dataclasses import dataclass
 
 from titan.autonomy.actuator import Actuation, Bounds, Proposal
 from titan.autonomy.health import CampaignHealth, CampaignWindow, explain
-
-#: Share of the configured limit a degrading campaign is cut to. A quarter,
-#: matching the sender-level reduction in titan.delivery.adaptive_limits -- the
-#: two are the same judgement about the same kind of trouble, and different
-#: numbers would only invite an argument about which was right.
-DEGRADED_LIMIT_RATIO = 0.25
-
-#: How much of the gap to the ceiling a recovering campaign takes back per
-#: cycle. Half: two or three cycles to full volume, which is slow enough that a
-#: campaign that degrades again is caught before it is at full speed.
-RECOVERY_FRACTION = 0.5
 
 #: Added to the lead score bar when a campaign degrades. Small on purpose --
 #: the actuator caps a single step anyway, and the intent is to be choosier
@@ -116,44 +109,21 @@ def plan(state: ManagedState, window: CampaignWindow) -> list[Proposal]:
         return []
 
     if health is CampaignHealth.DEGRADED:
-        cut = max(
-            state.bounds.floor_daily_limit,
-            int(state.bounds.configured_daily_limit * DEGRADED_LIMIT_RATIO),
-        )
-        proposals = []
-        if cut < state.current_limit:
-            proposals.append(propose(Actuation.SET_DAILY_LIMIT, state.current_limit, cut))
-        raised = state.current_score + DEGRADED_SCORE_STEP
-        proposals.append(
-            propose(Actuation.SET_MIN_LEAD_SCORE, state.current_score, raised)
-        )
-        return proposals
-
-    # Everything below is a recovery. The campaign is behaving, so whatever the
-    # manager did to it is walked back toward what a human configured.
-    proposals = []
-
-    ceiling = state.bounds.configured_daily_limit
-    if state.current_limit < ceiling:
-        gap = ceiling - state.current_limit
-        step = max(1, int(gap * RECOVERY_FRACTION))
-        proposals.append(
+        return [
             propose(
-                Actuation.SET_DAILY_LIMIT,
-                state.current_limit,
-                min(ceiling, state.current_limit + step),
+                Actuation.SET_MIN_LEAD_SCORE,
+                state.current_score,
+                state.current_score + DEGRADED_SCORE_STEP,
             )
-        )
+        ]
 
+    # The campaign is behaving, so the bar goes back to what a human configured.
     configured_score = state.bounds.configured_min_lead_score
     if state.current_score > configured_score:
-        # In one step, unlike volume. A bar left too high costs qualified leads
-        # and protects nothing, so there is no reason to walk it down slowly.
-        proposals.append(
+        return [
             propose(Actuation.SET_MIN_LEAD_SCORE, state.current_score, configured_score)
-        )
-
-    return proposals
+        ]
+    return []
 
 
 def _health(window: CampaignWindow) -> CampaignHealth:
@@ -163,9 +133,7 @@ def _health(window: CampaignWindow) -> CampaignHealth:
 
 
 __all__ = [
-    "DEGRADED_LIMIT_RATIO",
     "DEGRADED_SCORE_STEP",
-    "RECOVERY_FRACTION",
     "ManagedState",
     "confidence_for",
     "plan",
