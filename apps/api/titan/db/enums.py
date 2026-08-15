@@ -117,6 +117,86 @@ class CampaignStatus(enum.StrEnum):
     ARCHIVED = "archived"
 
 
+class Region(enum.StrEnum):
+    """The market a campaign is aimed at.
+
+    Coarser than a country and deliberately so: it is the level at which
+    outreach actually differs. Working hours, public holidays, the shape of a
+    business day and what counts as an acceptable approach all vary by market
+    far more than they vary between neighbouring countries inside one.
+
+    ``target_country_code`` is not a substitute. It holds one country, so a
+    campaign aimed at Europe cannot be expressed by it at all, and a great many
+    campaigns leave it empty.
+    """
+
+    USA = "usa"
+    CANADA = "canada"
+    UK = "uk"
+    EUROPE = "europe"
+    AUSTRALIA = "australia"
+    MIDDLE_EAST = "middle_east"
+    #: Declared, and outside the six. Distinct from UNSPECIFIED: somebody chose
+    #: this, so a campaign in it is configured rather than forgotten.
+    OTHER = "other"
+    #: Not declared. The default, and what every campaign that predates the
+    #: column carries unless a country code implied otherwise.
+    UNSPECIFIED = "unspecified"
+
+
+class SubRegion(enum.StrEnum):
+    """A timezone band inside a market that spans several.
+
+    Only defined for the markets where the country tells you nothing about the
+    clock. The USA is the case that matters -- a business in California and one
+    in Georgia share a country, a market and a working week, and are three hours
+    apart -- and Canada and Australia have the same shape.
+
+    Europe is deliberately absent. Its zones follow national borders closely
+    enough that ``target_country_code`` already distinguishes them, and a second
+    vocabulary saying the same thing would be one more place to disagree.
+    """
+
+    #: Arizona is its own band because it does not observe daylight saving.
+    #: Folding it into Mountain is correct for four months of the year and an
+    #: hour wrong for the other eight.
+    US_EASTERN = "us_eastern"
+    US_CENTRAL = "us_central"
+    US_MOUNTAIN = "us_mountain"
+    US_ARIZONA = "us_arizona"
+    US_PACIFIC = "us_pacific"
+    US_ALASKA = "us_alaska"
+    US_HAWAII = "us_hawaii"
+
+    CA_ATLANTIC = "ca_atlantic"
+    CA_EASTERN = "ca_eastern"
+    CA_CENTRAL = "ca_central"
+    CA_MOUNTAIN = "ca_mountain"
+    CA_PACIFIC = "ca_pacific"
+
+    AU_EASTERN = "au_eastern"
+    AU_CENTRAL = "au_central"
+    AU_WESTERN = "au_western"
+
+    #: Not segmented, or not known. The market default applies.
+    UNSPECIFIED = "unspecified"
+
+
+#: Regions with enough shared working conventions to schedule against. OTHER and
+#: UNSPECIFIED are absent by design -- there is no local business day for
+#: "somewhere", and pretending otherwise is how mail gets sent at 3am.
+SCHEDULABLE_REGIONS = frozenset(
+    {
+        Region.USA,
+        Region.CANADA,
+        Region.UK,
+        Region.EUROPE,
+        Region.AUSTRALIA,
+        Region.MIDDLE_EAST,
+    }
+)
+
+
 class LeadStatus(enum.StrEnum):
     DISCOVERED = "discovered"
     RESEARCHING = "researching"
@@ -244,16 +324,70 @@ class VerificationStatus(enum.StrEnum):
     PUBLISHED_FIRST_PARTY = "published_first_party"
     PROVIDER_VERIFIED = "provider_verified"
     RISKY = "risky"
+    #: The domain accepts mail for every local part, so the server's acceptance
+    #: of *this* address proves nothing about it. Distinct from RISKY and from
+    #: UNKNOWN: something conclusive was learned, and what was learned is that
+    #: no mailbox-level answer is obtainable from this domain at any price.
+    CATCH_ALL = "catch_all"
     INVALID = "invalid"
     UNKNOWN = "unknown"
 
 
+#: Statuses that permit sending on their own, whatever the provenance.
 SENDABLE_VERIFICATION_STATUSES = frozenset(
     {
         VerificationStatus.PUBLISHED_FIRST_PARTY,
         VerificationStatus.PROVIDER_VERIFIED,
     }
 )
+
+#: Provenances strong enough to carry a CATCH_ALL address. See
+#: :func:`verification_permits_sending` for why this exists at all.
+#: Deliberately narrower than ELIGIBLE_CONTACT_SOURCES. A directory listing or
+#: a Places record is a third party asserting an address; only these three are
+#: someone with direct knowledge of the mailbox putting it in front of us.
+_CATCH_ALL_TRUSTED_SOURCES = frozenset(
+    {
+        ContactSource.FIRST_PARTY_WEBSITE,
+        ContactSource.MANUAL_ENTRY,
+        ContactSource.EXISTING_CRM_RELATIONSHIP,
+    }
+)
+
+
+def verification_permits_sending(
+    status: VerificationStatus, source: ContactSource
+) -> bool:
+    """Whether verification and provenance together permit a send.
+
+    A frozenset was enough while every status could be judged alone. CATCH_ALL
+    cannot be, and collapsing it into either bucket gets a real population
+    wrong:
+
+    * Treat it as sendable and Titan mails guessed addresses at domains that
+      accept everything and bounce nothing -- the mail lands in a spam trap or
+      vanishes, and neither outcome is visible as a bounce, so the list quality
+      problem never surfaces.
+    * Treat it as unsendable and Titan refuses ``enquiries@`` addresses that the
+      business published on its own contact page. Catch-all is the default on
+      most small-business hosting, which is precisely the population Titan
+      targets: this would discard a large share of legitimate leads for a
+      property of their mail server they have never thought about.
+
+    What separates the two is not the mail server -- it is identical in both
+    cases -- but who put the address in front of us. A human publishing an
+    address on their own website is asserting that somebody reads it. That
+    assertion is the evidence; the catch-all configuration merely means the
+    server will not confirm it independently.
+
+    So provenance decides, which is the same rule invariant 6 already applies to
+    the address itself.
+    """
+    if status in SENDABLE_VERIFICATION_STATUSES:
+        return True
+    if status is VerificationStatus.CATCH_ALL:
+        return source in _CATCH_ALL_TRUSTED_SOURCES
+    return False
 
 
 class DraftStatus(enum.StrEnum):

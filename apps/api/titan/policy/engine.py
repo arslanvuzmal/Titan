@@ -26,14 +26,18 @@ from typing import Any
 from titan.config import OperatingMode, Settings
 from titan.db.enums import (
     ELIGIBLE_CONTACT_SOURCES,
-    SENDABLE_VERIFICATION_STATUSES,
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
     ContactSource,
     LeadStatus,
+    Region,
+    SubRegion,
     VerificationStatus,
+    verification_permits_sending,
 )
+from titan.intelligence.domain_health import DomainHealth
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
+from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 
 
 class DenyCode(StrEnum):
@@ -55,6 +59,7 @@ class DenyCode(StrEnum):
     CONTACT_GUESSED = "contact_address_was_guessed"
     CONTACT_NOT_VERIFIED = "contact_not_verified"
     CONTACT_INACTIVE = "contact_channel_inactive"
+    RECIPIENT_DOMAIN_BLOCKED = "recipient_domain_blocked"
     SUPPRESSED = "recipient_suppressed"
     NO_EVIDENCE = "no_evidence_backed_claims"
     VALIDATION_FAILED = "message_validation_failed"
@@ -64,6 +69,7 @@ class DenyCode(StrEnum):
     FOLLOWUP_LIMIT = "followup_limit_reached"
     QUOTA_EXHAUSTED = "quota_exhausted"
     QUIET_HOURS = "recipient_quiet_hours"
+    OUTSIDE_SEND_WINDOW = "outside_campaign_send_window"
     SPACING = "minimum_spacing_not_elapsed"
     IDEMPOTENCY_KEY_MISSING = "provider_idempotency_key_missing"
     INTERNAL_ERROR = "internal_error"
@@ -162,6 +168,20 @@ class SendContext:
     is_suppressed: bool = False
     suppression_reason: str | None = None
     quota_exhausted_scope: str | None = None
+    #: Live classification of the recipient's domain. Defaults to UNKNOWN, which
+    #: denies nothing: a caller that cannot supply it loses a check rather than
+    #: gaining a refusal.
+    recipient_domain_health: DomainHealth = DomainHealth.UNKNOWN
+    #: The campaign's working hours, in the recipient's local time. None means
+    #: the caller did not supply one, and only the global quiet hours apply.
+    send_window: SendWindow | None = None
+    #: The campaign's market. Supplies a timezone for a recipient who has none.
+    campaign_region: Region = Region.UNSPECIFIED
+    #: The band this recipient's own address falls in, derived from their state
+    #: and coordinates. More specific than anything the campaign can declare.
+    recipient_subregion: SubRegion = SubRegion.UNSPECIFIED
+    #: The band the campaign works, for recipients whose address resolved to none.
+    campaign_subregion: SubRegion = SubRegion.UNSPECIFIED
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -281,14 +301,33 @@ def evaluate_send(ctx: SendContext) -> Decision:
     if not ctx.contact_is_active:
         denials.append(Denial(DenyCode.CONTACT_INACTIVE, "contact channel is inactive"))
 
-    if ctx.require_verified_email and ctx.contact_verification not in (
-        SENDABLE_VERIFICATION_STATUSES
+    # Provenance is part of this test, not just the status. A CATCH_ALL domain
+    # tells us the server will accept anything, so what decides is who put the
+    # address in front of us -- see enums.verification_permits_sending.
+    if ctx.require_verified_email and not verification_permits_sending(
+        ctx.contact_verification, ctx.contact_source
     ):
         denials.append(
             Denial(
                 DenyCode.CONTACT_NOT_VERIFIED,
-                f"verification status is {ctx.contact_verification.value}; campaign "
+                f"verification status is {ctx.contact_verification.value} for an "
+                f"address sourced from {ctx.contact_source.value}; campaign "
                 "requires a verified or first-party-published address",
+            )
+        )
+
+    # The recipient's domain, as it is *now* rather than as it was when the
+    # address was discovered. A contact channel's verification status is written
+    # once and can be weeks old; a complaint arriving this morning has to stop
+    # the message queued for that domain last week, and only a live read does
+    # that. DEGRADED deliberately does not deny here -- it already refused the
+    # address at discovery, and re-blocking mail a human has since approved on
+    # the strength of a bounce rate over four messages is not worth the lead.
+    if ctx.recipient_domain_health is DomainHealth.BLOCKED:
+        denials.append(
+            Denial(
+                DenyCode.RECIPIENT_DOMAIN_BLOCKED,
+                "recipient domain is blocked by its own delivery record",
             )
         )
 
@@ -332,13 +371,21 @@ def evaluate_send(ctx: SendContext) -> Decision:
                 DenyCode.QUOTA_EXHAUSTED, f"{ctx.quota_exhausted_scope} quota exhausted"
             )
         )
-    if ctx.respect_quiet_hours and _in_quiet_hours(ctx):
-        denials.append(
-            Denial(
-                DenyCode.QUIET_HOURS,
-                f"local time for {ctx.recipient_timezone} is inside quiet hours",
+    # The campaign's working hours first, then the process-wide quiet hours as
+    # a floor beneath them. Only one of the two is reported: a message at 3am on
+    # a Sunday is outside both, and saying so twice tells an operator nothing
+    # they did not learn from the first line.
+    if ctx.respect_quiet_hours:
+        outside = _outside_send_window(ctx)
+        if outside is not None:
+            denials.append(Denial(DenyCode.OUTSIDE_SEND_WINDOW, outside))
+        elif _in_quiet_hours(ctx):
+            denials.append(
+                Denial(
+                    DenyCode.QUIET_HOURS,
+                    f"local time for {ctx.recipient_timezone} is inside quiet hours",
+                )
             )
-        )
     if _spacing_violated(ctx):
         denials.append(
             Denial(
@@ -406,6 +453,43 @@ def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
             )
         )
     return denials
+
+
+def _outside_send_window(ctx: SendContext) -> str | None:
+    """Why this message may not go now, or None when the window is open.
+
+    Returns a reason rather than a boolean because there are three distinct ways
+    to be refused here and they call for different fixes: no window configured
+    at all, no clock to measure against, or simply the wrong hour.
+
+    Fails closed on an unresolvable timezone, as the quiet-hours check it
+    replaces always did -- but it fails closed far less often, because a
+    campaign that declares its market can now answer for a recipient whose
+    location Places never resolved.
+    """
+    if ctx.send_window is None:
+        return None
+    if not ctx.send_window.is_usable:
+        return f"campaign send window is not usable ({ctx.send_window.describe()})"
+
+    timezone = resolve_timezone(
+        ctx.recipient_timezone,
+        ctx.campaign_region,
+        recipient_subregion=ctx.recipient_subregion,
+        campaign_subregion=ctx.campaign_subregion,
+    )
+    local = local_time(ctx.now, timezone)
+    if local is None:
+        return (
+            "no usable timezone for the recipient and none implied by the "
+            f"campaign's market ({ctx.campaign_region.value})"
+        )
+    if ctx.send_window.is_open_at(local):
+        return None
+    return (
+        f"{local:%a %H:%M} in {timezone} is outside the campaign's send window "
+        f"({ctx.send_window.describe()})"
+    )
 
 
 def _in_quiet_hours(ctx: SendContext) -> bool:

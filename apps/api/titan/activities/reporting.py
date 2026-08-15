@@ -15,10 +15,11 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
-from titan.db.enums import DraftStatus, MessageState
+from titan.db.enums import DraftStatus, MessageState, Region
 from titan.db.models import (
     BusinessOpportunity,
     Lead,
@@ -32,6 +33,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.intelligence import lead_sources, portfolio, timing
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
     WeeklyReport,
@@ -48,6 +50,21 @@ REPORT_WINDOW = dt.timedelta(days=7)
 
 #: Named on the report so an operator can act without opening the CRM first.
 MAX_HOT_LEADS = 8
+
+#: How far back a discovery batch is still worth grading. Much wider than the
+#: report window: a batch discovered on Monday has produced almost no outcomes
+#: by Friday, and grading only this week's searches would report UNKNOWN for
+#: every one of them forever.
+SOURCE_LOOKBACK = dt.timedelta(days=90)
+
+#: How far back the timing question looks. A quarter: one slot needs about a
+#: month of one campaign's sending to be judgeable at all, so anything
+#: shorter reports the whole week as unknown.
+TIMING_LOOKBACK = dt.timedelta(days=90)
+
+#: Sources shown in the report. Ranked worst first, so the truncated tail is the
+#: part nobody needed to read.
+MAX_SOURCE_LINES = 5
 
 
 @activity.defn(name="generate_weekly_report")
@@ -212,6 +229,12 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             )
         ).all()
 
+        source_windows = await _lead_source_windows(session, workspace_id, now)
+        region_slices = await _portfolio_slices(session, workspace_id, since)
+        slot_outcomes = await _timing_slots(session, workspace_id, now)
+
+    standing = portfolio.summarise(region_slices)
+    timing_report = timing.learn(slot_outcomes)
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -239,6 +262,19 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         hot_leads=tuple(
             f"{name} -- waiting since {created.date().isoformat()}"
             for name, created in hot
+        ),
+        portfolio=tuple(
+            (window.region.value, portfolio.describe(window, standing))
+            for window in standing.slices
+        ),
+        timing=timing.describe(timing_report),
+        lead_sources=tuple(
+            (
+                window.label or window.kind,
+                grade.value,
+                lead_sources.explain(window, grade),
+            )
+            for window, grade in lead_sources.rank(source_windows)[:MAX_SOURCE_LINES]
         ),
     )
 
@@ -281,3 +317,238 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
 ALL_REPORTING_ACTIVITIES = [generate_weekly_report]
 
 __all__ = ["ALL_REPORTING_ACTIVITIES", "REPORT_WINDOW", "generate_weekly_report"]
+
+
+async def _lead_source_windows(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[lead_sources.LeadSourceWindow]:
+    """What each recent discovery batch produced downstream.
+
+    One query rather than one per source: a workspace accumulates a discovery
+    batch per campaign cycle, and a report that issued a query each would grow
+    slower every week it ran.
+
+    The outcome counts are deliberately *not* windowed to the report period.
+    A batch discovered six weeks ago is graded on everything it has produced
+    since, because that is what it produced -- clipping the outcomes to the last
+    seven days would report a batch as having achieved nothing whenever its
+    replies happened to arrive in a different week from the report.
+
+    ``workspace_id`` is written into the SQL rather than left to the session.
+    ``workspace_session`` scopes ORM entity queries only and has no effect on
+    ``text()``; see the invariant test that enforces this.
+
+    Fails soft and returns nothing. The source standings are one section of a
+    report whose other twenty numbers are already gathered; losing them must not
+    cost the operator the whole week's summary.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT ls.id::text                                   AS source_id,
+                           ls.kind                                       AS kind,
+                           ls.label                                      AS label,
+                           ls.estimated_cost_usd                         AS cost_usd,
+                           count(DISTINCT l.id)                          AS leads,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.primary_contact_channel_id IS NOT NULL
+                           )                                             AS contactable,
+                           count(DISTINCT m.lead_id) FILTER (
+                               WHERE m.sent_at IS NOT NULL
+                           )                                             AS contacted,
+                           count(m.id) FILTER (WHERE m.sent_at IS NOT NULL)
+                                                                         AS sent,
+                           count(m.id) FILTER (WHERE m.delivered_at IS NOT NULL)
+                                                                         AS delivered,
+                           count(m.id) FILTER (WHERE m.bounced_at IS NOT NULL)
+                                                                         AS bounced,
+                           count(m.id) FILTER (WHERE m.complained_at IS NOT NULL)
+                                                                         AS complained,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                             AS replied
+                      FROM lead_sources ls
+                      JOIN leads l
+                        ON l.lead_source_id = ls.id
+                       AND l.workspace_id = ls.workspace_id
+                      LEFT JOIN messages m
+                        ON m.lead_id = l.id
+                       AND m.workspace_id = ls.workspace_id
+                     WHERE ls.workspace_id = :workspace
+                       AND ls.created_at >= :since
+                     GROUP BY ls.id, ls.kind, ls.label, ls.estimated_cost_usd
+                    """
+                ),
+                {"workspace": workspace_id, "since": now - SOURCE_LOOKBACK},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "lead source standings unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        lead_sources.LeadSourceWindow(
+            source_id=row.source_id,
+            kind=row.kind,
+            label=row.label or "",
+            cost_usd=float(row.cost_usd or 0.0),
+            leads=int(row.leads or 0),
+            contactable=int(row.contactable or 0),
+            contacted=int(row.contacted or 0),
+            sent=int(row.sent or 0),
+            delivered=int(row.delivered or 0),
+            bounced=int(row.bounced or 0),
+            complained=int(row.complained or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _portfolio_slices(
+    session: AsyncSession, workspace_id: uuid.UUID, since: dt.datetime
+) -> list[portfolio.RegionSlice]:
+    """This week's activity, grouped by market.
+
+    Campaign counts are current state and deliberately not windowed: a market
+    with three active campaigns that sent nothing this week is the single most
+    useful row this view produces, and windowing the campaigns would erase it by
+    reporting the region as absent rather than as idle.
+
+    Everything else is windowed to the report period, because share of sending
+    is the question -- and a share computed over all time would be a history
+    lesson rather than a description of the week.
+
+    Fails soft: the portfolio is one section of a report whose other numbers are
+    already gathered.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT c.region                                      AS region,
+                           count(DISTINCT c.id)                          AS campaigns,
+                           count(DISTINCT c.id) FILTER (
+                               WHERE c.status = 'active'
+                           )                                             AS active_campaigns,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.created_at >= :since
+                           )                                             AS leads,
+                           count(DISTINCT m.lead_id) FILTER (
+                               WHERE m.sent_at >= :since
+                           )                                             AS contacted,
+                           count(m.id) FILTER (WHERE m.sent_at >= :since) AS sent,
+                           count(m.id) FILTER (
+                               WHERE m.bounced_at >= :since
+                           )                                             AS bounced,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.replied_at >= :since
+                           )                                             AS replied
+                      FROM campaigns c
+                      LEFT JOIN leads l
+                        ON l.campaign_id = c.id
+                       AND l.workspace_id = c.workspace_id
+                      LEFT JOIN messages m
+                        ON m.lead_id = l.id
+                       AND m.workspace_id = c.workspace_id
+                     WHERE c.workspace_id = :workspace
+                     GROUP BY c.region
+                    """
+                ),
+                {"workspace": workspace_id, "since": since},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "portfolio view unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        portfolio.RegionSlice(
+            region=Region(row.region),
+            campaigns=int(row.campaigns or 0),
+            active_campaigns=int(row.active_campaigns or 0),
+            leads=int(row.leads or 0),
+            contacted=int(row.contacted or 0),
+            sent=int(row.sent or 0),
+            bounced=int(row.bounced or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _timing_slots(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[timing.SlotOutcome]:
+    """Sends and replies by local weekday and hour.
+
+    Not windowed to the report period. A single hour of a single weekday takes
+    about a month of one campaign's sending to reach the sample floor, so a
+    seven-day window would report every slot as unknown forever -- which is
+    accurate and useless.
+
+    Replies are counted per lead, and attributed to the slot of the message that
+    prompted them: the *first* message sent to that lead. A reply follows a
+    conversation rather than a single send, and attributing it to the most
+    recent follow-up would credit the last message for work the first one did.
+
+    Rows with no local hour are excluded rather than defaulted. A null means the
+    clock could not be resolved, and treating it as midnight would invent a
+    thousand sends at 3am and then act on them.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    WITH first_send AS (
+                        SELECT DISTINCT ON (lead_id)
+                               lead_id,
+                               local_sent_weekday AS weekday,
+                               local_sent_hour    AS hour
+                          FROM messages
+                         WHERE workspace_id = :workspace
+                           AND sent_at IS NOT NULL
+                           AND local_sent_hour IS NOT NULL
+                           AND created_at >= :since
+                         ORDER BY lead_id, sent_at
+                    )
+                    SELECT f.weekday                                AS weekday,
+                           f.hour                                   AS hour,
+                           count(*)                                 AS sent,
+                           count(*) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                        AS replied
+                      FROM first_send f
+                      JOIN leads l ON l.id = f.lead_id
+                     WHERE l.workspace_id = :workspace
+                     GROUP BY f.weekday, f.hour
+                    """
+                ),
+                {"workspace": workspace_id, "since": now - TIMING_LOOKBACK},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "timing slots unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        timing.SlotOutcome(
+            slot=timing.Slot(weekday=int(row.weekday), hour=int(row.hour)),
+            sent=int(row.sent or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]

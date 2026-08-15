@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -27,7 +28,7 @@ from titan.db.base import (
     pg_enum,
     uuid_pk,
 )
-from titan.db.enums import CampaignStatus, Industry
+from titan.db.enums import CampaignStatus, Industry, Region, SubRegion
 
 
 class IndustryPlaybook(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
@@ -94,6 +95,29 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         PGUUID(as_uuid=True), ForeignKey("sender_identities.id", ondelete="SET NULL")
     )
 
+    #: The market this campaign works. Coarser than target_country_code and not
+    #: derived from it: one country code cannot express a campaign aimed at
+    #: Europe, and most campaigns leave it empty. See
+    #: titan.intelligence.portfolio.disagrees_with_country for how the two are
+    #: reconciled -- surfaced, never silently rewritten.
+    region: Mapped[Region] = mapped_column(
+        pg_enum(Region, "region"),
+        default=Region.UNSPECIFIED,
+        server_default=Region.UNSPECIFIED.value,
+        nullable=False,
+        index=True,
+    )
+
+    #: The timezone band inside the market, where the market spans several.
+    #: Only meaningful for the USA, Canada and Australia -- Europe's zones
+    #: follow its national borders, which target_country_code already names.
+    sub_region: Mapped[SubRegion] = mapped_column(
+        pg_enum(SubRegion, "sub_region"),
+        default=SubRegion.UNSPECIFIED,
+        server_default=SubRegion.UNSPECIFIED.value,
+        nullable=False,
+    )
+
     #: Targeting
     target_business_type: Mapped[str | None] = mapped_column(String(200))
     target_geography: Mapped[str | None] = mapped_column(String(200))
@@ -129,6 +153,11 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
             name="min_lead_score_range",
         ),
         CheckConstraint("max_followups >= 0", name="max_followups_non_negative"),
+        CheckConstraint(
+            "send_window_start_hour >= 0 AND send_window_end_hour <= 24 "
+            "AND send_window_start_hour < send_window_end_hour",
+            name="send_window_ordered",
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -158,6 +187,19 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     approval_ttl_hours: Mapped[int] = mapped_column(default=168, nullable=False)
 
     daily_send_limit: Mapped[int] = mapped_column(default=25, nullable=False)
+
+    #: What the campaign manager has set, if anything. Kept apart from the two
+    #: columns above rather than overwriting them, because those are the human's
+    #: numbers and they are the bound every managed value is clamped against.
+    #: Writing to them directly would make next cycle's ceiling the manager's own
+    #: previous answer, with nothing left to measure drift against.
+    #:
+    #: Null means the manager has no opinion and the configured value stands.
+    #: See titan.autonomy.actuator for how the pair resolve: the effective limit
+    #: is the *lower* of the two and the effective score the *higher*, so a
+    #: managed value can only ever be more conservative than what was approved.
+    managed_daily_send_limit: Mapped[int | None] = mapped_column(Integer)
+    managed_min_lead_score: Mapped[int | None] = mapped_column(Integer)
     recipient_domain_daily_limit: Mapped[int] = mapped_column(default=2, nullable=False)
     min_spacing_seconds: Mapped[int] = mapped_column(default=90, nullable=False)
     max_followups: Mapped[int] = mapped_column(default=3, nullable=False)
@@ -165,7 +207,28 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     followup_schedule_days: Mapped[list[str]] = mapped_column(
         JSONB, default=lambda: [0, 3, 7, 14], nullable=False
     )
+    #: Whether the recipient's local schedule is honoured at all. Named for
+    #: quiet hours because that is all it used to govern; it now governs the
+    #: working-hours window below, which subsumes them -- anything outside
+    #: 08:00-17:00 is also outside 08:00-20:00.
     respect_quiet_hours: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    #: The working window, in the *recipient's* local time. End hour exclusive:
+    #: 17 means the last minute is 16:59. Defaults are a conventional business
+    #: day; the market's own working week comes from
+    #: titan.policy.schedule.REGION_SEND_DAYS when a campaign is created.
+    send_window_start_hour: Mapped[int] = mapped_column(
+        default=8, server_default="8", nullable=False
+    )
+    send_window_end_hour: Mapped[int] = mapped_column(
+        default=17, server_default="17", nullable=False
+    )
+    #: Weekdays the campaign may send, Monday is 0 (datetime.weekday()).
+    #: Mon-Fri by default; a Middle East campaign wants Sun-Thu, which is why
+    #: this is per-campaign rather than a constant.
+    send_days: Mapped[list[int]] = mapped_column(
+        JSONB, default=lambda: [0, 1, 2, 3, 4], nullable=False
+    )
 
     research_budget_usd: Mapped[float] = mapped_column(default=10.0, nullable=False)
     per_lead_budget_usd: Mapped[float] = mapped_column(default=0.50, nullable=False)

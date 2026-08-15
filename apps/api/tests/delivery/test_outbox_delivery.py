@@ -12,7 +12,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from titan.db.enums import (
     CampaignStatus,
     ContactSource,
@@ -42,11 +42,18 @@ from .conftest import NOW, build_sendable, sending_settings
 pytestmark = pytest.mark.integration
 
 
-def worker(provider: MockEmailProvider, **setting_overrides) -> OutboxWorker:
+def worker(
+    provider: MockEmailProvider, *, now_fn=None, **setting_overrides
+) -> OutboxWorker:
+    """The clock is separable from the settings.
+
+    Both are overrides but they go to different places, and passing now_fn
+    through **setting_overrides hands Settings a field it does not have.
+    """
     return OutboxWorker(
         provider,
         sending_settings(**setting_overrides),
-        now_fn=lambda: NOW,
+        now_fn=now_fn or (lambda: NOW),
     )
 
 
@@ -639,3 +646,326 @@ async def test_blocked_row_is_not_retried(db_session, sendable) -> None:
     second = await run_worker(provider)
     assert second == []
     assert provider.delivered_count == 0
+
+
+# --------------------------------------------------------------------------
+# Recipient domain health, read live at send time
+# --------------------------------------------------------------------------
+async def _prior_message(
+    workspace_id: uuid.UUID, *, suffix: str, **outcome: bool
+) -> None:
+    """A completed message to the same fixture domain, with an outcome on it.
+
+    Built through the ordinary fixture so the whole foreign-key chain exists;
+    only the delivery timestamps are set afterwards, which is exactly what a
+    webhook would have done.
+
+    Its outbox row is then removed. ``build_sendable`` produces a *pending* one,
+    and leaving it would give the worker a second message to process -- so the
+    run under test would report two outcomes and every assertion here would be
+    about the wrong row. History is what these tests are seeding, not queue depth.
+    """
+    async with get_sessionmaker()() as s:
+        prior = await build_sendable(s, workspace_id, suffix=suffix)
+        now = dt.datetime.now(dt.UTC)
+        await s.execute(
+            update(Message)
+            .where(Message.id == prior.message_id)
+            .values(
+                sent_at=now,
+                delivered_at=now if outcome.get("delivered") else None,
+                bounced_at=now if outcome.get("bounced") else None,
+                complained_at=now if outcome.get("complained") else None,
+            )
+        )
+        await s.execute(delete(OutboxMessage).where(OutboxMessage.id == prior.outbox_id))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_complaint_stops_mail_already_queued_to_that_domain(
+    db_session, sendable
+) -> None:
+    """The gap that made domain health only half a control.
+
+    The bounce engine classifies a domain when the contact is discovered and
+    stores the verdict on the channel. This message was already drafted,
+    approved and queued under a clean verdict; the complaint arrives afterwards.
+    Without a live read at send time, it goes out.
+    """
+    await _prior_message(sendable.workspace_id, suffix="dhcomp", complained=True)
+
+    provider = MockEmailProvider()
+    results = await run_worker(provider)
+
+    assert [r.outcome for r in results] == ["blocked"]
+    assert provider.delivered_count == 0
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    assert "domain" in (row.blocked_reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_three_bounces_with_no_delivery_stop_the_domain(
+    db_session, sendable
+) -> None:
+    for i in range(3):
+        await _prior_message(sendable.workspace_id, suffix=f"dhb{i}", bounced=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["blocked"]
+    assert provider.delivered_count == 0
+
+
+@pytest.mark.asyncio
+async def test_bounces_alongside_deliveries_do_not_stop_the_domain(
+    db_session, sendable
+) -> None:
+    """The false-positive control, and the reason DEGRADED does not deny here.
+
+    Two bounces and two deliveries is a 50% rate over four sends -- degraded at
+    discovery, where it would refuse a new address. It must not retract a
+    message a human has already approved.
+    """
+    for i in range(2):
+        await _prior_message(sendable.workspace_id, suffix=f"dhok{i}", delivered=True)
+    for i in range(2):
+        await _prior_message(sendable.workspace_id, suffix=f"dhbad{i}", bounced=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["sent"]
+    assert provider.delivered_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_clean_domain_sends_normally(db_session, sendable) -> None:
+    """If this fails the three above are vacuous."""
+    await _prior_message(sendable.workspace_id, suffix="dhclean", delivered=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["sent"]
+    assert provider.delivered_count == 1
+
+
+# --------------------------------------------------------------------------
+# Deferral lands at the window, not at UTC midnight
+# --------------------------------------------------------------------------
+async def _enable_window(campaign_id: uuid.UUID, *, days: list[int]) -> None:
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign).where(Campaign.id == campaign_id).values(region=Region.UK)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == campaign_id)
+            .values(respect_quiet_hours=True, send_days=days)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_message_outside_the_window_waits_for_it_to_open(
+    db_session, sendable
+) -> None:
+    """Not the next UTC midnight.
+
+    A message refused on a Friday evening that retries at midnight would wake up
+    and be refused again every night of the weekend. It should sleep until the
+    window opens and wake once.
+    """
+    await _enable_window(sendable.campaign_id, days=[0, 1, 2, 3, 4])
+
+    saturday = dt.datetime(2026, 8, 8, 12, 0, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: saturday)
+
+    assert [r.outcome for r in results] == ["deferred"]
+    assert provider.delivered_count == 0
+
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    # Monday 08:00 Europe/London is 07:00 UTC in August.
+    assert row.next_attempt_at == dt.datetime(2026, 8, 10, 7, 0, tzinfo=dt.UTC)
+    assert "send window" in (row.blocked_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_message_inside_the_window_is_sent(db_session, sendable) -> None:
+    """The control. Without it the test above passes for a campaign that can
+    never send at all."""
+    await _enable_window(sendable.campaign_id, days=[0, 1, 2, 3, 4])
+
+    monday = dt.datetime(2026, 8, 3, 12, 0, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]
+
+
+# --------------------------------------------------------------------------
+# The recipient's band, derived at send time
+# --------------------------------------------------------------------------
+async def _place_in(lead_id: uuid.UUID, *, admin_area: str, longitude: float) -> None:
+    """Move the lead's business to a US state and forget its timezone.
+
+    Nulling the timezone is the point: with one present, nothing below is
+    exercised, because an exact fact about the recipient always wins.
+    """
+    from titan.db.models import Lead as LeadRow
+    from titan.db.models.lead import OrganizationLocation
+
+    async with get_sessionmaker()() as s, s.begin():
+        org_id = (
+            await s.execute(select(LeadRow.organization_id).where(LeadRow.id == lead_id))
+        ).scalar_one()
+        await s.execute(
+            update(OrganizationLocation)
+            .where(OrganizationLocation.organization_id == org_id)
+            .values(
+                timezone=None,
+                country_code="US",
+                region=admin_area,
+                longitude=longitude,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_pacific_business_is_not_scheduled_on_eastern(
+    db_session, sendable
+) -> None:
+    """08:30 Eastern is 05:30 Pacific. One is inside the working window and the
+    other is three hours before anybody has arrived -- which is exactly what the
+    single market clock got wrong for half the country.
+    """
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign)
+            .where(Campaign.id == sendable.campaign_id)
+            .values(region=Region.USA)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == sendable.campaign_id)
+            .values(respect_quiet_hours=True)
+        )
+    await _place_in(sendable.lead_id, admin_area="California", longitude=-118.24)
+
+    # Monday 12:30 UTC = 08:30 America/New_York = 05:30 America/Los_Angeles.
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: monday)
+
+    assert [r.outcome for r in results] == ["deferred"]
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    assert "Los_Angeles" in (row.blocked_reason or "")
+    # It waits until 08:00 Pacific the same morning, not until tomorrow.
+    assert row.next_attempt_at == dt.datetime(2026, 8, 3, 15, 0, tzinfo=dt.UTC)
+
+
+@pytest.mark.asyncio
+async def test_an_eastern_business_at_the_same_moment_is_sent(
+    db_session, sendable
+) -> None:
+    """The control. Same instant, same campaign, different coast."""
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign)
+            .where(Campaign.id == sendable.campaign_id)
+            .values(region=Region.USA)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == sendable.campaign_id)
+            .values(respect_quiet_hours=True)
+        )
+    await _place_in(sendable.lead_id, admin_area="Georgia", longitude=-84.39)
+
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]
+
+
+# --------------------------------------------------------------------------
+# The local frame, stamped at send time
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_send_records_the_recipients_local_hour(db_session, sendable) -> None:
+    """Without this the columns stay null forever and the timing question
+    cannot be asked -- which is the state this replaced."""
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)  # 13:30 Europe/London
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]
+
+    async with get_sessionmaker()() as s:
+        message = await s.get(Message, sendable.message_id)
+    assert message.sent_timezone == "Europe/London"
+    assert message.local_sent_hour == 13
+    assert message.local_sent_weekday == 0  # Monday
+
+
+@pytest.mark.asyncio
+async def test_two_coasts_at_one_instant_record_different_hours(
+    db_session, workspace
+) -> None:
+    """The whole point of recording it in their frame rather than ours."""
+    from titan.db.enums import Region
+    from titan.db.models.lead import OrganizationLocation
+
+    async def place(fixture, *, admin_area: str, longitude: float):
+        async with get_sessionmaker()() as s, s.begin():
+            org_id = (
+                await s.execute(
+                    select(Lead.organization_id).where(Lead.id == fixture.lead_id)
+                )
+            ).scalar_one()
+            await s.execute(
+                update(OrganizationLocation)
+                .where(OrganizationLocation.organization_id == org_id)
+                .values(
+                    timezone=None,
+                    country_code="US",
+                    region=admin_area,
+                    longitude=longitude,
+                )
+            )
+            await s.execute(
+                update(Campaign)
+                .where(Campaign.id == fixture.campaign_id)
+                .values(region=Region.USA)
+            )
+
+    async with get_sessionmaker()() as s:
+        west = await build_sendable(s, workspace, suffix="frameW")
+        east = await build_sendable(s, workspace, suffix="frameE")
+    await place(west, admin_area="California", longitude=-118.24)
+    await place(east, admin_area="Georgia", longitude=-84.39)
+
+    # 16:00 UTC = 09:00 Pacific and 12:00 Eastern, inside both windows.
+    moment = dt.datetime(2026, 8, 3, 16, 0, tzinfo=dt.UTC)
+    await run_worker(MockEmailProvider(), now_fn=lambda: moment)
+
+    async with get_sessionmaker()() as s:
+        west_row = await s.get(Message, west.message_id)
+        east_row = await s.get(Message, east.message_id)
+
+    assert west_row.local_sent_hour == 9
+    assert east_row.local_sent_hour == 12
+    assert west_row.sent_timezone == "America/Los_Angeles"
+    assert east_row.sent_timezone == "America/New_York"

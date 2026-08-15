@@ -269,6 +269,71 @@ def test_all_domain_tables_are_workspace_scoped() -> None:
     )
 
 
+#: Raw SQL against a scoped table that deliberately does not name workspace_id,
+#: keyed by (file, table) with the reason it is safe.
+#:
+#: Exactly one entry, and it should stay that way. The outbox claim is genuinely
+#: cross-workspace -- one worker drains every workspace's queue, which is why it
+#: runs on an unscoped session and why it cannot name a single workspace.
+#:
+#: The sender reputation queries were briefly listed here too, on the reasoning
+#: that filtering by ``sender_identity_id`` scopes them by construction. True,
+#: but it exempted the whole file: any *new* query against ``messages`` in the
+#: outbox worker would have inherited the exemption silently. They now name the
+#: workspace explicitly and the entry is gone.
+RAW_SQL_SCOPE_ALLOWLIST = {
+    ("titan/delivery/outbox_worker.py", "outbox_messages"),
+}
+
+
+def test_raw_sql_against_a_scoped_table_names_the_workspace() -> None:
+    """``workspace_session`` does not scope ``text()``. Not at all.
+
+    Its guard is ``with_loader_criteria``, which rewrites ORM entity queries and
+    has no effect on raw SQL; and the row-level security policy is permissive
+    when ``titan.workspace_id`` is unset, which is how migrations, the outbox
+    claim and webhook ingestion legitimately run unscoped. A raw SELECT inside a
+    scoped session therefore inherits no isolation whatsoever -- it only looks as
+    though it does, which is the dangerous part.
+
+    Found the hard way: the recipient-domain history query grouped by
+    ``to_domain`` with no workspace predicate, and one workspace's bounce record
+    silently downgraded another workspace's lead. Nothing about the call site
+    hinted at it.
+    """
+    from titan.db.models import Base
+
+    scoped_tables = {
+        mapper.class_.__tablename__
+        for mapper in Base.registry.mappers
+        if "workspace_id" in mapper.class_.__table__.c
+    }
+    # A text() block, from the opening paren to the closing triple quote.
+    blocks = re.compile(r"text\(\s*(?:\"\"\"|''')(.*?)(?:\"\"\"|''')", re.DOTALL)
+
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if rel.startswith("titan/db/migrations/"):
+            continue
+        for sql in blocks.findall(path.read_text(encoding="utf-8")):
+            lowered = sql.lower()
+            if "workspace_id" in lowered:
+                continue
+            for table in scoped_tables:
+                if not re.search(rf"\b(?:from|join|update|into)\s+{table}\b", lowered):
+                    continue
+                if (rel, table) in RAW_SQL_SCOPE_ALLOWLIST:
+                    continue
+                offenders.append(f"{rel}: {table}")
+
+    assert not offenders, (
+        f"raw SQL touches a workspace-scoped table without naming workspace_id: "
+        f"{sorted(set(offenders))}. Add the predicate to the query -- the session "
+        "will not add it for you -- or allowlist it above with a reason."
+    )
+
+
 # ==========================================================================
 # Invariant 19: no secrets in logs or responses
 # ==========================================================================
@@ -411,6 +476,97 @@ def test_loopback_escape_hatch_is_off_by_default() -> None:
         ), f"{candidate.relative_to(REPO)} enables the loopback escape hatch"
 
 
+#: The only module allowed to read the raw sendable-status set. Everywhere else
+#: must go through ``verification_permits_sending``.
+_SENDABILITY_RULE_OWNER = "titan/db/enums.py"
+
+
+def test_the_sendability_rule_has_exactly_one_implementation() -> None:
+    """Verification status alone no longer decides whether an address may be mailed.
+
+    CATCH_ALL is sendable behind first-party provenance and refused behind a
+    directory listing, so the test is ``verification_permits_sending(status,
+    source)`` rather than membership of ``SENDABLE_VERIFICATION_STATUSES``. Two
+    call sites -- the policy engine and the contact eligibility check -- used the
+    frozenset directly, and a third reading it again would reintroduce the drift
+    this consolidation removed: the UI would explain a block the send gate did
+    not apply, or worse, the reverse.
+
+    Reading the set for documentation or a test fixture is fine. Branching on
+    membership is what this refuses.
+    """
+    membership = re.compile(r"\bin\s+SENDABLE_VERIFICATION_STATUSES\b")
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if rel == _SENDABILITY_RULE_OWNER:
+            continue
+        if membership.search(path.read_text(encoding="utf-8")):
+            offenders.append(rel)
+    assert not offenders, (
+        "these modules test membership of SENDABLE_VERIFICATION_STATUSES "
+        f"directly: {offenders}. Call "
+        "titan.db.enums.verification_permits_sending(status, source) instead, so "
+        "the catch-all provenance rule cannot be skipped."
+    )
+
+
+#: Everything the campaign manager must not be able to touch. Not "must not
+#: touch" -- must not be *able* to, which is a property of what it imports.
+FORBIDDEN_TO_THE_MANAGER = (
+    "titan.delivery.suppression",
+    "titan.delivery.outbox_worker",
+    "titan.delivery.providers.resend",
+    "titan.delivery.providers.smartlead",
+    "titan.delivery.providers.smtp",
+    "titan.intelligence.composer",
+    "titan.intelligence.message_validator",
+)
+
+
+def test_the_campaign_manager_cannot_reach_a_delivery_gate() -> None:
+    """Bounded autonomy, as a property of the import graph.
+
+    Written down, the boundary is a paragraph saying the manager may optimise
+    but must not bypass suppression, approval, evidence or the delivery gates.
+    Meant, it is a package that cannot import any of them -- so the refusal is
+    not a check that could be forgotten but a capability that does not exist.
+
+    The bounds in ``titan.autonomy.actuator`` stop it exceeding a human's
+    numbers. This stops it reaching anything else at all.
+    """
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if not rel.startswith("titan/autonomy/"):
+            continue
+        modules = imported_modules(parse(path))
+        for forbidden in FORBIDDEN_TO_THE_MANAGER:
+            if forbidden in modules:
+                offenders.append(f"{rel} imports {forbidden}")
+
+    assert not offenders, (
+        "the campaign manager reached past its actuator: "
+        f"{offenders}. Everything it may change goes through "
+        "titan.autonomy.actuator, and everything else is not its to change."
+    )
+
+
+def test_the_manager_writes_to_no_column_a_human_owns() -> None:
+    """The other half of the boundary. The manager has its own columns, and the
+    human's numbers are the bound it is clamped against -- writing to those
+    directly would make next cycle's ceiling the manager's own last answer.
+    """
+    from titan.autonomy.apply import _COLUMN_FOR
+
+    assert set(_COLUMN_FOR.values()) == {
+        "managed_daily_send_limit",
+        "managed_min_lead_score",
+    }
+    forbidden = {"daily_send_limit", "min_lead_score", "sending_authorized"}
+    assert not (set(_COLUMN_FOR.values()) & forbidden)
+
+
 @pytest.mark.parametrize(
     "module,symbol",
     [
@@ -418,6 +574,10 @@ def test_loopback_escape_hatch_is_off_by_default() -> None:
         ("titan.delivery.quotas", "reserve_all"),
         ("titan.delivery.suppression", "is_suppressed"),
         ("titan.intelligence.message_validator", "validate_message"),
+        ("titan.intelligence.bounce_risk", "assess"),
+        ("titan.autonomy.actuator", "evaluate"),
+        ("titan.autonomy.apply", "apply_all"),
+        ("titan.db.enums", "verification_permits_sending"),
         ("titan.security.url_guard", "validate_url"),
     ],
 )

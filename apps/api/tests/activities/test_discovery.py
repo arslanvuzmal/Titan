@@ -186,7 +186,15 @@ async def test_the_organization_takes_its_industry_from_the_campaign(
     await run_discovery(run_for(workspace, campaign_id), places_result(found(1)))
 
     async with get_sessionmaker()() as s:
-        org = (await s.execute(select(Organization))).scalars().one()
+        org = (
+            (
+                await s.execute(
+                    select(Organization).where(Organization.workspace_id == workspace)
+                )
+            )
+            .scalars()
+            .one()
+        )
         assert org.industry is Industry.DENTIST
         assert org.google_place_id == "places/found-1"
         assert org.provenance[0]["source"] == "google_places"
@@ -262,7 +270,15 @@ async def test_a_business_already_known_is_not_added_twice(db_session, workspace
     assert second.leads_created == 1  # only the new one
 
     async with get_sessionmaker()() as s:
-        orgs = (await s.execute(select(Organization))).scalars().all()
+        orgs = (
+            (
+                await s.execute(
+                    select(Organization).where(Organization.workspace_id == workspace)
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(orgs) == 2
 
 
@@ -352,10 +368,31 @@ async def test_a_retry_on_the_same_key_does_not_search_again(db_session, workspa
     assert second.duplicate is True
     assert second.leads_created == 2
 
+    # Scoped to this test's workspace. Unscoped, these count every row in the
+    # database, so one leaked workspace from any other test in any earlier run
+    # fails them -- with a message about duplicate discovery that has nothing to
+    # do with the leak. get_sessionmaker gives an unscoped session on purpose;
+    # the predicate has to be written here.
     async with get_sessionmaker()() as s:
-        sources = (await s.execute(select(LeadSource))).scalars().all()
+        sources = (
+            (
+                await s.execute(
+                    select(LeadSource).where(LeadSource.workspace_id == workspace)
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(sources) == 1
-        orgs = (await s.execute(select(Organization))).scalars().all()
+        orgs = (
+            (
+                await s.execute(
+                    select(Organization).where(Organization.workspace_id == workspace)
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert len(orgs) == 2
 
 

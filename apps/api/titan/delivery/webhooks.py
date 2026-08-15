@@ -34,6 +34,7 @@ from titan.db.enums import (
     SuppressionReason,
 )
 from titan.db.models import Lead, Message, ProviderEvent
+from titan.delivery.bounces import BounceKind, record_bounce
 from titan.delivery.providers.base import EmailProvider, NormalizedEvent
 from titan.delivery.providers.resend import ResendProvider
 from titan.delivery.suppression import suppress
@@ -273,9 +274,34 @@ async def _apply_side_effects(
     if event.state is None:
         return
 
+    # Bounces go through titan.delivery.bounces, which is also where the IMAP
+    # path sends them. Deciding here as well would be a second implementation of
+    # the escalation rule, free to disagree with the first about when a mailbox
+    # has refused often enough to give up on.
+    if event.state is MessageState.BOUNCED:
+        outcome = await record_bounce(
+            session,
+            workspace_id=message.workspace_id,
+            to_email=message.to_email_normalized,
+            kind=BounceKind.HARD if event.is_hard_bounce else BounceKind.SOFT,
+            source=f"{event.provider}_webhook",
+            source_reference=event.provider_event_id,
+            message_id=message.id,
+            lead_id=message.lead_id,
+            now=now,
+        )
+        if outcome.suppressed:
+            logger.info(
+                "recipient suppressed from webhook",
+                extra={
+                    "message_id": str(message.id),
+                    "reason": outcome.reason.value if outcome.reason else None,
+                    "soft_bounce_count": outcome.soft_bounce_count,
+                },
+            )
+        return
+
     reason = _SUPPRESSING_STATES.get(event.state)
-    if event.state is MessageState.BOUNCED and event.is_hard_bounce:
-        reason = SuppressionReason.HARD_BOUNCE
 
     if reason is not None:
         await suppress(

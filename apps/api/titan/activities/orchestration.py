@@ -24,18 +24,39 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
+from titan.autonomy.actuator import (
+    Actuation,
+    Bounds,
+    Proposal,
+    effective_daily_limit,
+    effective_min_lead_score,
+)
+from titan.autonomy.allocation import CampaignDemand, allocate
+from titan.autonomy.allocation import explain as explain_share
+from titan.autonomy.apply import apply_all
+from titan.autonomy.health import CampaignHealth, CampaignWindow
+from titan.autonomy.health import classify as classify_campaign
+from titan.autonomy.manager import ManagedState, plan
 from titan.db.enums import (
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
     LeadStatus,
     MessageState,
 )
-from titan.db.models import Campaign, CampaignPolicy, Lead, Message, Organization
-from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.db.models import (
+    Campaign,
+    CampaignPolicy,
+    Lead,
+    Message,
+    Organization,
+    Workspace,
+)
+from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
+from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import (
@@ -46,6 +67,10 @@ from titan.workflows.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: The window the manager judges a campaign over. The same trailing thirty
+#: days the sender and recipient-domain judgements use.
+MANAGER_WINDOW_DAYS = 30
 
 #: Lead statuses that still need the research pipeline run over them. A lead
 #: already DRAFTED or QUEUED has a message waiting on a human or on the outbox;
@@ -105,6 +130,11 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             )
         assert policy is not None  # narrowed by _authorization_blockers
 
+        configured_limit = policy.daily_send_limit
+        configured_score = policy.min_lead_score
+        managed_limit = policy.managed_daily_send_limit
+        managed_score = policy.managed_min_lead_score
+
         # Midnight UTC, not a rolling 24 hours. The quota engine counts the same
         # way, and two components disagreeing about where "today" starts is how
         # a limit gets silently exceeded around the boundary.
@@ -120,8 +150,39 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
                 )
             )
         ).scalar_one()
-        remaining = max(0, policy.daily_send_limit - int(spent))
-        min_score = policy.min_lead_score
+        outcomes = await _campaign_outcomes(session, campaign_id, now)
+        leads_available = await _pool_size(session, campaign_id=campaign_id)
+
+    # The manager runs before the budget is read, so a decision made now governs
+    # this cycle rather than the next one. It is deliberately *after* the
+    # authorization check above: a campaign that may not send is not a campaign
+    # worth tuning, and running the manager on one would fill the audit trail
+    # with decisions about mail that was never going out.
+    # Capacity is a portfolio question, so it is answered for the whole
+    # workspace whenever any part of it cycles. Writing sibling campaigns'
+    # limits from this campaign's cycle looks surprising and is the honest
+    # shape of the problem: one workspace limit, many campaigns, and no
+    # division of it possible from inside any single one.
+    await _reallocate_capacity(workspace_id, now)
+
+    effective_limit, effective_score = await _run_manager(
+        workspace_id=workspace_id,
+        campaign_id=campaign_id,
+        status=campaign.status,
+        bounds=Bounds(
+            configured_daily_limit=configured_limit,
+            configured_min_lead_score=configured_score,
+        ),
+        managed_limit=managed_limit,
+        managed_score=managed_score,
+        outcomes=outcomes,
+        leads_available=leads_available,
+        now=now,
+    )
+
+    async with workspace_session(workspace_id) as session:
+        remaining = max(0, effective_limit - int(spent))
+        min_score = effective_score
 
     if remaining == 0:
         return CampaignCyclePlan(
@@ -345,3 +406,260 @@ __all__ = [
     "RESEARCHABLE_STATUSES",
     "plan_campaign_cycle",
 ]
+
+
+async def _campaign_outcomes(
+    session: AsyncSession, campaign_id: uuid.UUID, now: dt.datetime
+) -> dict[str, int]:
+    """This campaign's recent delivery record, over the reputation window.
+
+    The same trailing thirty days the sender and domain judgements use. A
+    campaign judged on a different window from the gate that stops its mail
+    would be answering a different question and calling it the same one.
+    """
+    since = now - dt.timedelta(days=MANAGER_WINDOW_DAYS)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                       count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                       count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                       count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
+                       count(DISTINCT lead_id) FILTER (
+                           WHERE sent_at IS NOT NULL
+                       )                                                 AS contacted
+                  FROM messages
+                 WHERE workspace_id = :workspace
+                   AND campaign_id = :campaign
+                   AND created_at >= :since
+                """
+            ),
+            {
+                "workspace": session.info.get(WORKSPACE_KEY),
+                "campaign": campaign_id,
+                "since": since,
+            },
+        )
+    ).one()
+    replied = (
+        await session.execute(
+            select(func.count())
+            .select_from(Lead)
+            .where(Lead.campaign_id == campaign_id, Lead.replied_at >= since)
+        )
+    ).scalar_one()
+    return {
+        "sent": int(row.sent or 0),
+        "delivered": int(row.delivered or 0),
+        "bounced": int(row.bounced or 0),
+        "complained": int(row.complained or 0),
+        "contacted": int(row.contacted or 0),
+        "replied": int(replied or 0),
+    }
+
+
+async def _run_manager(
+    *,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    status: CampaignStatus,
+    bounds: Bounds,
+    managed_limit: int | None,
+    managed_score: int | None,
+    outcomes: dict[str, int],
+    leads_available: int,
+    now: dt.datetime,
+) -> tuple[int, int]:
+    """Let the manager adjust this campaign, and return what it may now use.
+
+    Fails soft to the *configured* values, not to the managed ones. If the
+    manager cannot run, the campaign falls back to what a human approved rather
+    than to whatever the manager last decided -- an autonomous adjustment should
+    not outlive the ability to review it.
+    """
+    effective_limit = effective_daily_limit(bounds.configured_daily_limit, managed_limit)
+    effective_score = effective_min_lead_score(
+        bounds.configured_min_lead_score, managed_score
+    )
+
+    window = CampaignWindow(
+        campaign_id=str(campaign_id),
+        status=status,
+        window=ReputationWindow(
+            sent=outcomes["sent"],
+            delivered=outcomes["delivered"],
+            hard_bounced=outcomes["bounced"],
+            complained=outcomes["complained"],
+        ),
+        contacted=outcomes["contacted"],
+        replied=outcomes["replied"],
+        configured_limit=bounds.configured_daily_limit,
+        effective_limit=effective_limit,
+        leads_available=leads_available,
+    )
+    health = classify_campaign(window)
+    state = ManagedState(
+        campaign_id=str(campaign_id),
+        bounds=bounds,
+        managed_daily_limit=managed_limit,
+        managed_min_lead_score=managed_score,
+    )
+
+    try:
+        proposals = plan(state, window)
+        if not proposals:
+            return effective_limit, effective_score
+        async with workspace_unit_of_work(workspace_id) as session:
+            verdicts = await apply_all(
+                session,
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                health=health,
+                proposals=proposals,
+                bounds=bounds,
+                now=now,
+            )
+    except Exception as exc:
+        logger.warning(
+            "campaign manager could not run; the configured limits stand",
+            extra={"campaign_id": str(campaign_id), "error_code": type(exc).__name__},
+        )
+        return bounds.configured_daily_limit, bounds.configured_min_lead_score
+
+    for verdict in verdicts:
+        if not verdict.changes_anything:
+            continue
+        if verdict.proposal.actuation is Actuation.SET_DAILY_LIMIT:
+            effective_limit = effective_daily_limit(
+                bounds.configured_daily_limit, verdict.applied_value
+            )
+        elif verdict.proposal.actuation is Actuation.SET_MIN_LEAD_SCORE:
+            effective_score = effective_min_lead_score(
+                bounds.configured_min_lead_score, verdict.applied_value
+            )
+    return effective_limit, effective_score
+
+
+async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> None:
+    """Divide the workspace's daily sending between the campaigns competing for it.
+
+    Campaign limits were never a division of anything: each has its own, and in
+    the live database twenty active campaigns hold a hundred sends a day between
+    them against a workspace cap of five. The cap is real and enforced at send
+    time, so what happened was that whichever campaign the outbox worker claimed
+    from first consumed the whole allowance -- by claim order, not by merit.
+
+    Fails soft and silently. An allocation that cannot be computed leaves every
+    campaign on the limit it already had, which is the state the system ran in
+    before this existed and is safe by construction: those limits are already
+    bounded by the human's configuration.
+    """
+    try:
+        async with workspace_session(workspace_id) as session:
+            workspace = await session.get(Workspace, workspace_id)
+            if workspace is None:
+                return
+            rows = (
+                await session.execute(
+                    select(Campaign, CampaignPolicy)
+                    .join(CampaignPolicy, CampaignPolicy.campaign_id == Campaign.id)
+                    .where(Campaign.status == CampaignStatus.ACTIVE)
+                )
+            ).all()
+            if not rows:
+                return
+
+            demands: list[CampaignDemand] = []
+            states: dict[str, tuple[uuid.UUID, CampaignPolicy, CampaignHealth]] = {}
+            for campaign, policy in rows:
+                outcomes = await _campaign_outcomes(session, campaign.id, now)
+                current = effective_daily_limit(
+                    policy.daily_send_limit, policy.managed_daily_send_limit
+                )
+                leads = await _pool_size(session, campaign_id=campaign.id)
+                health = classify_campaign(
+                    CampaignWindow(
+                        campaign_id=str(campaign.id),
+                        status=campaign.status,
+                        window=ReputationWindow(
+                            sent=outcomes["sent"],
+                            delivered=outcomes["delivered"],
+                            hard_bounced=outcomes["bounced"],
+                            complained=outcomes["complained"],
+                        ),
+                        contacted=outcomes["contacted"],
+                        replied=outcomes["replied"],
+                        configured_limit=policy.daily_send_limit,
+                        effective_limit=current,
+                        leads_available=leads,
+                    )
+                )
+                demands.append(
+                    CampaignDemand(
+                        campaign_id=str(campaign.id),
+                        health=health,
+                        configured_limit=policy.daily_send_limit,
+                        leads_available=leads,
+                    )
+                )
+                states[str(campaign.id)] = (campaign.id, policy, health)
+
+            allocation = allocate(demands, workspace.daily_send_limit)
+    except Exception as exc:
+        logger.warning(
+            "capacity could not be reallocated; existing limits stand",
+            extra={"workspace_id": str(workspace_id), "error_code": type(exc).__name__},
+        )
+        return
+
+    for demand in demands:
+        campaign_id, policy, health = states[demand.campaign_id]
+        share = allocation.per_campaign.get(demand.campaign_id, 0)
+        current = effective_daily_limit(
+            policy.daily_send_limit, policy.managed_daily_send_limit
+        )
+        if share == current:
+            continue
+        try:
+            async with workspace_unit_of_work(workspace_id) as session:
+                await apply_all(
+                    session,
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    health=health,
+                    proposals=[
+                        Proposal(
+                            actuation=Actuation.SET_DAILY_LIMIT,
+                            campaign_id=demand.campaign_id,
+                            current=current,
+                            proposed=share,
+                            reason=f"portfolio allocation: {explain_share(demand, allocation)}",
+                            confidence=1.0,
+                            evidence={
+                                "health": health.value,
+                                "workspace_limit": allocation.workspace_limit,
+                                "allocated": share,
+                                "configured_limit": demand.configured_limit,
+                                "leads_available": demand.leads_available,
+                                "share_of_allocated": round(
+                                    allocation.share_of(demand.campaign_id), 4
+                                ),
+                                "unallocated": allocation.unallocated,
+                            },
+                        )
+                    ],
+                    bounds=Bounds(
+                        configured_daily_limit=policy.daily_send_limit,
+                        configured_min_lead_score=policy.min_lead_score,
+                    ),
+                    now=now,
+                )
+        except Exception as exc:
+            logger.warning(
+                "could not apply a capacity allocation",
+                extra={
+                    "campaign_id": str(campaign_id),
+                    "error_code": type(exc).__name__,
+                },
+            )

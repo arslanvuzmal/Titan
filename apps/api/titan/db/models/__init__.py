@@ -9,6 +9,7 @@ tests/db/test_model_registry.py.
 from __future__ import annotations
 
 from titan.db.base import Base
+from titan.db.models.autonomy import AutonomyDecision
 from titan.db.models.campaign import Campaign, CampaignPolicy, IndustryPlaybook
 from titan.db.models.compliance import (
     AuditLog,
@@ -18,6 +19,7 @@ from titan.db.models.compliance import (
 )
 from titan.db.models.identity import (
     ProviderConnection,
+    SenderHealthSnapshot,
     SenderIdentity,
     User,
     Workspace,
@@ -71,6 +73,7 @@ from titan.db.models.smartlead import (
 __all__ = [
     "AuditFinding",
     "AuditLog",
+    "AutonomyDecision",
     "Base",
     "BrowserArtifact",
     "BusinessOpportunity",
@@ -103,6 +106,7 @@ __all__ = [
     "QuotaCounter",
     "ReplyClassification",
     "ResearchRun",
+    "SenderHealthSnapshot",
     "SenderIdentity",
     "SequenceStep",
     "SmartleadImportBatch",
