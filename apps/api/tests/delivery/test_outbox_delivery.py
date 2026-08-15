@@ -12,7 +12,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from titan.db.enums import (
     CampaignStatus,
     ContactSource,
@@ -639,3 +639,102 @@ async def test_blocked_row_is_not_retried(db_session, sendable) -> None:
     second = await run_worker(provider)
     assert second == []
     assert provider.delivered_count == 0
+
+
+# --------------------------------------------------------------------------
+# Recipient domain health, read live at send time
+# --------------------------------------------------------------------------
+async def _prior_message(
+    workspace_id: uuid.UUID, *, suffix: str, **outcome: bool
+) -> None:
+    """A completed message to the same fixture domain, with an outcome on it.
+
+    Built through the ordinary fixture so the whole foreign-key chain exists;
+    only the delivery timestamps are set afterwards, which is exactly what a
+    webhook would have done.
+
+    Its outbox row is then removed. ``build_sendable`` produces a *pending* one,
+    and leaving it would give the worker a second message to process -- so the
+    run under test would report two outcomes and every assertion here would be
+    about the wrong row. History is what these tests are seeding, not queue depth.
+    """
+    async with get_sessionmaker()() as s:
+        prior = await build_sendable(s, workspace_id, suffix=suffix)
+        now = dt.datetime.now(dt.UTC)
+        await s.execute(
+            update(Message)
+            .where(Message.id == prior.message_id)
+            .values(
+                sent_at=now,
+                delivered_at=now if outcome.get("delivered") else None,
+                bounced_at=now if outcome.get("bounced") else None,
+                complained_at=now if outcome.get("complained") else None,
+            )
+        )
+        await s.execute(delete(OutboxMessage).where(OutboxMessage.id == prior.outbox_id))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_complaint_stops_mail_already_queued_to_that_domain(
+    db_session, sendable
+) -> None:
+    """The gap that made domain health only half a control.
+
+    The bounce engine classifies a domain when the contact is discovered and
+    stores the verdict on the channel. This message was already drafted,
+    approved and queued under a clean verdict; the complaint arrives afterwards.
+    Without a live read at send time, it goes out.
+    """
+    await _prior_message(sendable.workspace_id, suffix="dhcomp", complained=True)
+
+    provider = MockEmailProvider()
+    results = await run_worker(provider)
+
+    assert [r.outcome for r in results] == ["blocked"]
+    assert provider.delivered_count == 0
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    assert "domain" in (row.blocked_reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_three_bounces_with_no_delivery_stop_the_domain(
+    db_session, sendable
+) -> None:
+    for i in range(3):
+        await _prior_message(sendable.workspace_id, suffix=f"dhb{i}", bounced=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["blocked"]
+    assert provider.delivered_count == 0
+
+
+@pytest.mark.asyncio
+async def test_bounces_alongside_deliveries_do_not_stop_the_domain(
+    db_session, sendable
+) -> None:
+    """The false-positive control, and the reason DEGRADED does not deny here.
+
+    Two bounces and two deliveries is a 50% rate over four sends -- degraded at
+    discovery, where it would refuse a new address. It must not retract a
+    message a human has already approved.
+    """
+    for i in range(2):
+        await _prior_message(sendable.workspace_id, suffix=f"dhok{i}", delivered=True)
+    for i in range(2):
+        await _prior_message(sendable.workspace_id, suffix=f"dhbad{i}", bounced=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["sent"]
+    assert provider.delivered_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_clean_domain_sends_normally(db_session, sendable) -> None:
+    """If this fails the three above are vacuous."""
+    await _prior_message(sendable.workspace_id, suffix="dhclean", delivered=True)
+
+    provider = MockEmailProvider()
+    assert [r.outcome for r in await run_worker(provider)] == ["sent"]
+    assert provider.delivered_count == 1

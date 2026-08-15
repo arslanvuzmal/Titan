@@ -70,6 +70,8 @@ from titan.delivery.providers.base import (
     SendResult,
 )
 from titan.delivery.suppression import is_suppressed, suppress
+from titan.intelligence import domain_health
+from titan.intelligence.domain_health import DomainHealth, DomainWindow
 from titan.policy.engine import Decision, SendContext, evaluate_send
 
 logger = logging.getLogger(__name__)
@@ -232,6 +234,8 @@ class OutboxWorker:
             )
         ).scalar_one_or_none()
 
+        domain_health = await self._recipient_domain_health(session, row)
+
         ctx = SendContext(
             settings=self._settings,
             now=self._now(),
@@ -261,6 +265,7 @@ class OutboxWorker:
             contact_verification=channel.verification_status,
             contact_is_active=channel.is_active,
             recipient_timezone=location.timezone if location else None,
+            recipient_domain_health=domain_health,
             evidence_count=_evidence_count(draft),
             validation_passed=draft.validation_passed,
             provider_idempotency_key=row.provider_idempotency_key,
@@ -346,6 +351,67 @@ class OutboxWorker:
 
         return await self._record(session, row, result)
 
+    async def _recipient_domain_health(
+        self, session: AsyncSession, row: OutboxMessage
+    ) -> DomainHealth:
+        """How this recipient's domain has behaved, read now rather than at discovery.
+
+        The bounce engine classifies a domain when a contact is first found and
+        stores the verdict on the contact channel. That is the right place for
+        it -- it stops a bad address being kept at all -- but the stored verdict
+        is a snapshot, and this message may have been drafted, approved and
+        queued weeks later. A complaint that arrived this morning has to stop the
+        mail waiting for that domain today, and only a live read does that.
+
+        The same shape as the campaign policy re-read a few lines up, and for the
+        same reason: pausing a campaign stops mail already queued, and so should
+        a domain going bad.
+
+        A failure returns UNKNOWN, which denies nothing. This is one check among
+        several and losing it degrades the decision; raising here would strand a
+        message the other gates had already cleared.
+        """
+        window = dt.timedelta(days=domain_health.WINDOW_DAYS)
+        try:
+            stats = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT
+                          count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                          count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                          count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                          count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
+                          FROM messages
+                         WHERE workspace_id = :workspace
+                           AND to_domain = :domain
+                           AND created_at >= :since
+                        """
+                    ),
+                    {
+                        "workspace": row.workspace_id,
+                        "domain": row.to_domain,
+                        "since": self._now() - window,
+                    },
+                )
+            ).one()
+        except Exception:
+            logger.warning(
+                "recipient domain health unavailable; the check is skipped",
+                extra={"outbox_id": str(row.id), "domain": row.to_domain},
+            )
+            return DomainHealth.UNKNOWN
+
+        return domain_health.classify(
+            DomainWindow(
+                domain=row.to_domain,
+                sent=int(stats.sent or 0),
+                delivered=int(stats.delivered or 0),
+                bounced=int(stats.bounced or 0),
+                complained=int(stats.complained or 0),
+            )
+        )
+
     async def _check_deliverability(
         self, session: AsyncSession, row: OutboxMessage, email: OutboundEmail
     ) -> deliverability.DeliverabilityReport:
@@ -367,10 +433,16 @@ class OutboxWorker:
                       count(*) FILTER (WHERE bounced_at IS NOT NULL)   AS bounced,
                       count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
                       FROM messages
-                     WHERE sender_identity_id = :sender AND created_at >= :since
+                     WHERE workspace_id = :workspace
+                       AND sender_identity_id = :sender
+                       AND created_at >= :since
                     """
                 ),
-                {"sender": row.sender_identity_id, "since": since},
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "since": since,
+                },
             )
         ).one()
 
@@ -378,9 +450,10 @@ class OutboxWorker:
             await session.execute(
                 text(
                     "SELECT min(sent_at) FROM messages "
-                    "WHERE sender_identity_id = :sender AND sent_at IS NOT NULL"
+                    "WHERE workspace_id = :workspace AND sender_identity_id = :sender "
+                    "AND sent_at IS NOT NULL"
                 ),
-                {"sender": row.sender_identity_id},
+                {"workspace": row.workspace_id, "sender": row.sender_identity_id},
             )
         ).scalar_one_or_none()
 
@@ -388,10 +461,12 @@ class OutboxWorker:
             (
                 await session.execute(
                     text(
-                        "SELECT count(*) FROM messages WHERE sender_identity_id = :s "
+                        "SELECT count(*) FROM messages "
+                        "WHERE workspace_id = :workspace AND sender_identity_id = :s "
                         "AND sent_at >= :start"
                     ),
                     {
+                        "workspace": row.workspace_id,
                         "s": row.sender_identity_id,
                         "start": dt.datetime.combine(
                             now.date(), dt.time.min, tzinfo=dt.UTC

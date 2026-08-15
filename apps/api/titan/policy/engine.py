@@ -33,6 +33,7 @@ from titan.db.enums import (
     VerificationStatus,
     verification_permits_sending,
 )
+from titan.intelligence.domain_health import DomainHealth
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
 
 
@@ -55,6 +56,7 @@ class DenyCode(StrEnum):
     CONTACT_GUESSED = "contact_address_was_guessed"
     CONTACT_NOT_VERIFIED = "contact_not_verified"
     CONTACT_INACTIVE = "contact_channel_inactive"
+    RECIPIENT_DOMAIN_BLOCKED = "recipient_domain_blocked"
     SUPPRESSED = "recipient_suppressed"
     NO_EVIDENCE = "no_evidence_backed_claims"
     VALIDATION_FAILED = "message_validation_failed"
@@ -162,6 +164,10 @@ class SendContext:
     is_suppressed: bool = False
     suppression_reason: str | None = None
     quota_exhausted_scope: str | None = None
+    #: Live classification of the recipient's domain. Defaults to UNKNOWN, which
+    #: denies nothing: a caller that cannot supply it loses a check rather than
+    #: gaining a refusal.
+    recipient_domain_health: DomainHealth = DomainHealth.UNKNOWN
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -293,6 +299,21 @@ def evaluate_send(ctx: SendContext) -> Decision:
                 f"verification status is {ctx.contact_verification.value} for an "
                 f"address sourced from {ctx.contact_source.value}; campaign "
                 "requires a verified or first-party-published address",
+            )
+        )
+
+    # The recipient's domain, as it is *now* rather than as it was when the
+    # address was discovered. A contact channel's verification status is written
+    # once and can be weeks old; a complaint arriving this morning has to stop
+    # the message queued for that domain last week, and only a live read does
+    # that. DEGRADED deliberately does not deny here -- it already refused the
+    # address at discovery, and re-blocking mail a human has since approved on
+    # the strength of a bounce rate over four messages is not worth the lead.
+    if ctx.recipient_domain_health is DomainHealth.BLOCKED:
+        denials.append(
+            Denial(
+                DenyCode.RECIPIENT_DOMAIN_BLOCKED,
+                "recipient domain is blocked by its own delivery record",
             )
         )
 

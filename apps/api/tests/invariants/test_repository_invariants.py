@@ -272,13 +272,17 @@ def test_all_domain_tables_are_workspace_scoped() -> None:
 #: Raw SQL against a scoped table that deliberately does not name workspace_id,
 #: keyed by (file, table) with the reason it is safe.
 #:
-#: The outbox claim is genuinely cross-workspace: one worker drains every
-#: workspace's queue, which is why it runs on an unscoped session. The sender
-#: reputation queries filter on sender_identity_id, a UUID that belongs to
-#: exactly one workspace, so the predicate scopes them by construction.
+#: Exactly one entry, and it should stay that way. The outbox claim is genuinely
+#: cross-workspace -- one worker drains every workspace's queue, which is why it
+#: runs on an unscoped session and why it cannot name a single workspace.
+#:
+#: The sender reputation queries were briefly listed here too, on the reasoning
+#: that filtering by ``sender_identity_id`` scopes them by construction. True,
+#: but it exempted the whole file: any *new* query against ``messages`` in the
+#: outbox worker would have inherited the exemption silently. They now name the
+#: workspace explicitly and the entry is gone.
 RAW_SQL_SCOPE_ALLOWLIST = {
     ("titan/delivery/outbox_worker.py", "outbox_messages"),
-    ("titan/delivery/outbox_worker.py", "messages"),
 }
 
 
