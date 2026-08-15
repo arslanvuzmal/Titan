@@ -293,7 +293,6 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/titan-api:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/titan-api:latest
-            titan-api:ci
           # Scoped per image so the two builds cannot overwrite each other's
           # cache manifests. Hygiene, not a bug fix -- see the note on this job
           # about what actually broke the build on main.
@@ -310,9 +309,23 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/titan-browser-worker:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/titan-browser-worker:latest
-            titan-browser-worker:ci
           cache-from: type=gha,scope=titan-browser-worker
           cache-to: type=gha,mode=max,scope=titan-browser-worker
+
+      # buildx pushes every tag it is given, and a bare `titan-api:ci` resolves
+      # to docker.io/library/titan-api -- a repository this project has no
+      # rights to and no reason to want. On a pull request nothing is pushed so
+      # the bare tag was harmless; on main it took the whole job down *after*
+      # the GHCR push had already succeeded, which is why the failure looked
+      # like a registry permission problem twice over.
+      #
+      # `load: true` puts the built image in the local daemon under its GHCR
+      # names, so aliasing here gives the assertions a stable short name without
+      # adding a push target.
+      - name: Tag images for local assertions
+        run: |
+          docker tag ghcr.io/${{ github.repository_owner }}/titan-api:latest titan-api:ci
+          docker tag ghcr.io/${{ github.repository_owner }}/titan-browser-worker:latest titan-browser-worker:ci
 
       - name: API image runs as non-root
         run: |
