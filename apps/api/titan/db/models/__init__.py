@@ -18,6 +18,7 @@ from titan.db.models.compliance import (
 )
 from titan.db.models.identity import (
     ProviderConnection,
+    SenderHealthSnapshot,
     SenderIdentity,
     User,
     Workspace,
@@ -103,6 +104,7 @@ __all__ = [
     "QuotaCounter",
     "ReplyClassification",
     "ResearchRun",
+    "SenderHealthSnapshot",
     "SenderIdentity",
     "SequenceStep",
     "SmartleadImportBatch",

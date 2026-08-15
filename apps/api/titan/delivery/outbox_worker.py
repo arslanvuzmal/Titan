@@ -35,8 +35,10 @@ import socket
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select, text, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.config import Settings, get_settings
@@ -59,11 +61,12 @@ from titan.db.models import (
     MessageDraft,
     OrganizationLocation,
     OutboxMessage,
+    SenderHealthSnapshot,
     SenderIdentity,
     Workspace,
 )
 from titan.db.session import get_sessionmaker
-from titan.delivery import deliverability, quotas
+from titan.delivery import deliverability, quotas, sender_health
 from titan.delivery.providers.base import (
     EmailProvider,
     OutboundEmail,
@@ -72,6 +75,8 @@ from titan.delivery.providers.base import (
 from titan.delivery.suppression import is_suppressed, suppress
 from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
+from titan.intelligence.sender_auth import is_stale
+from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.engine import Decision, SendContext, evaluate_send
 
 logger = logging.getLogger(__name__)
@@ -290,6 +295,13 @@ class OutboxWorker:
             await self._block(session, row, missing or "context unavailable")
             return ProcessResult(row.id, "blocked", missing)
 
+        # Before the decision, not after it. A sender whose authentication has
+        # lapsed is refused by evaluate_send below and never reaches the
+        # deliverability check -- so capturing there recorded health for exactly
+        # the senders that had none of it, and left the broken ones invisible.
+        # The mailbox most worth monitoring is the one that has stopped working.
+        await self._capture_sender_health(session, row)
+
         decision = evaluate_send(ctx)
         if not decision.allowed:
             # Quota and quiet hours are temporary; everything else is a block.
@@ -411,6 +423,243 @@ class OutboxWorker:
                 complained=int(stats.complained or 0),
             )
         )
+
+    async def _capture_sender_health(
+        self, session: AsyncSession, row: OutboxMessage
+    ) -> None:
+        """Write today's health row for this sender, and alert on a downturn.
+
+        Upserted rather than appended: one row per sender per day, whose values
+        are those of the last message processed that day. See the migration for
+        why a rolling aggregate is not an event log.
+
+        Gathers its own numbers rather than borrowing the deliverability check's.
+        That repeats one indexed aggregate per message on the sending path, and
+        buys the property that matters: this runs for every message, including
+        the ones refused before that check is ever reached.
+
+        Fails soft. A snapshot is a record of a decision, never an input to one,
+        so failing to write history must not change what happens to the message.
+        """
+        sender = await session.get(SenderIdentity, row.sender_identity_id)
+        if sender is None:
+            return
+        now = self._now()
+        since = now - dt.timedelta(days=30)
+        stats = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                      count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                      count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                      count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                      count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
+                      min(sent_at)                                      AS first_send_at,
+                      count(*) FILTER (WHERE sent_at >= :day_start)     AS sent_today
+                      FROM messages
+                     WHERE workspace_id = :workspace
+                       AND sender_identity_id = :sender
+                       AND created_at >= :since
+                    """
+                ),
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "since": since,
+                    "day_start": dt.datetime.combine(
+                        now.date(), dt.time.min, tzinfo=dt.UTC
+                    ),
+                },
+            )
+        ).one()
+        first_send_at = stats.first_send_at
+        sent_today = int(stats.sent_today or 0)
+        # A SAVEPOINT, not just a try/except. This shares the caller's
+        # transaction, and PostgreSQL aborts the whole transaction on any failed
+        # statement -- so catching the exception would leave the session
+        # poisoned and every statement after it, including the send bookkeeping,
+        # would fail. Catching without this would make the send *more* fragile
+        # than not recording health at all, which is the opposite of the intent.
+        try:
+            async with session.begin_nested():
+                await self._write_sender_health(
+                    session,
+                    row,
+                    sender=sender,
+                    stats=stats,
+                    first_send_at=first_send_at,
+                    sent_today=sent_today,
+                    now=now,
+                )
+        except Exception:
+            logger.warning(
+                "could not record sender health; the send decision is unaffected",
+                extra={"outbox_id": str(row.id), "sender_id": str(sender.id)},
+            )
+
+    async def _write_sender_health(
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        *,
+        sender: SenderIdentity,
+        stats: Any,
+        first_send_at: dt.datetime | None,
+        sent_today: int,
+        now: dt.datetime,
+    ) -> None:
+        """The snapshot write itself. Always called inside a savepoint."""
+        throughput = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                      count(*) FILTER (
+                        WHERE sent_at IS NOT NULL OR attempt_count > 0
+                      )                             AS attempted,
+                      coalesce(sum(attempt_count), 0) AS retries,
+                      count(*) FILTER (WHERE status = 'deferred') AS deferred
+                      FROM outbox_messages
+                     WHERE workspace_id = :workspace
+                       AND sender_identity_id = :sender
+                       AND created_at >= :since
+                    """
+                ),
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "since": now - dt.timedelta(days=30),
+                },
+            )
+        ).one()
+
+        attempted = int(throughput.attempted or 0)
+        retries = int(throughput.retries or 0)
+        warmup_limit = deliverability.warmup_limit(first_send_at=first_send_at, now=now)
+        warmup_day = (
+            None
+            if warmup_limit is None
+            else (
+                0 if first_send_at is None else (now.date() - first_send_at.date()).days
+            )
+        )
+
+        snapshot = sender_health.SenderSnapshot(
+            sender_identity_id=str(sender.id),
+            sending_domain=sender.sending_domain,
+            captured_on=now.date(),
+            domain_verified=sender.domain_verified,
+            spf_ok=sender.spf_ok,
+            dkim_ok=sender.dkim_ok,
+            dmarc_ok=sender.dmarc_ok,
+            auth_stale=is_stale(sender.last_verified_at),
+            window=deliverability.ReputationWindow(
+                sent=int(stats.sent or 0),
+                delivered=int(stats.delivered or 0),
+                hard_bounced=int(stats.bounced or 0),
+                complained=int(stats.complained or 0),
+            ),
+            attempts=attempted + retries,
+            retries=retries,
+            deferred=int(throughput.deferred or 0),
+            sent_today=sent_today,
+            warmup_day=warmup_day,
+            warmup_limit=warmup_limit,
+        )
+        status = sender_health.classify(snapshot)
+
+        # The previous verdict, from an earlier day. Read before the upsert:
+        # afterwards today's own row is the most recent and the comparison
+        # would be against itself.
+        previous_status = (
+            await session.execute(
+                text(
+                    """
+                    SELECT status FROM sender_health_snapshots
+                     WHERE workspace_id = :workspace
+                       AND sender_identity_id = :sender
+                       AND captured_on < :today
+                     ORDER BY captured_on DESC
+                     LIMIT 1
+                    """
+                ),
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "today": now.date(),
+                },
+            )
+        ).scalar_one_or_none()
+
+        await session.execute(
+            pg_insert(SenderHealthSnapshot.__table__)  # type: ignore[arg-type]
+            .values(
+                workspace_id=row.workspace_id,
+                sender_identity_id=sender.id,
+                sending_domain=sender.sending_domain,
+                captured_on=snapshot.captured_on,
+                status=status.value,
+                domain_verified=snapshot.domain_verified,
+                spf_ok=snapshot.spf_ok,
+                dkim_ok=snapshot.dkim_ok,
+                dmarc_ok=snapshot.dmarc_ok,
+                auth_stale=snapshot.auth_stale,
+                window_sent=snapshot.window.sent,
+                window_delivered=snapshot.window.delivered,
+                window_bounced=snapshot.window.hard_bounced,
+                window_complained=snapshot.window.complained,
+                attempts=snapshot.attempts,
+                retries=snapshot.retries,
+                deferred=snapshot.deferred,
+                sent_today=snapshot.sent_today,
+                warmup_day=snapshot.warmup_day,
+                warmup_limit=snapshot.warmup_limit,
+                reasons=list(sender_health.reasons(snapshot)),
+            )
+            .on_conflict_do_update(
+                constraint="uq_sender_health_day",
+                set_={
+                    "status": status.value,
+                    "domain_verified": snapshot.domain_verified,
+                    "spf_ok": snapshot.spf_ok,
+                    "dkim_ok": snapshot.dkim_ok,
+                    "dmarc_ok": snapshot.dmarc_ok,
+                    "auth_stale": snapshot.auth_stale,
+                    "window_sent": snapshot.window.sent,
+                    "window_delivered": snapshot.window.delivered,
+                    "window_bounced": snapshot.window.hard_bounced,
+                    "window_complained": snapshot.window.complained,
+                    "attempts": snapshot.attempts,
+                    "retries": snapshot.retries,
+                    "deferred": snapshot.deferred,
+                    "sent_today": snapshot.sent_today,
+                    "warmup_day": snapshot.warmup_day,
+                    "warmup_limit": snapshot.warmup_limit,
+                    "reasons": list(sender_health.reasons(snapshot)),
+                    "updated_at": now,
+                },
+            )
+        )
+
+        previous = (
+            sender_health.SenderHealth(previous_status) if previous_status else None
+        )
+        if sender_health.should_alert(status, previous):
+            await record_notification(
+                session,
+                workspace_id=row.workspace_id,
+                kind=NotificationKind.DELIVERABILITY_ALERT,
+                title=f"{sender.from_email} is {status.value}",
+                # Keyed on the transition, not on the day: a mailbox that
+                # stays degraded for a fortnight is one alert, not fourteen.
+                dedupe_key=(
+                    f"sender-health:{sender.id}:"
+                    f"{previous.value if previous else 'new'}->{status.value}"
+                ),
+                description="; ".join(sender_health.reasons(snapshot)) or None,
+                now=now,
+            )
 
     async def _check_deliverability(
         self, session: AsyncSession, row: OutboxMessage, email: OutboundEmail

@@ -8,8 +8,10 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -244,3 +246,75 @@ class ProviderConnection(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     @property
     def has_credential(self) -> bool:
         return self.encrypted_credential is not None
+
+
+class SenderHealthSnapshot(Base, WorkspaceScoped, TimestampMixin):
+    """One day's measured health for one sending identity.
+
+    Mutable and keyed by date, following ``quota_counters`` rather than the
+    append-only tables. A snapshot is a rolling aggregate, not a record of an
+    event: the outbox worker upserts it as a by-product of the deliverability
+    check it already runs, so the last send of the day leaves the day's final
+    numbers. Writing one row per message instead would be append-only, faithful,
+    and produce tens of thousands of rows nobody would ever read.
+
+    Everything here was already being computed and thrown away. Persisting it is
+    what turns "this mailbox is at 0.04%" into "this mailbox was at 0.01% last
+    Tuesday", which is the only form of the number an operator can act on.
+    """
+
+    __tablename__ = "sender_health_snapshots"
+    __extra_table_args__ = (
+        # The unique constraint's own btree is also the read path -- "the last
+        # N days for this sender" is a prefix scan on exactly these columns in
+        # this order. A second index over the same tuple would be paid for on
+        # every write and never chosen by the planner.
+        UniqueConstraint(
+            "workspace_id",
+            "sender_identity_id",
+            "captured_on",
+            name="uq_sender_health_day",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    sender_identity_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("sender_identities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    #: Denormalised so a snapshot still reads sensibly after the identity is
+    #: deleted or its domain changed. History that silently rewrites itself is
+    #: not history.
+    sending_domain: Mapped[str] = mapped_column(String(253), nullable=False)
+    #: UTC date, matching quota_counters.window_date.
+    captured_on: Mapped[dt.date] = mapped_column(Date, nullable=False)
+
+    #: "unknown" | "warming" | "healthy" | "watch" | "degraded" | "blocked".
+    #: Deliberately a string rather than a native enum: this is a derived
+    #: judgement whose vocabulary will move as the classifier learns, and a
+    #: migration per adjustment would discourage adjusting it.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    domain_verified: Mapped[bool] = mapped_column(default=False, nullable=False)
+    spf_ok: Mapped[bool] = mapped_column(default=False, nullable=False)
+    dkim_ok: Mapped[bool] = mapped_column(default=False, nullable=False)
+    dmarc_ok: Mapped[bool] = mapped_column(default=False, nullable=False)
+    auth_stale: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    window_sent: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    window_delivered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    window_bounced: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    window_complained: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    retries: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    deferred: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    sent_today: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    warmup_day: Mapped[int | None] = mapped_column(Integer)
+    warmup_limit: Mapped[int | None] = mapped_column(Integer)
+
+    #: Human-readable, in the classifier's words, for the operator view.
+    reasons: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
