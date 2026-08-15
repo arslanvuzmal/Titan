@@ -315,3 +315,28 @@ def test_every_draft_carries_a_rationale():
             continue
         assert draft.rationale
         assert len(draft.rationale) > 30
+
+
+def test_a_message_cannot_be_composed_without_a_solution():
+    """The structural half of the fix.
+
+    Refusing in the pipeline stops today's caller. Removing the default stops
+    tomorrow's: the old ``solution`` default meant any new caller that forgot to
+    pass one silently produced a message claiming the sender builds "enquiry
+    capture and follow-up automation", whatever the evidence said. A required
+    field turns that into a TypeError at the call site.
+    """
+    base = {
+        "org_domain": "bellrose-dental.test",
+        "finding": FakeFinding(),
+        "evidence_ids": ["ev-1"],
+        "owner_name": OWNER,
+        "portfolio_url": PORTFOLIO,
+        "mailing_address": ADDRESS,
+        "unsubscribe_url": f"{PORTFOLIO}/unsubscribe",
+    }
+
+    with pytest.raises(TypeError):
+        ComposerContext(**base)  # type: ignore[arg-type]
+
+    assert ComposerContext(**base, solution="booking automation") is not None

@@ -818,3 +818,34 @@ def test_the_success_metric_is_reply_quality_not_reply_volume() -> None:
         leads_available=50,
     )
     assert classify(rejected) is not CampaignHealth.SCALING
+
+
+def test_no_generic_offer_is_substituted_when_evidence_matches_nothing() -> None:
+    """A pitch must follow from the evidence beside it.
+
+    The fallback this guards read "enquiry capture and follow-up automation" and
+    was substituted whenever a lead's evidence matched no offer in its
+    industry's playbook -- so the message cited a broken booking button and then
+    claimed a capability with no relationship to it. That is a performance claim
+    the system invented about itself.
+
+    Scans for the string as a *value* rather than anywhere at all, so the
+    comments explaining the removal do not re-trip it.
+    """
+    root = pathlib.Path(__file__).resolve().parents[2] / "titan"
+    offender = re.compile(
+        r"^(?!\s*#).*[=(]\s*[\"']enquiry capture and follow-up automation[\"']",
+        re.MULTILINE,
+    )
+
+    guilty = [
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*.py")
+        if offender.search(path.read_text(encoding="utf-8"))
+    ]
+
+    assert not guilty, (
+        f"a generic offer is being substituted for real evidence in: {guilty}. "
+        "select_offers returning empty means there is nothing truthful to "
+        "offer; the caller must refuse rather than invent one."
+    )
