@@ -29,10 +29,15 @@ from __future__ import annotations
 
 import datetime as dt
 import zoneinfo
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from titan.db.enums import Region, SubRegion
 from titan.policy.subregions import timezone_for
+
+#: Given a date, the name of the holiday falling on it, or None.
+#: ``titan.policy.calendars.holiday_on`` bound to a country, in practice.
+HolidayLookup = Callable[[dt.date], str | None]
 
 #: A representative business timezone per market, used only when the recipient
 #: has none of their own.
@@ -107,20 +112,30 @@ class SendWindow:
         """
         return bool(self.days) and 0 <= self.start_hour < self.end_hour <= 24
 
-    def is_open_at(self, local: dt.datetime) -> bool:
+    def is_open_at(
+        self, local: dt.datetime, holidays: HolidayLookup | None = None
+    ) -> bool:
         """Whether a local moment falls inside the window.
 
         The end hour is exclusive: 17 means the last minute is 16:59, not 17:59.
         A window ending "at five" that sends at 17:45 is the kind of small wrong
         that reads as automation.
+
+        ``holidays`` answers whether a given date is a public holiday where the
+        recipient is. Absent, the window knows only about the working week --
+        which is the behaviour before calendars existed, and sends on Christmas.
         """
         if not self.is_usable:
             return False
         if local.weekday() not in self.days:
             return False
+        if holidays is not None and holidays(local.date()) is not None:
+            return False
         return self.start_hour <= local.hour < self.end_hour
 
-    def next_open_from(self, local: dt.datetime) -> dt.datetime | None:
+    def next_open_from(
+        self, local: dt.datetime, holidays: HolidayLookup | None = None
+    ) -> dt.datetime | None:
         """The next local moment this window opens, at or after ``local``.
 
         Used to schedule a deferral. Without it a message refused at 18:00 local
@@ -130,12 +145,17 @@ class SendWindow:
         """
         if not self.is_usable:
             return None
-        if self.is_open_at(local):
+        if self.is_open_at(local, holidays):
             return local
+
+        def opens(day: dt.datetime) -> bool:
+            if day.weekday() not in self.days:
+                return False
+            return holidays is None or holidays(day.date()) is None
 
         candidate = local
         for _ in range(_MAX_LOOKAHEAD_DAYS):
-            if candidate.weekday() in self.days and candidate.hour < self.start_hour:
+            if opens(candidate) and candidate.hour < self.start_hour:
                 return candidate.replace(
                     hour=self.start_hour, minute=0, second=0, microsecond=0
                 )
@@ -143,7 +163,7 @@ class SendWindow:
             candidate = (candidate + dt.timedelta(days=1)).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
-            if candidate.weekday() in self.days:
+            if opens(candidate):
                 return candidate.replace(hour=self.start_hour)
         return None
 

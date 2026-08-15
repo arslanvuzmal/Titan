@@ -77,6 +77,7 @@ from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
 from titan.intelligence.sender_auth import is_stale
 from titan.notify.operator import NotificationKind, record_notification
+from titan.policy.calendars import holiday_on, resolve_country
 from titan.policy.engine import Decision, SendContext, evaluate_send
 from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 from titan.policy.subregions import subregion_for_location
@@ -313,6 +314,8 @@ class OutboxWorker:
                 location.longitude if location else None,
             ),
             campaign_subregion=campaign.sub_region,
+            recipient_country=location.country_code if location else None,
+            recipient_admin_area=location.region if location else None,
             send_window=SendWindow(
                 start_hour=policy.send_window_start_hour,
                 end_hour=policy.send_window_end_hour,
@@ -1056,7 +1059,17 @@ class OutboxWorker:
         local = local_time(ctx.now, timezone)
         if local is None:
             return None
-        opens = ctx.send_window.next_open_from(local)
+        country = resolve_country(ctx.recipient_country, ctx.campaign_region)
+        lookup = (
+            (
+                lambda day: holiday_on(
+                    day, country=country, subdiv=ctx.recipient_admin_area
+                )
+            )
+            if country
+            else None
+        )
+        opens = ctx.send_window.next_open_from(local, lookup)
         if opens is None or opens <= local:
             return None
         return opens.astimezone(dt.UTC)
