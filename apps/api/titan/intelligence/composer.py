@@ -61,7 +61,17 @@ class ComposerContext:
     unsubscribe_url: str
     #: What the offer delivers, as a NOUN PHRASE. An imperative here produces
     #: "I build point the button at a tested flow".
-    solution: str = "enquiry capture and follow-up automation"
+    #:
+    #: Required, and it used to carry a default. The default was the problem: it
+    #: read "enquiry capture and follow-up automation", so a lead whose evidence
+    #: matched no offer in its industry's playbook still got a message claiming
+    #: that is what the sender builds -- a pitch unrelated to the finding it had
+    #: just cited, and a capability claim nobody checked. ``select_offers``
+    #: already says an empty result means "there is nothing truthful to offer";
+    #: a default here quietly overrode that. Composing now requires the caller to
+    #: have found a real offer, so the refusal happens where the evidence is,
+    #: rather than being papered over here.
+    solution: str
     #: Published first name, when one was actually found. Never inferred from an
     #: email local part: "sam@" might be Samantha, Samuel, or the sales team.
     contact_first_name: str | None = None

@@ -1155,7 +1155,22 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
 
     headline = pitchable[0]
     offers = select_offers(org_industry, {f.issue_type for f in pitchable})
-    offer = offers[0] if offers else None
+    if not offers:
+        # No draft rather than a mismatched one. This used to fall back to a
+        # generic offer, so a lead whose evidence matched nothing in its
+        # industry's playbook was told "I build enquiry capture and follow-up
+        # automation" directly after being shown a broken booking button -- a
+        # capability claim unrelated to the evidence beside it, which is the
+        # kind of small wrong that reads as a template.
+        #
+        # ``select_offers`` already documents an empty result as "there is
+        # nothing truthful to offer". Refusing here is agreeing with it.
+        return DraftActivityResult(
+            draft_id="",
+            validation_passed=False,
+            violation_codes=("no_offer_matching_the_evidence",),
+        )
+    offer = offers[0]
 
     portfolio = str(settings.owner_portfolio_url).rstrip("/")
     composed = compose(
@@ -1167,9 +1182,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             portfolio_url=portfolio,
             mailing_address=mailing_address or "",
             unsubscribe_url=f"{portfolio}/unsubscribe",
-            solution=(
-                offer.delivers if offer else "enquiry capture and follow-up automation"
-            ),
+            solution=offer.delivers,
             # The lead, so the same lead always composes to the same message.
             # Seeding on anything that varies between runs would produce a
             # second, differently worded draft on an activity retry.

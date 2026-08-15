@@ -896,3 +896,49 @@ async def test_a_campaign_whose_whole_pool_is_full_queues_nothing(
     assert queued is not None and queued.queued is False
     assert any("no mailbox" in r for r in queued.refused_reasons), queued.refused_reasons
     assert any("no daily send limit" in r for r in queued.refused_reasons)
+
+
+# ==========================================================================
+# An offer has to match the evidence, or there is no message
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_evidence_with_no_matching_offer_produces_no_draft(
+    db_session, workspace, monkeypatch
+) -> None:
+    """The fallback this replaces was a capability claim nobody checked.
+
+    When a lead's evidence matched nothing in its industry's playbook, the
+    message still went out saying "I build enquiry capture and follow-up
+    automation" -- directly after showing the recipient a broken booking
+    button. Two sentences about unrelated things, which is the specific kind of
+    small wrong that reads as a template rather than a person.
+
+    ``select_offers`` already documents an empty result as "there is nothing
+    truthful to offer". Refusing is agreeing with it.
+    """
+    monkeypatch.setattr("titan.activities.pipeline.select_offers", lambda *a, **k: [])
+
+    ids = await seed_lead(workspace, suffix="nooffer")
+    out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="nooffer-1")
+
+    draft = out["draft"]
+    assert draft is not None, "the run stopped before drafting; the test proves nothing"
+    assert draft.validation_passed is False
+    assert draft.draft_id == ""
+    assert "no_offer_matching_the_evidence" in draft.violation_codes
+    assert out["queued"] is None, "a refused draft must never reach the outbox"
+
+
+@pytest.mark.asyncio
+async def test_a_matching_offer_still_drafts(db_session, workspace) -> None:
+    """The other half. A refusal that fired on everything would be a pause
+    wearing a validator's name, so the contrast is asserted rather than
+    assumed."""
+    ids = await seed_lead(workspace, suffix="hasoffer")
+    out = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="hasoffer-1"
+    )
+
+    draft = out["draft"]
+    assert draft is not None
+    assert "no_offer_matching_the_evidence" not in (draft.violation_codes or ())
