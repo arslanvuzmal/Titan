@@ -27,7 +27,7 @@ from titan.db.base import (
     pg_enum,
     uuid_pk,
 )
-from titan.db.enums import CampaignStatus, Industry
+from titan.db.enums import CampaignStatus, Industry, Region
 
 
 class IndustryPlaybook(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
@@ -92,6 +92,19 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     )
     sender_identity_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sender_identities.id", ondelete="SET NULL")
+    )
+
+    #: The market this campaign works. Coarser than target_country_code and not
+    #: derived from it: one country code cannot express a campaign aimed at
+    #: Europe, and most campaigns leave it empty. See
+    #: titan.intelligence.portfolio.disagrees_with_country for how the two are
+    #: reconciled -- surfaced, never silently rewritten.
+    region: Mapped[Region] = mapped_column(
+        pg_enum(Region, "region"),
+        default=Region.UNSPECIFIED,
+        server_default=Region.UNSPECIFIED.value,
+        nullable=False,
+        index=True,
     )
 
     #: Targeting

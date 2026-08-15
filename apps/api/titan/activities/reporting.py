@@ -19,7 +19,7 @@ from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
-from titan.db.enums import DraftStatus, MessageState
+from titan.db.enums import DraftStatus, MessageState, Region
 from titan.db.models import (
     BusinessOpportunity,
     Lead,
@@ -33,7 +33,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
-from titan.intelligence import lead_sources
+from titan.intelligence import lead_sources, portfolio
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
     WeeklyReport,
@@ -225,7 +225,9 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         ).all()
 
         source_windows = await _lead_source_windows(session, workspace_id, now)
+        region_slices = await _portfolio_slices(session, workspace_id, since)
 
+    standing = portfolio.summarise(region_slices)
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -253,6 +255,10 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         hot_leads=tuple(
             f"{name} -- waiting since {created.date().isoformat()}"
             for name, created in hot
+        ),
+        portfolio=tuple(
+            (window.region.value, portfolio.describe(window, standing))
+            for window in standing.slices
         ),
         lead_sources=tuple(
             (
@@ -390,6 +396,82 @@ async def _lead_source_windows(
             delivered=int(row.delivered or 0),
             bounced=int(row.bounced or 0),
             complained=int(row.complained or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _portfolio_slices(
+    session: AsyncSession, workspace_id: uuid.UUID, since: dt.datetime
+) -> list[portfolio.RegionSlice]:
+    """This week's activity, grouped by market.
+
+    Campaign counts are current state and deliberately not windowed: a market
+    with three active campaigns that sent nothing this week is the single most
+    useful row this view produces, and windowing the campaigns would erase it by
+    reporting the region as absent rather than as idle.
+
+    Everything else is windowed to the report period, because share of sending
+    is the question -- and a share computed over all time would be a history
+    lesson rather than a description of the week.
+
+    Fails soft: the portfolio is one section of a report whose other numbers are
+    already gathered.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT c.region                                      AS region,
+                           count(DISTINCT c.id)                          AS campaigns,
+                           count(DISTINCT c.id) FILTER (
+                               WHERE c.status = 'active'
+                           )                                             AS active_campaigns,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.created_at >= :since
+                           )                                             AS leads,
+                           count(DISTINCT m.lead_id) FILTER (
+                               WHERE m.sent_at >= :since
+                           )                                             AS contacted,
+                           count(m.id) FILTER (WHERE m.sent_at >= :since) AS sent,
+                           count(m.id) FILTER (
+                               WHERE m.bounced_at >= :since
+                           )                                             AS bounced,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.replied_at >= :since
+                           )                                             AS replied
+                      FROM campaigns c
+                      LEFT JOIN leads l
+                        ON l.campaign_id = c.id
+                       AND l.workspace_id = c.workspace_id
+                      LEFT JOIN messages m
+                        ON m.lead_id = l.id
+                       AND m.workspace_id = c.workspace_id
+                     WHERE c.workspace_id = :workspace
+                     GROUP BY c.region
+                    """
+                ),
+                {"workspace": workspace_id, "since": since},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "portfolio view unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        portfolio.RegionSlice(
+            region=Region(row.region),
+            campaigns=int(row.campaigns or 0),
+            active_campaigns=int(row.active_campaigns or 0),
+            leads=int(row.leads or 0),
+            contacted=int(row.contacted or 0),
+            sent=int(row.sent or 0),
+            bounced=int(row.bounced or 0),
             replied=int(row.replied or 0),
         )
         for row in rows

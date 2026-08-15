@@ -117,6 +117,48 @@ class CampaignStatus(enum.StrEnum):
     ARCHIVED = "archived"
 
 
+class Region(enum.StrEnum):
+    """The market a campaign is aimed at.
+
+    Coarser than a country and deliberately so: it is the level at which
+    outreach actually differs. Working hours, public holidays, the shape of a
+    business day and what counts as an acceptable approach all vary by market
+    far more than they vary between neighbouring countries inside one.
+
+    ``target_country_code`` is not a substitute. It holds one country, so a
+    campaign aimed at Europe cannot be expressed by it at all, and a great many
+    campaigns leave it empty.
+    """
+
+    USA = "usa"
+    CANADA = "canada"
+    UK = "uk"
+    EUROPE = "europe"
+    AUSTRALIA = "australia"
+    MIDDLE_EAST = "middle_east"
+    #: Declared, and outside the six. Distinct from UNSPECIFIED: somebody chose
+    #: this, so a campaign in it is configured rather than forgotten.
+    OTHER = "other"
+    #: Not declared. The default, and what every campaign that predates the
+    #: column carries unless a country code implied otherwise.
+    UNSPECIFIED = "unspecified"
+
+
+#: Regions with enough shared working conventions to schedule against. OTHER and
+#: UNSPECIFIED are absent by design -- there is no local business day for
+#: "somewhere", and pretending otherwise is how mail gets sent at 3am.
+SCHEDULABLE_REGIONS = frozenset(
+    {
+        Region.USA,
+        Region.CANADA,
+        Region.UK,
+        Region.EUROPE,
+        Region.AUSTRALIA,
+        Region.MIDDLE_EAST,
+    }
+)
+
+
 class LeadStatus(enum.StrEnum):
     DISCOVERED = "discovered"
     RESEARCHING = "researching"
