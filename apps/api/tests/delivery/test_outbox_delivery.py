@@ -803,3 +803,97 @@ async def test_a_message_inside_the_window_is_sent(db_session, sendable) -> None
     assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
         "sent"
     ]
+
+
+# --------------------------------------------------------------------------
+# The recipient's band, derived at send time
+# --------------------------------------------------------------------------
+async def _place_in(lead_id: uuid.UUID, *, admin_area: str, longitude: float) -> None:
+    """Move the lead's business to a US state and forget its timezone.
+
+    Nulling the timezone is the point: with one present, nothing below is
+    exercised, because an exact fact about the recipient always wins.
+    """
+    from titan.db.models import Lead as LeadRow
+    from titan.db.models.lead import OrganizationLocation
+
+    async with get_sessionmaker()() as s, s.begin():
+        org_id = (
+            await s.execute(select(LeadRow.organization_id).where(LeadRow.id == lead_id))
+        ).scalar_one()
+        await s.execute(
+            update(OrganizationLocation)
+            .where(OrganizationLocation.organization_id == org_id)
+            .values(
+                timezone=None,
+                country_code="US",
+                region=admin_area,
+                longitude=longitude,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_pacific_business_is_not_scheduled_on_eastern(
+    db_session, sendable
+) -> None:
+    """08:30 Eastern is 05:30 Pacific. One is inside the working window and the
+    other is three hours before anybody has arrived -- which is exactly what the
+    single market clock got wrong for half the country.
+    """
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign)
+            .where(Campaign.id == sendable.campaign_id)
+            .values(region=Region.USA)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == sendable.campaign_id)
+            .values(respect_quiet_hours=True)
+        )
+    await _place_in(sendable.lead_id, admin_area="California", longitude=-118.24)
+
+    # Monday 12:30 UTC = 08:30 America/New_York = 05:30 America/Los_Angeles.
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: monday)
+
+    assert [r.outcome for r in results] == ["deferred"]
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    assert "Los_Angeles" in (row.blocked_reason or "")
+    # It waits until 08:00 Pacific the same morning, not until tomorrow.
+    assert row.next_attempt_at == dt.datetime(2026, 8, 3, 15, 0, tzinfo=dt.UTC)
+
+
+@pytest.mark.asyncio
+async def test_an_eastern_business_at_the_same_moment_is_sent(
+    db_session, sendable
+) -> None:
+    """The control. Same instant, same campaign, different coast."""
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign)
+            .where(Campaign.id == sendable.campaign_id)
+            .values(region=Region.USA)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == sendable.campaign_id)
+            .values(respect_quiet_hours=True)
+        )
+    await _place_in(sendable.lead_id, admin_area="Georgia", longitude=-84.39)
+
+    monday = dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]

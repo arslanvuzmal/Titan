@@ -31,7 +31,8 @@ import datetime as dt
 import zoneinfo
 from dataclasses import dataclass, field
 
-from titan.db.enums import Region
+from titan.db.enums import Region, SubRegion
+from titan.policy.subregions import timezone_for
 
 #: A representative business timezone per market, used only when the recipient
 #: has none of their own.
@@ -158,16 +159,33 @@ def default_window_for(region: Region) -> SendWindow:
     return SendWindow(days=REGION_SEND_DAYS.get(region, MONDAY_TO_FRIDAY))
 
 
-def resolve_timezone(recipient_timezone: str | None, region: Region) -> str | None:
-    """The clock to schedule against.
+def resolve_timezone(
+    recipient_timezone: str | None,
+    region: Region,
+    *,
+    recipient_subregion: SubRegion = SubRegion.UNSPECIFIED,
+    campaign_subregion: SubRegion = SubRegion.UNSPECIFIED,
+) -> str | None:
+    """The clock to schedule against, most specific source first.
 
-    The recipient's own timezone wins whenever there is one -- it is a fact
-    about them, and the region is a fact about the campaign. The region is the
-    fallback, and where neither answers the caller must refuse rather than guess
-    at a local hour.
+    1. The recipient's own timezone. A fact about them, and exact.
+    2. The band their address falls in. Still a fact about them, derived from
+       their state or their coordinates, and right to the hour everywhere the
+       market's single clock is right only on one coast.
+    3. The band the campaign declares. A US Pacific campaign should schedule its
+       unresolved leads on Pacific rather than on the market default, which is
+       Eastern and three hours early for them.
+    4. The market. One clock for a continent, which is where this started.
+
+    Where none of the four answers the caller must refuse rather than guess at a
+    local hour.
     """
     if recipient_timezone and recipient_timezone.strip():
         return recipient_timezone.strip()
+    for band in (recipient_subregion, campaign_subregion):
+        zone = timezone_for(band)
+        if zone:
+            return zone
     return REGION_TIMEZONES.get(region)
 
 

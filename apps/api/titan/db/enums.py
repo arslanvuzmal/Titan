@@ -144,6 +144,44 @@ class Region(enum.StrEnum):
     UNSPECIFIED = "unspecified"
 
 
+class SubRegion(enum.StrEnum):
+    """A timezone band inside a market that spans several.
+
+    Only defined for the markets where the country tells you nothing about the
+    clock. The USA is the case that matters -- a business in California and one
+    in Georgia share a country, a market and a working week, and are three hours
+    apart -- and Canada and Australia have the same shape.
+
+    Europe is deliberately absent. Its zones follow national borders closely
+    enough that ``target_country_code`` already distinguishes them, and a second
+    vocabulary saying the same thing would be one more place to disagree.
+    """
+
+    #: Arizona is its own band because it does not observe daylight saving.
+    #: Folding it into Mountain is correct for four months of the year and an
+    #: hour wrong for the other eight.
+    US_EASTERN = "us_eastern"
+    US_CENTRAL = "us_central"
+    US_MOUNTAIN = "us_mountain"
+    US_ARIZONA = "us_arizona"
+    US_PACIFIC = "us_pacific"
+    US_ALASKA = "us_alaska"
+    US_HAWAII = "us_hawaii"
+
+    CA_ATLANTIC = "ca_atlantic"
+    CA_EASTERN = "ca_eastern"
+    CA_CENTRAL = "ca_central"
+    CA_MOUNTAIN = "ca_mountain"
+    CA_PACIFIC = "ca_pacific"
+
+    AU_EASTERN = "au_eastern"
+    AU_CENTRAL = "au_central"
+    AU_WESTERN = "au_western"
+
+    #: Not segmented, or not known. The market default applies.
+    UNSPECIFIED = "unspecified"
+
+
 #: Regions with enough shared working conventions to schedule against. OTHER and
 #: UNSPECIFIED are absent by design -- there is no local business day for
 #: "somewhere", and pretending otherwise is how mail gets sent at 3am.

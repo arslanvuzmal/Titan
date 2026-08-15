@@ -79,6 +79,7 @@ from titan.intelligence.sender_auth import is_stale
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.engine import Decision, SendContext, evaluate_send
 from titan.policy.schedule import SendWindow, local_time, resolve_timezone
+from titan.policy.subregions import subregion_for_location
 
 logger = logging.getLogger(__name__)
 
@@ -272,6 +273,12 @@ class OutboxWorker:
             contact_is_active=channel.is_active,
             recipient_timezone=location.timezone if location else None,
             recipient_domain_health=domain_health,
+            recipient_subregion=subregion_for_location(
+                location.country_code if location else None,
+                location.region if location else None,
+                location.longitude if location else None,
+            ),
+            campaign_subregion=campaign.sub_region,
             send_window=SendWindow(
                 start_hour=policy.send_window_start_hour,
                 end_hour=policy.send_window_end_hour,
@@ -1001,7 +1008,12 @@ class OutboxWorker:
         """
         if ctx.send_window is None or not ctx.send_window.is_usable:
             return None
-        timezone = resolve_timezone(ctx.recipient_timezone, ctx.campaign_region)
+        timezone = resolve_timezone(
+            ctx.recipient_timezone,
+            ctx.campaign_region,
+            recipient_subregion=ctx.recipient_subregion,
+            campaign_subregion=ctx.campaign_subregion,
+        )
         local = local_time(ctx.now, timezone)
         if local is None:
             return None

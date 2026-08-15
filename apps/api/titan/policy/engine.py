@@ -31,6 +31,7 @@ from titan.db.enums import (
     ContactSource,
     LeadStatus,
     Region,
+    SubRegion,
     VerificationStatus,
     verification_permits_sending,
 )
@@ -176,6 +177,11 @@ class SendContext:
     send_window: SendWindow | None = None
     #: The campaign's market. Supplies a timezone for a recipient who has none.
     campaign_region: Region = Region.UNSPECIFIED
+    #: The band this recipient's own address falls in, derived from their state
+    #: and coordinates. More specific than anything the campaign can declare.
+    recipient_subregion: SubRegion = SubRegion.UNSPECIFIED
+    #: The band the campaign works, for recipients whose address resolved to none.
+    campaign_subregion: SubRegion = SubRegion.UNSPECIFIED
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -466,7 +472,12 @@ def _outside_send_window(ctx: SendContext) -> str | None:
     if not ctx.send_window.is_usable:
         return f"campaign send window is not usable ({ctx.send_window.describe()})"
 
-    timezone = resolve_timezone(ctx.recipient_timezone, ctx.campaign_region)
+    timezone = resolve_timezone(
+        ctx.recipient_timezone,
+        ctx.campaign_region,
+        recipient_subregion=ctx.recipient_subregion,
+        campaign_subregion=ctx.campaign_subregion,
+    )
     local = local_time(ctx.now, timezone)
     if local is None:
         return (

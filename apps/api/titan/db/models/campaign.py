@@ -27,7 +27,7 @@ from titan.db.base import (
     pg_enum,
     uuid_pk,
 )
-from titan.db.enums import CampaignStatus, Industry, Region
+from titan.db.enums import CampaignStatus, Industry, Region, SubRegion
 
 
 class IndustryPlaybook(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
@@ -105,6 +105,16 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         server_default=Region.UNSPECIFIED.value,
         nullable=False,
         index=True,
+    )
+
+    #: The timezone band inside the market, where the market spans several.
+    #: Only meaningful for the USA, Canada and Australia -- Europe's zones
+    #: follow its national borders, which target_country_code already names.
+    sub_region: Mapped[SubRegion] = mapped_column(
+        pg_enum(SubRegion, "sub_region"),
+        default=SubRegion.UNSPECIFIED,
+        server_default=SubRegion.UNSPECIFIED.value,
+        nullable=False,
     )
 
     #: Targeting
