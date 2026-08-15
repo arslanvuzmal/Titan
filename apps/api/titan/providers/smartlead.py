@@ -319,6 +319,29 @@ class SmartleadClient:
         rows = payload if isinstance(payload, list) else (payload or {}).get("data", [])
         return [row for row in rows if isinstance(row, dict)]
 
+    async def set_daily_limit(self, email_account_id: int, limit: int) -> None:
+        """Set one mailbox's ``max_email_per_day``, and nothing else.
+
+        The payload carries a single field on purpose. This is the same endpoint
+        that holds the mailbox's SMTP and IMAP configuration, and a caller that
+        sent a fuller body reconstructed from a GET could put stale connection
+        settings back over working ones. Verified against the live API: posting
+        only this field leaves ``is_smtp_success`` and ``is_imap_success``
+        untouched.
+
+        Refuses a negative limit rather than passing it through. Zero is
+        meaningful -- it closes the mailbox -- but a negative number is a
+        calculation that went wrong upstream, and forwarding it would let a bug
+        here become a mailbox setting nobody chose.
+        """
+        if limit < 0:
+            raise ValueError(f"daily limit cannot be negative: {limit}")
+        await self._request(
+            "POST",
+            f"/email-accounts/{email_account_id}",
+            json={"max_email_per_day": limit},
+        )
+
     async def warmup_stats(self, email_account_id: int) -> dict[str, Any]:
         result = await self._request(
             "GET", f"/email-accounts/{email_account_id}/warmup-stats"

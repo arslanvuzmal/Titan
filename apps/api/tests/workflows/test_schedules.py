@@ -107,6 +107,7 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
     assert {j.workflow for j in jobs} == {
         "WeeklyReportWorkflow",
         "SenderVerificationWorkflow",
+        "MailboxRampWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 
@@ -207,10 +208,11 @@ async def test_missed_occurrences_are_dropped_not_caught_up() -> None:
 async def test_a_fresh_install_creates_every_schedule() -> None:
     client = FakeClient()
 
-    applied = await schedules.install(client, plan_schedules(WS, task_queue=QUEUE))
+    jobs = plan_schedules(WS, task_queue=QUEUE)
+    applied = await schedules.install(client, jobs)
 
-    assert [a.outcome for a in applied] == [Outcome.CREATED, Outcome.CREATED]
-    assert len(client.created) == 2
+    assert [a.outcome for a in applied] == [Outcome.CREATED] * len(jobs)
+    assert len(client.created) == len(jobs)
 
 
 @pytest.mark.asyncio

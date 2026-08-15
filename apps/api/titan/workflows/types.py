@@ -359,6 +359,29 @@ class VerifySendersInput:
 
 
 @dataclasses.dataclass(frozen=True)
+class RampMailboxesInput:
+    workspace_id: str
+    #: When false the ramp computes and reports but writes nothing to the
+    #: provider. The decision stays visible either way, so a dry run is a way to
+    #: read what would happen rather than a way to disable the feature quietly.
+    apply: bool = True
+
+
+@dataclasses.dataclass(frozen=True)
+class RampMailboxesResult:
+    considered: int = 0
+    #: Mailboxes whose daily limit actually moved.
+    changed: int = 0
+    raised: int = 0
+    lowered: int = 0
+    #: One line per mailbox, in the terms the decision was made on.
+    detail: tuple[str, ...] = ()
+    #: Set when the provider could not be reached at all. The ramp then leaves
+    #: every limit exactly as it found it.
+    unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class VerifySendersResult:
     checked: int = 0
     #: Distinct domains looked up. Lower than ``checked`` whenever several
