@@ -42,6 +42,7 @@ from titan.autonomy.health import CampaignHealth, CampaignWindow
 from titan.autonomy.health import classify as classify_campaign
 from titan.autonomy.manager import ManagedState, plan
 from titan.db.enums import (
+    POSITIVE_REPLY_CLASSES,
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
     LeadStatus,
@@ -56,6 +57,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
+from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.notify.operator import NotificationKind, record_notification
@@ -449,6 +451,43 @@ async def _campaign_outcomes(
             .where(Lead.campaign_id == campaign_id, Lead.replied_at >= since)
         )
     ).scalar_one()
+
+    # Which replies were any good, and which ended in the outcome the whole
+    # system exists to produce. Counted separately from ``replied`` rather than
+    # replacing it: a campaign that provokes many responses and converts none of
+    # them is a specific, diagnosable failure, and collapsing the two numbers
+    # into one hides exactly that case.
+    quality = (
+        await session.execute(
+            text(
+                """
+                SELECT count(DISTINCT l.id) FILTER (
+                           WHERE c.reply_class = ANY(CAST(:positive AS reply_class[]))
+                       ) AS positive,
+                       count(DISTINCT l.id) FILTER (
+                           WHERE l.status = 'meeting_booked'
+                       ) AS meetings
+                  FROM leads l
+                  LEFT JOIN inbound_messages i
+                         ON i.lead_id = l.id
+                        AND i.workspace_id = l.workspace_id
+                  LEFT JOIN reply_classifications c
+                         ON c.inbound_message_id = i.id
+                        AND c.workspace_id = l.workspace_id
+                 WHERE l.workspace_id = :workspace
+                   AND l.campaign_id = :campaign
+                   AND l.replied_at >= :since
+                """
+            ),
+            {
+                "workspace": session.info.get(WORKSPACE_KEY),
+                "campaign": campaign_id,
+                "since": since,
+                "positive": [c.value for c in POSITIVE_REPLY_CLASSES],
+            },
+        )
+    ).one()
+
     return {
         "sent": int(row.sent or 0),
         "delivered": int(row.delivered or 0),
@@ -456,6 +495,8 @@ async def _campaign_outcomes(
         "complained": int(row.complained or 0),
         "contacted": int(row.contacted or 0),
         "replied": int(replied or 0),
+        "positive_replies": int(quality.positive or 0),
+        "meetings_booked": int(quality.meetings or 0),
     }
 
 
@@ -494,6 +535,8 @@ async def _run_manager(
         ),
         contacted=outcomes["contacted"],
         replied=outcomes["replied"],
+        positive_replies=outcomes["positive_replies"],
+        meetings_booked=outcomes["meetings_booked"],
         configured_limit=bounds.configured_daily_limit,
         effective_limit=effective_limit,
         leads_available=leads_available,
@@ -539,6 +582,58 @@ async def _run_manager(
                 bounds.configured_min_lead_score, verdict.applied_value
             )
     return effective_limit, effective_score
+
+
+async def _deliverable_budget(
+    session: AsyncSession, workspace: Workspace, now: dt.datetime
+) -> int:
+    """How much the workspace may allocate today: the lower of what a human
+    approved and what the mailboxes can actually send.
+
+    The configured limit is a statement of intent. Three mailboxes at fifty a
+    day is a hundred and fifty, and it stays a hundred and fifty on the mailboxes'
+    first morning, when warm-up will let each of them send five. Dividing the
+    intent rather than the reality does not produce extra sends -- the per-mailbox
+    warm-up ceiling still refuses them at the gate -- it produces a hundred and
+    thirty-five deferrals a day and a set of campaign limits describing volume
+    that was never available. Every number downstream is then a plan against
+    capacity that does not exist.
+
+    Bounding it here fixes that at the only place it can be fixed: the allocator
+    is where a single figure becomes each campaign's share.
+
+    Fails soft *upward*, to the configured limit. That is the behaviour before
+    this existed, and it is safe for the same reason the whole function is: the
+    warm-up ceiling is enforced independently at send time, so a budget that is
+    too generous costs deferrals, never sends.
+    """
+    configured = workspace.daily_send_limit
+    try:
+        slots = await sender_pool.load_slots(session, workspace.id, None, now=now)
+    except Exception as exc:
+        logger.warning(
+            "could not read mailbox capacity; the configured limit stands",
+            extra={
+                "workspace_id": str(workspace.id),
+                "error_code": type(exc).__name__,
+            },
+        )
+        return configured
+
+    ceiling = sender_pool.daily_ceiling(slots)
+    if ceiling >= configured:
+        return configured
+
+    logger.info(
+        "daily sending is bounded by mailbox warm-up, not by configuration",
+        extra={
+            "workspace_id": str(workspace.id),
+            "configured_limit": configured,
+            "deliverable_today": ceiling,
+            "mailboxes": len(slots),
+        },
+    )
+    return ceiling
 
 
 async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> None:
@@ -590,6 +685,8 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                         ),
                         contacted=outcomes["contacted"],
                         replied=outcomes["replied"],
+                        positive_replies=outcomes["positive_replies"],
+                        meetings_booked=outcomes["meetings_booked"],
                         configured_limit=policy.daily_send_limit,
                         effective_limit=current,
                         leads_available=leads,
@@ -605,7 +702,8 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                 )
                 states[str(campaign.id)] = (campaign.id, policy, health)
 
-            allocation = allocate(demands, workspace.daily_send_limit)
+            budget = await _deliverable_budget(session, workspace, now)
+            allocation = allocate(demands, budget)
     except Exception as exc:
         logger.warning(
             "capacity could not be reallocated; existing limits stand",

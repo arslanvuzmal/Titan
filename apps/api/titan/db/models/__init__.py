@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from titan.db.base import Base
 from titan.db.models.autonomy import AutonomyDecision
-from titan.db.models.campaign import Campaign, CampaignPolicy, IndustryPlaybook
+from titan.db.models.campaign import (
+    Campaign,
+    CampaignPolicy,
+    CampaignSender,
+    IndustryPlaybook,
+)
 from titan.db.models.compliance import (
     AuditLog,
     QuotaCounter,
@@ -79,6 +84,7 @@ __all__ = [
     "BusinessOpportunity",
     "Campaign",
     "CampaignPolicy",
+    "CampaignSender",
     "Contact",
     "ContactChannel",
     "ContactVerification",

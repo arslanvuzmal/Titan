@@ -19,7 +19,13 @@ from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
-from titan.db.enums import DraftStatus, MessageState, Region
+from titan.autonomy import experiments
+from titan.db.enums import (
+    POSITIVE_REPLY_CLASSES,
+    DraftStatus,
+    MessageState,
+    Region,
+)
 from titan.db.models import (
     BusinessOpportunity,
     Lead,
@@ -33,6 +39,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.delivery import sender_pool
 from titan.intelligence import lead_sources, portfolio, timing
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
@@ -61,6 +68,10 @@ SOURCE_LOOKBACK = dt.timedelta(days=90)
 #: month of one campaign's sending to be judgeable at all, so anything
 #: shorter reports the whole week as unknown.
 TIMING_LOOKBACK = dt.timedelta(days=90)
+
+#: How far back variants are compared. Wider than the timing lookback: an
+#: arm needs a hundred sends before it is testable at all.
+VARIANT_LOOKBACK = dt.timedelta(days=180)
 
 #: Sources shown in the report. Ranked worst first, so the truncated tail is the
 #: part nobody needed to read.
@@ -232,9 +243,12 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         source_windows = await _lead_source_windows(session, workspace_id, now)
         region_slices = await _portfolio_slices(session, workspace_id, since)
         slot_outcomes = await _timing_slots(session, workspace_id, now)
+        mailbox_slots = await _mailbox_slots(session, workspace_id, now)
+        variant_arms = await _variant_arms(session, workspace_id, now)
 
     standing = portfolio.summarise(region_slices)
     timing_report = timing.learn(slot_outcomes)
+    variant_result = experiments.best_against_control(variant_arms)
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -268,6 +282,11 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             for window in standing.slices
         ),
         timing=timing.describe(timing_report),
+        mailboxes=tuple(
+            (slot.label, sender_pool.describe_slot(slot)) for slot in mailbox_slots
+        ),
+        sending_headroom=sender_pool.capacity(mailbox_slots),
+        variants=experiments.describe(variant_result),
         lead_sources=tuple(
             (
                 window.label or window.kind,
@@ -552,3 +571,109 @@ async def _timing_slots(
         )
         for row in rows
     ]
+
+
+async def _variant_arms(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[experiments.Arm]:
+    """Sends and replies per phrasing variant.
+
+    Counted per lead rather than per message, and only the *first* message to
+    each lead. A lead receives four messages from one variant, so counting
+    messages would multiply every arm by its follow-up count and inflate the
+    denominators without adding a single independent observation -- which is
+    exactly the input a significance test must not be given.
+
+    Not windowed to the report period. An arm needs a hundred sends and five
+    replies before the test means anything, which at Titan's volumes is months.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    WITH first_send AS (
+                        SELECT DISTINCT ON (m.lead_id)
+                               m.lead_id AS lead_id,
+                               d.variant AS variant
+                          FROM messages m
+                          JOIN message_drafts d ON d.id = m.draft_id
+                         WHERE m.workspace_id = :workspace
+                           AND m.sent_at IS NOT NULL
+                           AND d.variant IS NOT NULL
+                           AND m.created_at >= :since
+                         ORDER BY m.lead_id, m.sent_at
+                    ),
+                    -- Leads whose reply went somewhere. A lead counts once
+                    -- however many times they answered, matching the per-lead
+                    -- denominator above; counting classifications would let one
+                    -- talkative lead outvote an arm.
+                    positive AS (
+                        SELECT DISTINCT i.lead_id AS lead_id
+                          FROM reply_classifications rc
+                          JOIN inbound_messages i
+                            ON i.id = rc.inbound_message_id
+                           AND i.workspace_id = rc.workspace_id
+                         WHERE rc.workspace_id = :workspace
+                           AND i.lead_id IS NOT NULL
+                           AND rc.reply_class = ANY(
+                                   CAST(:positive_classes AS reply_class[])
+                               )
+                    )
+                    SELECT f.variant                                 AS variant,
+                           count(*)                                  AS sent,
+                           count(*) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                         AS replied,
+                           count(*) FILTER (
+                               WHERE l.id IN (SELECT lead_id FROM positive)
+                           )                                         AS positive
+                      FROM first_send f
+                      JOIN leads l ON l.id = f.lead_id
+                     WHERE l.workspace_id = :workspace
+                     GROUP BY f.variant
+                    """
+                ),
+                {
+                    "workspace": workspace_id,
+                    "since": now - VARIANT_LOOKBACK,
+                    "positive_classes": [c.value for c in POSITIVE_REPLY_CLASSES],
+                },
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "variant arms unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        experiments.Arm(
+            key=str(row.variant),
+            sent=int(row.sent or 0),
+            replied=int(row.replied or 0),
+            positive_replies=int(row.positive or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _mailbox_slots(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[sender_pool.MailboxSlot]:
+    """Every sending mailbox in the workspace and what it can still take today.
+
+    Fails soft, like the other report sections: a report missing its capacity
+    line is worth sending, and a report that never arrives is not. The guard
+    against that fail-soft hiding a broken query is
+    tests/delivery/test_sender_pool.py, which asserts rows come back.
+    """
+    try:
+        return await sender_pool.load_slots(session, workspace_id, None, now=now)
+    except Exception:
+        logger.warning(
+            "sending capacity unavailable; the rest of the report stands",
+            exc_info=True,
+        )
+        return []

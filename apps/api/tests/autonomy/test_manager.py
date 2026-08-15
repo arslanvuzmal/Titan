@@ -58,6 +58,7 @@ def window(**overrides) -> CampaignWindow:
         "window": ReputationWindow(sent=400, delivered=396, hard_bounced=2, complained=0),
         "contacted": 300,
         "replied": 6,
+        "positive_replies": 3,
         "configured_limit": 40,
         "effective_limit": 40,
         "leads_available": 50,
@@ -196,9 +197,9 @@ def test_a_performing_campaign_climbing_back_is_scaling_not_throttled() -> None:
     them left SCALING unreachable: a state in the enum that no input could
     produce.
     """
-    climbing = window(effective_limit=20, replied=30, contacted=300)
+    climbing = window(effective_limit=20, replied=30, positive_replies=30, contacted=300)
 
-    assert climbing.reply_rate >= SCALING_REPLY_RATE
+    assert climbing.positive_reply_rate >= SCALING_REPLY_RATE
     assert climbing.is_throttled is True
     assert classify(climbing) is CampaignHealth.SCALING
 
@@ -209,8 +210,10 @@ def test_every_health_state_is_reachable() -> None:
         classify(window(status=CampaignStatus.PAUSED)),
         classify(window(window=ReputationWindow(4, 2, 2, 0), contacted=4, replied=0)),
         classify(window(window=ReputationWindow(400, 300, 40, 0))),
-        classify(window(effective_limit=10, replied=0)),
-        classify(window(effective_limit=20, replied=30, contacted=300)),
+        classify(window(effective_limit=10, replied=0, positive_replies=0)),
+        classify(
+            window(effective_limit=20, replied=30, positive_replies=30, contacted=300)
+        ),
         classify(window()),
     }
     assert reachable == set(CampaignHealth)
@@ -302,3 +305,38 @@ def test_confidence_grows_with_the_sample_and_is_never_acted_on() -> None:
     assert small < large
     assert large == 1.0
     assert confidence_for(window(window=ReputationWindow(0, 0, 0, 0))) == 0.0
+
+
+# ==========================================================================
+# What earns a campaign more volume
+# ==========================================================================
+def test_a_campaign_drawing_rejections_does_not_earn_more_volume() -> None:
+    """The defect this guards. Scaling used to read ``replied``, so a campaign
+    whose recipients all wrote back to say no looked like the best performer in
+    the workspace and was handed a larger share of the daily budget."""
+    rejected = window(effective_limit=20, contacted=300, replied=60, positive_replies=1)
+
+    assert rejected.reply_rate >= SCALING_REPLY_RATE, "the setup is wrong"
+    assert rejected.positive_reply_rate < SCALING_REPLY_RATE
+    assert classify(rejected) is CampaignHealth.THROTTLED
+
+
+def test_the_two_reply_rates_are_equal_only_when_nobody_said_no() -> None:
+    """They diverge exactly on the campaigns that most need to stop growing."""
+    clean = window(contacted=300, replied=30, positive_replies=30)
+    mixed = window(contacted=300, replied=30, positive_replies=4)
+
+    assert clean.reply_rate == clean.positive_reply_rate
+    assert mixed.reply_rate > mixed.positive_reply_rate
+
+
+def test_an_operator_can_see_both_numbers() -> None:
+    """ "12 replies from 200 contacted" reads as healthy; the same campaign with
+    one positive is a different decision, and the first line cannot show it."""
+    mixed = window(contacted=300, replied=30, positive_replies=2, meetings_booked=1)
+
+    line = explain(mixed, classify(mixed))
+
+    assert "30 repl(ies)" in line
+    assert "2 positive" in line
+    assert "1 booked" in line

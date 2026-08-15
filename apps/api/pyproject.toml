@@ -28,6 +28,11 @@ dependencies = [
     "tldextract>=5.1",
     # SPF/DKIM/DMARC verification resolves real TXT records.
     "dnspython>=2.7",
+    # Public holidays per country, including movable feasts and the substitute
+    # days that follow when one lands on a weekend. A hand-maintained table
+    # would go stale every January without anything failing to say so, which is
+    # the wrong failure mode for a check that stops mail going out on Christmas.
+    "holidays>=0.60,<1",
     # --- observability ---
     "structlog>=24.4",
     "opentelemetry-api>=1.27",

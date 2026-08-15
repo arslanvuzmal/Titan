@@ -59,6 +59,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence.bounce_risk import BounceRisk, assess
 from titan.intelligence.composer import ComposerContext, compose
@@ -1226,6 +1227,9 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             ),
             validation_passed=report.passed,
             template_key=request.template_key,
+            # The composer picked this from the lead id and has always done so.
+            # Recording it is what turns a real assignment into a measurable one.
+            variant=composed.variant or None,
         )
         session.add(draft)
         await session.flush()
@@ -1284,16 +1288,28 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
                 queued=False,
                 refused_reasons=("draft references a missing channel or campaign",),
             )
+        # Which mailbox, out of the campaign's pool. A pool of one behaves
+        # exactly as the single sender_identity_id did; beyond one, the message
+        # goes to whichever mailbox has the most room left today, so a batch
+        # spreads across the pool instead of filling one mailbox and deferring
+        # the rest.
+        slots = await sender_pool.load_slots(
+            session, workspace_id, campaign.id, now=_now()
+        )
+        selection = sender_pool.choose(slots)
         sender = (
-            await session.get(SenderIdentity, campaign.sender_identity_id)
-            if campaign.sender_identity_id
+            await session.get(SenderIdentity, selection.chosen_id)
+            if selection.chosen_id
             else None
         )
         if sender is None:
             return QueueActivityResult(
                 outbox_id=None,
                 queued=False,
-                refused_reasons=("campaign has no sender identity configured",),
+                refused_reasons=(
+                    f"no mailbox in the campaign's pool can send: "
+                    f"{sender_pool.describe(selection)}",
+                ),
             )
 
         suppressed = await is_suppressed(

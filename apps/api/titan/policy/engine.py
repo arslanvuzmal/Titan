@@ -36,6 +36,7 @@ from titan.db.enums import (
     verification_permits_sending,
 )
 from titan.intelligence.domain_health import DomainHealth
+from titan.policy.calendars import holiday_on, resolve_country
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
 from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 
@@ -182,6 +183,11 @@ class SendContext:
     recipient_subregion: SubRegion = SubRegion.UNSPECIFIED
     #: The band the campaign works, for recipients whose address resolved to none.
     campaign_subregion: SubRegion = SubRegion.UNSPECIFIED
+    #: The recipient's own country, for their public-holiday calendar. Falls
+    #: back to the campaign's market where that names one country unambiguously.
+    recipient_country: str | None = None
+    #: Their state or province, used when the calendar recognises it.
+    recipient_admin_area: str | None = None
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -484,7 +490,21 @@ def _outside_send_window(ctx: SendContext) -> str | None:
             "no usable timezone for the recipient and none implied by the "
             f"campaign's market ({ctx.campaign_region.value})"
         )
-    if ctx.send_window.is_open_at(local):
+    # A public holiday closes the window for the day, wherever the recipient is.
+    # Named rather than folded into the window text: "waiting out Christmas Day"
+    # is a better answer than "outside the send window", and it is the answer
+    # somebody reading a deferred queue in late December actually needs.
+    country = resolve_country(ctx.recipient_country, ctx.campaign_region)
+    holiday = holiday_on(local.date(), country=country, subdiv=ctx.recipient_admin_area)
+    if holiday is not None:
+        return f"{local:%a %d %b} is {holiday} in {country}"
+
+    lookup = (
+        (lambda day: holiday_on(day, country=country, subdiv=ctx.recipient_admin_area))
+        if country
+        else None
+    )
+    if ctx.send_window.is_open_at(local, lookup):
         return None
     return (
         f"{local:%a %H:%M} in {timezone} is outside the campaign's send window "

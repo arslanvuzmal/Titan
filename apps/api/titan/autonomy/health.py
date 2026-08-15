@@ -63,6 +63,12 @@ class CampaignWindow:
     #: message -- a person answers once however many times they were asked.
     contacted: int = 0
     replied: int = 0
+    #: Replies that moved the conversation forward, and meetings a human has
+    #: confirmed. Scaling reads these rather than ``replied``: a campaign
+    #: earning more volume on the strength of "not interested" replies is being
+    #: rewarded for provoking rejections.
+    positive_replies: int = 0
+    meetings_booked: int = 0
 
     #: What a human configured, and what the campaign may actually send today.
     configured_limit: int = 0
@@ -72,7 +78,19 @@ class CampaignWindow:
 
     @property
     def reply_rate(self) -> float:
+        """Any answer at all, including rejections. Reported, never optimised."""
         return self.replied / self.contacted if self.contacted else 0.0
+
+    @property
+    def positive_reply_rate(self) -> float:
+        """The share of contacted leads who answered with interest.
+
+        This is what earns a campaign more volume. The distinction from
+        ``reply_rate`` is the whole point: the two are equal only when nobody
+        has said no, and they diverge exactly on the campaigns that most need
+        to stop growing.
+        """
+        return self.positive_replies / self.contacted if self.contacted else 0.0
 
     @property
     def is_throttled(self) -> bool:
@@ -119,7 +137,7 @@ def classify(window: CampaignWindow) -> CampaignHealth:
         # conditions overlap exactly.
         if (
             window.can_judge_replies
-            and window.reply_rate >= SCALING_REPLY_RATE
+            and window.positive_reply_rate >= SCALING_REPLY_RATE
             and window.has_headroom
         ):
             return CampaignHealth.SCALING
@@ -133,9 +151,13 @@ def explain(window: CampaignWindow, health: CampaignHealth) -> str:
     if health is CampaignHealth.PAUSED:
         return f"campaign status is {window.status.value}"
 
+    # Both reply numbers, always. "12 replies from 200 contacted" reads as a
+    # healthy campaign; "12 repl(ies), 1 positive" is the same campaign and a
+    # different decision, and an operator cannot see the second from the first.
     counts = (
         f"{window.window.sent} sent, {window.window.hard_bounced} bounced, "
         f"{window.window.complained} complained, {window.replied} repl(ies) "
+        f"({window.positive_replies} positive, {window.meetings_booked} booked) "
         f"from {window.contacted} contacted"
     )
     if health is CampaignHealth.LEARNING:

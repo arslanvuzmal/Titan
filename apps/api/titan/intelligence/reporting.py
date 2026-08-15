@@ -109,6 +109,15 @@ class WeeklyReport:
     #: almost every slot is below the sample floor and saying so at length
     #: would fill the report with the word unknown.
     timing: str = ""
+    #: Whether any phrasing variant has actually beaten another. Usually
+    #: "not yet" -- which is the honest answer, not a missing feature.
+    variants: str = ""
+    #: (label, detail) per sending mailbox, plus the pool's total headroom.
+    #: The answer to "why is this only sending forty a day" -- which is almost
+    #: always one mailbox still warming rather than anything wrong.
+    mailboxes: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    #: Messages the whole estate can still send today, summed across mailboxes.
+    sending_headroom: int = 0
     #: (label, grade, detail) per discovery batch, worst first. Graded rather
     #: than merely counted: lead_sources already records what a search cost and
     #: how many rows it returned, and neither says whether the leads were good.
@@ -266,6 +275,20 @@ def render(report: WeeklyReport) -> str:
     if report.timing:
         lines.append("TIMING")
         lines.append(f"  {report.timing}")
+        if report.variants:
+            lines.append(f"  variants: {report.variants}")
+        lines.append("")
+
+    # ---- what can go out --------------------------------------------------
+    if report.mailboxes:
+        lines.append("SENDING CAPACITY")
+        for label, detail in report.mailboxes:
+            lines.append(f"  {label}: {detail}")
+        lines.append(
+            f"  {report.sending_headroom} more can go out today "
+            f"across {len(report.mailboxes)} "
+            + ("mailbox" if len(report.mailboxes) == 1 else "mailboxes")
+        )
         lines.append("")
 
     # ---- where the leads came from --------------------------------------

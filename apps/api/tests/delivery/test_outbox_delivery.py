@@ -750,6 +750,21 @@ async def test_a_clean_domain_sends_normally(db_session, sendable) -> None:
 # --------------------------------------------------------------------------
 # Deferral lands at the window, not at UTC midnight
 # --------------------------------------------------------------------------
+async def _long_lived(workspace_id: uuid.UUID, *, suffix: str, until: dt.datetime):
+    """A sendable whose approval survives a clock set months from NOW.
+
+    The fixture's approval expires a week after NOW and approvals are
+    append-only, so it cannot be extended afterwards -- a test moving the clock
+    to December has to build one that lasts, or it measures a stale approval
+    rather than whatever it meant to.
+    """
+    async with get_sessionmaker()() as s:
+        fixture = await build_sendable(
+            s, workspace_id, suffix=suffix, approval_valid_until=until
+        )
+    return fixture
+
+
 async def _enable_window(campaign_id: uuid.UUID, *, days: list[int]) -> None:
     from titan.db.enums import Region
     from titan.db.models import CampaignPolicy
@@ -969,3 +984,55 @@ async def test_two_coasts_at_one_instant_record_different_hours(
     assert east_row.local_sent_hour == 12
     assert west_row.sent_timezone == "America/Los_Angeles"
     assert east_row.sent_timezone == "America/New_York"
+
+
+# --------------------------------------------------------------------------
+# Public holidays
+# --------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_message_waits_out_christmas(db_session, sendable) -> None:
+    """Christmas Day 2026 is a Friday -- a working day by every other rule.
+
+    The message should sleep until the first genuine working morning, which is
+    Tuesday: the holiday, then the weekend, then Boxing Day observed on Monday.
+    """
+    fixture = await _long_lived(
+        sendable.workspace_id,
+        suffix="xmas",
+        until=dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
+    )
+    await _enable_window(fixture.campaign_id, days=[0, 1, 2, 3, 4])
+
+    christmas = dt.datetime(2026, 12, 25, 10, 0, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: christmas)
+
+    # The session's own `sendable` row is also in the queue and its approval
+    # expired in August, so it blocks. Assert on the row this test built.
+    outcomes = {r.outbox_id: r.outcome for r in results}
+    assert outcomes[fixture.outbox_id] == "deferred"
+    assert provider.delivered_count == 0
+
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, fixture.outbox_id)
+    assert "Christmas Day" in (row.blocked_reason or "")
+    assert row.next_attempt_at == dt.datetime(2026, 12, 29, 8, 0, tzinfo=dt.UTC)
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_december_weekday_sends(db_session, sendable) -> None:
+    """The control. Without it the test above passes for a campaign that can
+    never send in December at all."""
+    fixture = await _long_lived(
+        sendable.workspace_id,
+        suffix="dec",
+        until=dt.datetime(2027, 1, 1, tzinfo=dt.UTC),
+    )
+    await _enable_window(fixture.campaign_id, days=[0, 1, 2, 3, 4])
+
+    ordinary = dt.datetime(2026, 12, 22, 10, 0, tzinfo=dt.UTC)  # Tuesday
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: ordinary)
+
+    outcomes = {r.outbox_id: r.outcome for r in results}
+    assert outcomes[fixture.outbox_id] == "sent"

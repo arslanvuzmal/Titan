@@ -70,6 +70,28 @@ class CampaignCreate(BaseModel):
     offer_summary: str | None = None
     min_lead_score: int = Field(default=70, ge=0, le=100)
 
+    #: The market this campaign is aimed at. Decides the working week, the
+    #: sending window, and -- for every lead whose own timezone Places never
+    #: resolved -- which clock the window is measured against. Left unspecified,
+    #: the campaign has no clock and defers those leads rather than guessing at
+    #: their local hour, so this is the single most consequential field here.
+    region: str | None = None
+    #: The timezone band inside that market, where the market spans several.
+    #: A US campaign selling to California should say so; without it the market
+    #: default is Eastern and three hours early.
+    sub_region: str | None = None
+
+
+class MeetingBookedRequest(BaseModel):
+    """An operator recording that a lead booked a meeting.
+
+    Deliberately thin. The only thing worth capturing beyond the fact itself is
+    a note, because the fact is what the optimiser reads and everything else
+    would be a second place for the truth to live.
+    """
+
+    note: str | None = Field(default=None, max_length=500)
+
 
 class CampaignOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -94,6 +116,12 @@ class CampaignPolicyOut(BaseModel):
     recipient_domain_daily_limit: int
     max_followups: int
     allowed_contact_sources: list[str]
+    #: The sending window, in the recipient's local time. Surfaced because it is
+    #: derived from the campaign's market at creation rather than typed in, and
+    #: a derived value nobody can see is one nobody can check.
+    send_window_start_hour: int
+    send_window_end_hour: int
+    send_days: list[int]
 
 
 class CampaignPolicyUpdate(BaseModel):

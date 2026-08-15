@@ -805,3 +805,94 @@ async def test_an_unverified_sending_domain_cannot_be_used(db_session, workspace
         errors = sender.authorization_errors()
 
     assert any("never been verified" in e for e in errors)
+
+
+@pytest.mark.asyncio
+async def test_the_queued_message_comes_from_the_campaigns_pool(
+    db_session, workspace
+) -> None:
+    """The wiring proof for the sender pool.
+
+    Selection and capacity are covered as units in
+    tests/delivery/test_sender_pool.py. What that cannot show is whether
+    queue_message actually asks. So the pool here holds exactly one mailbox and
+    it is deliberately *not* the one on ``campaigns.sender_identity_id`` -- if
+    the pool were being ignored the message would go out from the campaign's own
+    sender, and the assertion below would name it.
+    """
+    from titan.db.models import CampaignSender, Message, SenderIdentity
+
+    ids = await seed_lead(workspace, suffix="pool-wired")
+    legacy = uuid.UUID(ids["sender_id"])
+
+    async with get_sessionmaker()() as s, s.begin():
+        source = await s.get(SenderIdentity, legacy)
+        second = SenderIdentity(
+            workspace_id=workspace,
+            label="second",
+            from_email=f"second-{uuid.uuid4().hex[:8]}@{source.sending_domain}",
+            from_name=source.from_name,
+            reply_to_email=source.reply_to_email,
+            sending_domain=source.sending_domain,
+            domain_verified=True,
+            spf_ok=True,
+            dkim_ok=True,
+            dmarc_ok=True,
+            last_verified_at=source.last_verified_at,
+            daily_send_limit=source.daily_send_limit,
+            mailing_address=source.mailing_address,
+        )
+        s.add(second)
+        await s.flush()
+        pool_only = second.id
+        s.add(
+            CampaignSender(
+                workspace_id=workspace,
+                campaign_id=uuid.UUID(ids["campaign_id"]),
+                sender_identity_id=pool_only,
+            )
+        )
+
+    result = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="pool-wired-run"
+    )
+
+    assert result["queued"] is not None and result["queued"].queued, (
+        result["queued"].refused_reasons if result["queued"] else None
+    )
+    async with get_sessionmaker()() as s:
+        message = (
+            await s.execute(
+                select(Message).where(
+                    Message.campaign_id == uuid.UUID(ids["campaign_id"])
+                )
+            )
+        ).scalar_one()
+
+    assert message.sender_identity_id == pool_only
+    assert message.sender_identity_id != legacy, "the pool was ignored"
+
+
+@pytest.mark.asyncio
+async def test_a_campaign_whose_whole_pool_is_full_queues_nothing(
+    db_session, workspace
+) -> None:
+    """The refusal names the mailboxes rather than saying "no capacity", because
+    the fix differs per mailbox: one waits for tomorrow, another for a DNS
+    record."""
+    from titan.db.models import SenderIdentity
+
+    ids = await seed_lead(workspace, suffix="pool-full")
+
+    async with get_sessionmaker()() as s, s.begin():
+        sender = await s.get(SenderIdentity, uuid.UUID(ids["sender_id"]))
+        sender.daily_send_limit = 0
+
+    result = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="pool-full-run"
+    )
+
+    queued = result["queued"]
+    assert queued is not None and queued.queued is False
+    assert any("no mailbox" in r for r in queued.refused_reasons), queued.refused_reasons
+    assert any("no daily send limit" in r for r in queued.refused_reasons)

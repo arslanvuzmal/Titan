@@ -77,6 +77,7 @@ from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
 from titan.intelligence.sender_auth import is_stale
 from titan.notify.operator import NotificationKind, record_notification
+from titan.policy.calendars import holiday_on, resolve_country
 from titan.policy.engine import Decision, SendContext, evaluate_send
 from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 from titan.policy.subregions import subregion_for_location
@@ -313,6 +314,8 @@ class OutboxWorker:
                 location.longitude if location else None,
             ),
             campaign_subregion=campaign.sub_region,
+            recipient_country=location.country_code if location else None,
+            recipient_admin_area=location.region if location else None,
             send_window=SendWindow(
                 start_hour=policy.send_window_start_hour,
                 end_hour=policy.send_window_end_hour,
@@ -560,13 +563,13 @@ class OutboxWorker:
         first_send_at = stats.first_send_at
         attempted = int(throughput.attempted or 0)
         retries = int(throughput.retries or 0)
-        warmup_limit = deliverability.warmup_limit(first_send_at=first_send_at, now=now)
+        warmup_limit = deliverability.warmup_limit(
+            first_send_at=first_send_at, now=now, target=sender.daily_send_limit
+        )
         warmup_day = (
             None
             if warmup_limit is None
-            else (
-                0 if first_send_at is None else (now.date() - first_send_at.date()).days
-            )
+            else deliverability.warmup_day(first_send_at, now)
         )
 
         snapshot = sender_health.SenderSnapshot(
@@ -809,6 +812,7 @@ class OutboxWorker:
                 first_send_at=first_send_at,
                 sent_today=sent_today,
                 now=now,
+                warmup_target=sender.daily_send_limit if sender else 0,
             )
         )
 
@@ -1056,7 +1060,17 @@ class OutboxWorker:
         local = local_time(ctx.now, timezone)
         if local is None:
             return None
-        opens = ctx.send_window.next_open_from(local)
+        country = resolve_country(ctx.recipient_country, ctx.campaign_region)
+        lookup = (
+            (
+                lambda day: holiday_on(
+                    day, country=country, subdiv=ctx.recipient_admin_area
+                )
+            )
+            if country
+            else None
+        )
+        opens = ctx.send_window.next_open_from(local, lookup)
         if opens is None or opens <= local:
             return None
         return opens.astimezone(dt.UTC)

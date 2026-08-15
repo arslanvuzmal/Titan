@@ -702,3 +702,119 @@ def test_the_browser_worker_gets_no_application_credentials() -> None:
         "the browser worker is given the application env_file; it must hold no "
         "database, email, or model credential"
     )
+
+
+def test_every_cron_workflow_is_actually_scheduled() -> None:
+    """A workflow declaring a cron must appear in the installer's plan.
+
+    This is the exact failure the scheduler was written to fix, and it is one
+    that recurs silently. Four workflows were registered with the worker so they
+    *could* run, each carrying a cron expression and a workflow-id convention,
+    and nothing ever started one -- the loop was an arc for as long as it took
+    somebody to notice a report had never arrived.
+
+    Declaring DEFAULT_CRON is the statement "this runs on a timer". Nothing else
+    in the repository makes that true, so the two are checked against each other.
+    """
+    import uuid as _uuid
+
+    from titan.workflows import schedules
+
+    sources = {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in (TITAN / "workflows").glob("*.py")
+    }
+    declares_cron = {
+        module
+        for module, text in sources.items()
+        if re.search(r"^DEFAULT_CRON\s*[:=]", text, re.M)
+    }
+    assert declares_cron, "no cron workflows found; this invariant stopped looking"
+
+    scheduled = {
+        module
+        for job in schedules.plan_schedules(_uuid.uuid4(), task_queue="q")
+        for module, text in sources.items()
+        if f"class {job.workflow}" in text
+    }
+
+    missing = declares_cron - scheduled
+    assert not missing, (
+        f"these workflow modules declare a cron but nothing installs a schedule "
+        f"for them: {sorted(missing)}. A cron nobody installs is a workflow that "
+        f"never runs."
+    )
+
+
+# ==========================================================================
+# Outcome states: a state nothing can write is a state nothing can measure
+# ==========================================================================
+#: Lead states that describe the end of a lead's journey, and which some code
+#: path must therefore be able to reach.
+#:
+#: ``MEETING_BOOKED`` is the one that was missing, and it is the one that
+#: mattered most: the terminal success of the whole system, with no writer
+#: anywhere. Everything self-tuning therefore optimised on ``replied_at``
+#: instead, under which "not interested" is a win.
+_TERMINAL_LEAD_OUTCOMES = (
+    "MEETING_BOOKED",
+    "CONTACTED",
+    "REPLIED",
+    "SUPPRESSED",
+)
+
+
+@pytest.mark.parametrize("member", _TERMINAL_LEAD_OUTCOMES)
+def test_every_terminal_lead_outcome_has_a_writer(member: str) -> None:
+    """An outcome state nothing assigns cannot be reached, measured or improved.
+
+    Scans for an assignment of the member -- ``status=LeadStatus.X`` or
+    ``lead.status = LeadStatus.X`` -- rather than a mere mention, because being
+    named in a query's exclusion list is not the same as something being able
+    to put a lead into that state.
+    """
+    root = pathlib.Path(__file__).resolve().parents[2] / "titan"
+    pattern = re.compile(rf"(status\s*=\s*|status=)LeadStatus\.{member}\b")
+
+    writers = [
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*.py")
+        if "migrations" not in path.parts
+        and pattern.search(path.read_text(encoding="utf-8"))
+    ]
+
+    assert writers, (
+        f"LeadStatus.{member} is a terminal outcome that no code can assign. "
+        "Nothing can reach it, so nothing can count it, so nothing downstream "
+        "can optimise for it."
+    )
+
+
+def test_the_success_metric_is_reply_quality_not_reply_volume() -> None:
+    """The comparison and the scaling rule must read positive replies.
+
+    Reverting either to raw ``replied`` restores the defect this guards: the
+    winning variant becomes whichever phrasing provokes the most answers of any
+    kind, and the easiest way to provoke an answer is to annoy somebody.
+    """
+    from titan.autonomy.experiments import Arm, Verdict, compare
+    from titan.autonomy.health import CampaignHealth, CampaignWindow, classify
+    from titan.db.enums import CampaignStatus
+    from titan.delivery.deliverability import ReputationWindow
+
+    provocative = Arm("loud", sent=800, replied=200, positive_replies=10)
+    measured = Arm("measured", sent=800, replied=60, positive_replies=55)
+    assert compare(measured, provocative).verdict is Verdict.CONTROL_WINS
+
+    rejected = CampaignWindow(
+        campaign_id="c",
+        status=CampaignStatus.ACTIVE,
+        window=ReputationWindow(sent=400, delivered=396, hard_bounced=2, complained=0),
+        contacted=300,
+        replied=90,
+        positive_replies=1,
+        configured_limit=40,
+        effective_limit=20,
+        leads_available=50,
+    )
+    assert classify(rejected) is not CampaignHealth.SCALING

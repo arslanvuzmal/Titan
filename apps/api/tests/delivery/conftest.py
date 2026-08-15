@@ -89,6 +89,7 @@ async def build_sendable(
     suffix: str | None = None,
     daily_send_limit: int = 100,
     recipient_domain_daily_limit: int = 50,
+    approval_valid_until: dt.datetime | None = None,
 ) -> SendableFixture:
     tag = suffix or uuid.uuid4().hex[:8]
     address = to_email or f"hello-{tag}@fixture-business.test"
@@ -248,7 +249,10 @@ async def build_sendable(
             decision="approved",
             decided_by=user.id,
             decided_at=NOW,
-            expires_at=NOW + dt.timedelta(days=7),
+            # Approvals are append-only, so a test that moves the clock months
+            # forward cannot extend this afterwards -- it has to be built with
+            # the expiry it needs.
+            expires_at=approval_valid_until or (NOW + dt.timedelta(days=7)),
         )
     )
 

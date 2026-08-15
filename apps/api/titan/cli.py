@@ -7,6 +7,7 @@
     titan smartlead        # verify the Smartlead connection and carrier campaign,
                            # or list/manage campaigns and sending accounts
     titan set-passcode     # give an existing account a username and passcode
+    titan schedules        # install the recurring jobs that close the loop
 
 ``env-example`` exists so that the documented environment and the code that
 reads it cannot drift: the file is generated, never hand-maintained, which is
@@ -454,6 +455,109 @@ def cmd_set_passcode(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def _looks_like_uuid(value: str) -> bool:
+    import uuid as _uuid
+
+    try:
+        _uuid.UUID(value)
+    except ValueError:
+        return False
+    return True
+
+
+def cmd_schedules(args: argparse.Namespace) -> int:
+    """Install the recurring jobs, or show what installing would do.
+
+    Two separate acts, deliberately not one. Installing the schedules turns on
+    *measurement*: the weekly report and sender re-verification, both of which
+    only read Titan's database and the DNS records a human already published.
+    Starting the campaign loops turns on *work* -- discovery, drafting and
+    queueing -- and needs ``--start-campaigns`` said out loud.
+
+    Nothing here sends mail. A queued message still passes every delivery gate
+    in the outbox worker, and approval gating still applies. But the difference
+    between "the reports arrive" and "the machine is running" is worth a flag.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.enums import CampaignStatus
+    from titan.db.models import Campaign, Workspace
+    from titan.db.session import get_sessionmaker
+    from titan.workers.temporal_worker import RESEARCH_QUEUE, connect
+    from titan.workflows import schedules
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            # One workspace by slug or id, or every one. Defaulting to all is
+            # right for a single-tenant deployment and wrong the moment it is
+            # not, so an operator can name one.
+            query = select(Workspace.id, Workspace.slug)
+            if args.workspace:
+                query = query.where(
+                    Workspace.slug == args.workspace
+                    if not _looks_like_uuid(args.workspace)
+                    else Workspace.id == _uuid.UUID(args.workspace)
+                )
+            workspaces = list((await session.execute(query)).all())
+            campaigns_by_ws: dict[_uuid.UUID, list] = {}
+            rows = (
+                await session.execute(
+                    select(Campaign.workspace_id, Campaign.id, Campaign.status)
+                )
+            ).all()
+            for ws_id, campaign_id, status in rows:
+                campaigns_by_ws.setdefault(ws_id, []).append((campaign_id, status))
+
+        if not workspaces:
+            if args.workspace:
+                print(f"no workspace matching {args.workspace!r}")
+                return 1
+            print("no workspaces; nothing to schedule")
+            return 0
+
+        jobs: list = []
+        starts: list = []
+        for ws_id, slug in workspaces:
+            jobs.extend(schedules.plan_schedules(ws_id, task_queue=RESEARCH_QUEUE))
+            if args.start_campaigns:
+                starts.extend(
+                    schedules.plan_orchestrators(
+                        ws_id,
+                        campaigns_by_ws.get(ws_id, []),
+                        task_queue=RESEARCH_QUEUE,
+                    )
+                )
+            skipped = [
+                c
+                for c, st in campaigns_by_ws.get(ws_id, [])
+                if st is not CampaignStatus.ACTIVE
+            ]
+            if skipped and args.start_campaigns:
+                print(f"{slug}: {len(skipped)} campaign(s) not active; not started")
+
+        if args.dry_run:
+            print("PLAN (nothing was changed)")
+            for job in jobs:
+                print(f"  schedule  {job.schedule_id}  cron={job.cron!r}  {job.note}")
+            for start in starts:
+                print(f"  loop      {start.workflow_id}")
+            if not args.start_campaigns:
+                print("  (campaign loops omitted; pass --start-campaigns to include)")
+            return 0
+
+        client = await connect()
+        applied = await schedules.install(client, jobs)
+        if starts:
+            applied.extend(await schedules.start_orchestrators(client, starts))
+        print(schedules.summarise(applied))
+        return 1 if any(a.outcome is schedules.Outcome.FAILED for a in applied) else 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="titan", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -513,6 +617,30 @@ def main() -> int:
         ),
     )
     passcode_parser.set_defaults(func=cmd_set_passcode)
+
+    schedules_parser = sub.add_parser(
+        "schedules",
+        help="install the recurring jobs that close the loop",
+    )
+    schedules_parser.add_argument(
+        "--workspace",
+        default=None,
+        help="a workspace slug or id; defaults to every workspace",
+    )
+    schedules_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what would be installed and change nothing",
+    )
+    schedules_parser.add_argument(
+        "--start-campaigns",
+        action="store_true",
+        help=(
+            "also start the always-on loop for each ACTIVE campaign. Separate "
+            "from installing the schedules because this one starts work."
+        ),
+    )
+    schedules_parser.set_defaults(func=cmd_schedules)
 
     args = parser.parse_args()
     return int(args.func(args))
