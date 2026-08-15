@@ -82,6 +82,17 @@ class CampaignCreate(BaseModel):
     sub_region: str | None = None
 
 
+class MeetingBookedRequest(BaseModel):
+    """An operator recording that a lead booked a meeting.
+
+    Deliberately thin. The only thing worth capturing beyond the fact itself is
+    a note, because the fact is what the optimiser reads and everything else
+    would be a second place for the truth to live.
+    """
+
+    note: str | None = Field(default=None, max_length=500)
+
+
 class CampaignOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

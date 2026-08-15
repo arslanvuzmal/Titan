@@ -34,6 +34,7 @@ from titan.api.schemas import (
     FindingOut,
     LeadOut,
     LoginRequest,
+    MeetingBookedRequest,
     MessageOut,
     Page,
     ResearchStartRequest,
@@ -54,6 +55,7 @@ from titan.db.enums import (
     ContactSource,
     DraftStatus,
     Industry,
+    LeadStatus,
     Region,
     SubRegion,
     SuppressionReason,
@@ -630,6 +632,55 @@ async def get_lead(
         lead = await session.get(Lead, lead_id)
         if lead is None:
             raise await _not_found("lead")
+        return (await enrich_leads(session, [lead]))[0]
+
+
+@router.post("/leads/{lead_id}/meeting", response_model=LeadOut, tags=["leads"])
+async def mark_meeting_booked(
+    lead_id: uuid.UUID,
+    request: Request,
+    payload: MeetingBookedRequest,
+    principal: Principal = Depends(require("campaign:write")),
+) -> LeadOut:
+    """Record that a lead booked a meeting. The first writer this state has had.
+
+    ``LeadStatus.MEETING_BOOKED`` is the terminal success of the entire system
+    and nothing could set it, so the outcome the machine exists to produce was
+    the one thing it could not observe. Everything downstream therefore
+    optimised on replies instead, and a rejection is a reply.
+
+    **A human sets this, never a classifier.** A model reading "sounds good,
+    send me a time" and concluding a meeting exists would be manufacturing a
+    business outcome from a sentence -- and that outcome then feeds the campaign
+    manager, the A/B decision and the weekly report. Positive reply *class* is
+    the machine-inferred signal and is kept separate; this is the ground truth,
+    and ground truth needs a person.
+
+    Idempotent: marking an already-booked lead returns it unchanged rather than
+    writing a second audit entry for the same meeting.
+    """
+    async with workspace_unit_of_work(principal.workspace_id) as session:
+        lead = await session.get(Lead, lead_id)
+        if lead is None:
+            raise await _not_found("lead")
+        if lead.status is LeadStatus.MEETING_BOOKED:
+            return (await enrich_leads(session, [lead]))[0]
+
+        previous = lead.status
+        lead.status = LeadStatus.MEETING_BOOKED
+        await audit.record(
+            session,
+            workspace_id=principal.workspace_id,
+            action="lead.meeting_booked",
+            resource_type="lead",
+            resource_id=str(lead_id),
+            actor_user_id=principal.user_id,
+            request_id=_request_id(request),
+            detail={
+                "previous_status": previous.value,
+                "note": payload.note,
+            },
+        )
         return (await enrich_leads(session, [lead]))[0]
 
 

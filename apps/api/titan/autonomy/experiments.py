@@ -61,27 +61,45 @@ class Verdict(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Arm:
-    """One variant's record."""
+    """One variant's record.
+
+    Two reply counts, and the test reads the narrower one. A variant is judged
+    on the replies that went *somewhere* -- interest, a question, a referral --
+    not on every response it drew. Testing raw replies rewards whichever
+    phrasing provokes the most answers of any kind, and the easiest way to
+    provoke an answer is to annoy somebody; "not interested" is a reply.
+    """
 
     key: str
     sent: int = 0
+    #: Any answer at all. Reported, never tested.
     replied: int = 0
+    #: Answers that moved the conversation forward. This is the success metric.
+    positive_replies: int = 0
 
     @property
     def reply_rate(self) -> float:
         return self.replied / self.sent if self.sent else 0.0
 
     @property
+    def success_rate(self) -> float:
+        """The rate the comparison is actually made on."""
+        return self.positive_replies / self.sent if self.sent else 0.0
+
+    @property
     def is_testable(self) -> bool:
         """Whether the normal approximation holds for this arm.
 
-        Both outcomes, not just replies: an arm of five messages that all
-        replied fails this as surely as one that none did.
+        Both outcomes, not just successes: an arm of five messages that all
+        landed well fails this as surely as one where none did.
         """
         if self.sent < MIN_SENDS_PER_ARM:
             return False
-        failures = self.sent - self.replied
-        return self.replied >= MIN_OUTCOMES_PER_ARM and failures >= MIN_OUTCOMES_PER_ARM
+        failures = self.sent - self.positive_replies
+        return (
+            self.positive_replies >= MIN_OUTCOMES_PER_ARM
+            and failures >= MIN_OUTCOMES_PER_ARM
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,19 +163,19 @@ def compare(control: Arm, challenger: Arm, alpha: float = ALPHA) -> Comparison:
         )
 
     n1, n2 = control.sent, challenger.sent
-    pooled = (control.replied + challenger.replied) / (n1 + n2)
+    pooled = (control.positive_replies + challenger.positive_replies) / (n1 + n2)
     # No zero-variance guard is needed here and one would be dead code:
-    # is_testable already requires at least five replies and five non-replies
+    # is_testable already requires at least five successes and five failures
     # in each arm, so the pooled rate is strictly between 0 and 1 and the
     # standard error is strictly positive. A degenerate pair never reaches this
     # line -- it is refused as INSUFFICIENT above.
     se = math.sqrt(pooled * (1 - pooled) * (1 / n1 + 1 / n2))
-    z = (challenger.reply_rate - control.reply_rate) / se
+    z = (challenger.success_rate - control.success_rate) / se
     p_value = 2 * (1 - _phi(abs(z)))
 
     if p_value > alpha:
         verdict = Verdict.INCONCLUSIVE
-    elif challenger.reply_rate > control.reply_rate:
+    elif challenger.success_rate > control.success_rate:
         verdict = Verdict.CHALLENGER_WINS
     else:
         verdict = Verdict.CONTROL_WINS
@@ -172,9 +190,9 @@ def compare(control: Arm, challenger: Arm, alpha: float = ALPHA) -> Comparison:
 
 
 def _lift(control: Arm, challenger: Arm) -> float | None:
-    if not control.reply_rate:
+    if not control.success_rate:
         return None
-    return (challenger.reply_rate - control.reply_rate) / control.reply_rate
+    return (challenger.success_rate - control.success_rate) / control.success_rate
 
 
 def best_against_control(arms: list[Arm], alpha: float = ALPHA) -> Comparison | None:
@@ -200,7 +218,7 @@ def best_against_control(arms: list[Arm], alpha: float = ALPHA) -> Comparison | 
         return None
     decisive = [r for r in results if r.winner is not None]
     if decisive:
-        return max(decisive, key=lambda r: r.challenger.reply_rate)
+        return max(decisive, key=lambda r: r.challenger.success_rate)
     return max(results, key=lambda r: r.challenger.sent)
 
 
@@ -210,15 +228,18 @@ def describe(comparison: Comparison | None) -> str:
         return "no variant has enough sends to compare yet"
 
     control, challenger = comparison.control, comparison.challenger
+    # The positive rate, because that is what was compared. Reporting the raw
+    # reply rate beside a verdict reached on a different number would be an
+    # invitation to check the arithmetic and find it wrong.
     counts = (
-        f"{control.key} {control.reply_rate:.1%} of {control.sent} "
-        f"vs {challenger.key} {challenger.reply_rate:.1%} of {challenger.sent}"
+        f"{control.key} {control.success_rate:.1%} of {control.sent} "
+        f"vs {challenger.key} {challenger.success_rate:.1%} of {challenger.sent}"
     )
 
     if comparison.verdict is Verdict.INSUFFICIENT:
         return (
             f"{counts} -- below the {MIN_SENDS_PER_ARM} sends and "
-            f"{MIN_OUTCOMES_PER_ARM} replies per arm the test needs"
+            f"{MIN_OUTCOMES_PER_ARM} positive replies per arm the test needs"
         )
     if comparison.verdict is Verdict.INCONCLUSIVE:
         return f"{counts} -- inside the noise (p={comparison.p_value:.2f})"

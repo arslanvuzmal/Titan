@@ -42,6 +42,7 @@ from titan.autonomy.health import CampaignHealth, CampaignWindow
 from titan.autonomy.health import classify as classify_campaign
 from titan.autonomy.manager import ManagedState, plan
 from titan.db.enums import (
+    POSITIVE_REPLY_CLASSES,
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
     LeadStatus,
@@ -450,6 +451,43 @@ async def _campaign_outcomes(
             .where(Lead.campaign_id == campaign_id, Lead.replied_at >= since)
         )
     ).scalar_one()
+
+    # Which replies were any good, and which ended in the outcome the whole
+    # system exists to produce. Counted separately from ``replied`` rather than
+    # replacing it: a campaign that provokes many responses and converts none of
+    # them is a specific, diagnosable failure, and collapsing the two numbers
+    # into one hides exactly that case.
+    quality = (
+        await session.execute(
+            text(
+                """
+                SELECT count(DISTINCT l.id) FILTER (
+                           WHERE c.reply_class = ANY(CAST(:positive AS reply_class[]))
+                       ) AS positive,
+                       count(DISTINCT l.id) FILTER (
+                           WHERE l.status = 'meeting_booked'
+                       ) AS meetings
+                  FROM leads l
+                  LEFT JOIN inbound_messages i
+                         ON i.lead_id = l.id
+                        AND i.workspace_id = l.workspace_id
+                  LEFT JOIN reply_classifications c
+                         ON c.inbound_message_id = i.id
+                        AND c.workspace_id = l.workspace_id
+                 WHERE l.workspace_id = :workspace
+                   AND l.campaign_id = :campaign
+                   AND l.replied_at >= :since
+                """
+            ),
+            {
+                "workspace": session.info.get(WORKSPACE_KEY),
+                "campaign": campaign_id,
+                "since": since,
+                "positive": [c.value for c in POSITIVE_REPLY_CLASSES],
+            },
+        )
+    ).one()
+
     return {
         "sent": int(row.sent or 0),
         "delivered": int(row.delivered or 0),
@@ -457,6 +495,8 @@ async def _campaign_outcomes(
         "complained": int(row.complained or 0),
         "contacted": int(row.contacted or 0),
         "replied": int(replied or 0),
+        "positive_replies": int(quality.positive or 0),
+        "meetings_booked": int(quality.meetings or 0),
     }
 
 
@@ -495,6 +535,8 @@ async def _run_manager(
         ),
         contacted=outcomes["contacted"],
         replied=outcomes["replied"],
+        positive_replies=outcomes["positive_replies"],
+        meetings_booked=outcomes["meetings_booked"],
         configured_limit=bounds.configured_daily_limit,
         effective_limit=effective_limit,
         leads_available=leads_available,
@@ -643,6 +685,8 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                         ),
                         contacted=outcomes["contacted"],
                         replied=outcomes["replied"],
+                        positive_replies=outcomes["positive_replies"],
+                        meetings_booked=outcomes["meetings_booked"],
                         configured_limit=policy.daily_send_limit,
                         effective_limit=current,
                         leads_available=leads,

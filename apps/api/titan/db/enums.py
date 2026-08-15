@@ -509,6 +509,43 @@ SUPPRESSING_REPLY_CLASSES = {
     ReplyClass.NOT_INTERESTED: SuppressionReason.NOT_INTERESTED,
 }
 
+#: Replies that moved the conversation *forward*.
+#:
+#: Until this existed the system had a vocabulary for a reply that was human and
+#: one for a reply that ended the relationship, and none for a reply that was
+#: any good. Everything optimising itself therefore optimised on ``replied_at``,
+#: which counts "not interested" and "you have the wrong person" as wins -- so
+#: the message most likely to survive an A/B test was whichever one provoked the
+#: most responses of any kind, and provoking a response is the easy half of the
+#: problem.
+#:
+#: ``NOT_NOW`` and ``OBJECTION`` are deliberately outside. Both are engagement
+#: and neither is progress; counting a polite decline as a success is the exact
+#: error this set exists to stop. ``WRONG_PERSON`` is outside for the same
+#: reason -- it is useful information about the *lead*, not evidence the message
+#: worked.
+POSITIVE_REPLY_CLASSES = frozenset(
+    {
+        ReplyClass.INTERESTED,
+        ReplyClass.WANTS_MORE_INFO,
+        ReplyClass.WANTS_PRICING,
+        ReplyClass.WANTS_CALL,
+        ReplyClass.REFERRAL,
+    }
+)
+
+#: Replies that are evidence the approach did harm. Kept separate rather than
+#: inferred as "human and not positive", because the middle ground -- a soft no,
+#: an objection -- is neither, and collapsing it into either side would overstate
+#: what the reply actually said.
+NEGATIVE_REPLY_CLASSES = frozenset(
+    {
+        ReplyClass.NOT_INTERESTED,
+        ReplyClass.UNSUBSCRIBE,
+        ReplyClass.COMPLAINT,
+    }
+)
+
 
 class Industry(enum.StrEnum):
     LAW_FIRM = "law_firm"

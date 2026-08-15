@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
 from titan.autonomy import experiments
-from titan.db.enums import DraftStatus, MessageState, Region
+from titan.db.enums import (
+    POSITIVE_REPLY_CLASSES,
+    DraftStatus,
+    MessageState,
+    Region,
+)
 from titan.db.models import (
     BusinessOpportunity,
     Lead,
@@ -598,19 +603,42 @@ async def _variant_arms(
                            AND d.variant IS NOT NULL
                            AND m.created_at >= :since
                          ORDER BY m.lead_id, m.sent_at
+                    ),
+                    -- Leads whose reply went somewhere. A lead counts once
+                    -- however many times they answered, matching the per-lead
+                    -- denominator above; counting classifications would let one
+                    -- talkative lead outvote an arm.
+                    positive AS (
+                        SELECT DISTINCT i.lead_id AS lead_id
+                          FROM reply_classifications rc
+                          JOIN inbound_messages i
+                            ON i.id = rc.inbound_message_id
+                           AND i.workspace_id = rc.workspace_id
+                         WHERE rc.workspace_id = :workspace
+                           AND i.lead_id IS NOT NULL
+                           AND rc.reply_class = ANY(
+                                   CAST(:positive_classes AS reply_class[])
+                               )
                     )
                     SELECT f.variant                                 AS variant,
                            count(*)                                  AS sent,
                            count(*) FILTER (
                                WHERE l.replied_at IS NOT NULL
-                           )                                         AS replied
+                           )                                         AS replied,
+                           count(*) FILTER (
+                               WHERE l.id IN (SELECT lead_id FROM positive)
+                           )                                         AS positive
                       FROM first_send f
                       JOIN leads l ON l.id = f.lead_id
                      WHERE l.workspace_id = :workspace
                      GROUP BY f.variant
                     """
                 ),
-                {"workspace": workspace_id, "since": now - VARIANT_LOOKBACK},
+                {
+                    "workspace": workspace_id,
+                    "since": now - VARIANT_LOOKBACK,
+                    "positive_classes": [c.value for c in POSITIVE_REPLY_CLASSES],
+                },
             )
         ).all()
     except Exception as exc:
@@ -625,6 +653,7 @@ async def _variant_arms(
             key=str(row.variant),
             sent=int(row.sent or 0),
             replied=int(row.replied or 0),
+            positive_replies=int(row.positive or 0),
         )
         for row in rows
     ]
