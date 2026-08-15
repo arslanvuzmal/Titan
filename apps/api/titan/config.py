@@ -163,6 +163,21 @@ class Settings(BaseSettings):
     agent_reach_api_key: SecretStr | None = None
     agent_reach_base_url: AnyHttpUrl | None = None
 
+    # --------------------------------------------------- contact verification
+    #: Which mailbox verification service the bounce reduction engine may ask.
+    #:
+    #: "null" is the honest default: it answers UNKNOWN for every address, which
+    #: cannot mark one sendable and cannot condemn one either. Titan does not run
+    #: its own SMTP probe -- titan.intelligence.mx explains why -- so a
+    #: mailbox-level answer requires buying one, and that is a purchasing
+    #: decision rather than a default.
+    #:
+    #: "deterministic" is a seeded fake for tests and local development. The
+    #: validator below refuses it in a deployed environment, because an answer
+    #: derived from a hash of the address is indistinguishable from a real one
+    #: once it is stored on the contact.
+    mailbox_verifier: Literal["null", "deterministic"] = "null"
+
     # ------------------------------------------------------------------ smtp
     #: Used both for a real mailbox and for Mailpit, the local capture server
     #: that accepts everything and delivers nothing. See
@@ -459,6 +474,16 @@ class Settings(BaseSettings):
             missing.append("TITAN_LOCAL_JWT_SECRET")
         if self.demo_mode and self.is_production:
             missing.append("TITAN_DEMO_MODE must be false in production")
+        if self.mailbox_verifier == "deterministic":
+            # The fake derives its verdict from a hash of the address. Stored on
+            # a contact channel it is indistinguishable from a purchased answer,
+            # and it can reach PROVIDER_VERIFIED -- which sends. A fabricated
+            # verification is worse than none at all, so it is refused here
+            # rather than left to a deployment note nobody reads.
+            missing.append(
+                "TITAN_MAILBOX_VERIFIER='deterministic' is a test fake and must "
+                "not run in a deployed environment; use 'null'"
+            )
         if missing:
             raise ValueError(
                 f"Refusing to start in {self.environment.value} with incomplete "
