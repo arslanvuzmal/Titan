@@ -26,12 +26,12 @@ from typing import Any
 from titan.config import OperatingMode, Settings
 from titan.db.enums import (
     ELIGIBLE_CONTACT_SOURCES,
-    SENDABLE_VERIFICATION_STATUSES,
     TERMINAL_LEAD_STATUSES,
     CampaignStatus,
     ContactSource,
     LeadStatus,
     VerificationStatus,
+    verification_permits_sending,
 )
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
 
@@ -281,13 +281,17 @@ def evaluate_send(ctx: SendContext) -> Decision:
     if not ctx.contact_is_active:
         denials.append(Denial(DenyCode.CONTACT_INACTIVE, "contact channel is inactive"))
 
-    if ctx.require_verified_email and ctx.contact_verification not in (
-        SENDABLE_VERIFICATION_STATUSES
+    # Provenance is part of this test, not just the status. A CATCH_ALL domain
+    # tells us the server will accept anything, so what decides is who put the
+    # address in front of us -- see enums.verification_permits_sending.
+    if ctx.require_verified_email and not verification_permits_sending(
+        ctx.contact_verification, ctx.contact_source
     ):
         denials.append(
             Denial(
                 DenyCode.CONTACT_NOT_VERIFIED,
-                f"verification status is {ctx.contact_verification.value}; campaign "
+                f"verification status is {ctx.contact_verification.value} for an "
+                f"address sourced from {ctx.contact_source.value}; campaign "
                 "requires a verified or first-party-published address",
             )
         )

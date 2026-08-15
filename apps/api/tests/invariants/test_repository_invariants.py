@@ -411,6 +411,41 @@ def test_loopback_escape_hatch_is_off_by_default() -> None:
         ), f"{candidate.relative_to(REPO)} enables the loopback escape hatch"
 
 
+#: The only module allowed to read the raw sendable-status set. Everywhere else
+#: must go through ``verification_permits_sending``.
+_SENDABILITY_RULE_OWNER = "titan/db/enums.py"
+
+
+def test_the_sendability_rule_has_exactly_one_implementation() -> None:
+    """Verification status alone no longer decides whether an address may be mailed.
+
+    CATCH_ALL is sendable behind first-party provenance and refused behind a
+    directory listing, so the test is ``verification_permits_sending(status,
+    source)`` rather than membership of ``SENDABLE_VERIFICATION_STATUSES``. Two
+    call sites -- the policy engine and the contact eligibility check -- used the
+    frozenset directly, and a third reading it again would reintroduce the drift
+    this consolidation removed: the UI would explain a block the send gate did
+    not apply, or worse, the reverse.
+
+    Reading the set for documentation or a test fixture is fine. Branching on
+    membership is what this refuses.
+    """
+    membership = re.compile(r"\bin\s+SENDABLE_VERIFICATION_STATUSES\b")
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if rel == _SENDABILITY_RULE_OWNER:
+            continue
+        if membership.search(path.read_text(encoding="utf-8")):
+            offenders.append(rel)
+    assert not offenders, (
+        "these modules test membership of SENDABLE_VERIFICATION_STATUSES "
+        f"directly: {offenders}. Call "
+        "titan.db.enums.verification_permits_sending(status, source) instead, so "
+        "the catch-all provenance rule cannot be skipped."
+    )
+
+
 @pytest.mark.parametrize(
     "module,symbol",
     [
@@ -418,6 +453,8 @@ def test_loopback_escape_hatch_is_off_by_default() -> None:
         ("titan.delivery.quotas", "reserve_all"),
         ("titan.delivery.suppression", "is_suppressed"),
         ("titan.intelligence.message_validator", "validate_message"),
+        ("titan.intelligence.bounce_risk", "assess"),
+        ("titan.db.enums", "verification_permits_sending"),
         ("titan.security.url_guard", "validate_url"),
     ],
 )

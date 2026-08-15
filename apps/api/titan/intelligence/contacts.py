@@ -23,9 +23,9 @@ from dataclasses import dataclass
 from titan.contracts.evidence import PageEvidence
 from titan.db.enums import (
     ELIGIBLE_CONTACT_SOURCES,
-    SENDABLE_VERIFICATION_STATUSES,
     ContactSource,
     VerificationStatus,
+    verification_permits_sending,
 )
 from titan.intelligence.mx import MxCheck
 
@@ -357,10 +357,15 @@ def check_contact_eligibility(
         reasons.append(f"source {source.value} is not permitted by this campaign")
     if not is_active:
         reasons.append("contact channel is inactive")
-    if require_verified and verification not in SENDABLE_VERIFICATION_STATUSES:
+    if require_verified and not verification_permits_sending(verification, source):
         reasons.append(
             f"verification status {verification.value} does not meet the "
             "campaign's requirement"
+            + (
+                f" for an address sourced from {source.value}"
+                if verification is VerificationStatus.CATCH_ALL
+                else ""
+            )
         )
     # One direction only. A failed lookup is deliberately not a disqualifier:
     # a resolver having a bad minute must not silently discard good leads.

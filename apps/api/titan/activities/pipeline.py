@@ -60,8 +60,10 @@ from titan.db.models import (
 )
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery.suppression import is_suppressed
+from titan.intelligence.bounce_risk import BounceRisk, assess
 from titan.intelligence.composer import ComposerContext, compose
 from titan.intelligence.contacts import (
+    DiscoveredContact,
     check_contact_eligibility,
     extract_contacts_from_pages,
 )
@@ -72,6 +74,7 @@ from titan.intelligence.opportunities import DerivedOpportunity, derive_opportun
 from titan.intelligence.playbooks import get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
+from titan.intelligence.verifier import VerificationResult, build_verifier
 from titan.models.recording import record_calls
 from titan.providers.browser_client import BrowserWorkerClient
 from titan.workflows.types import (
@@ -721,14 +724,18 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
             continue
 
         mx = mx_checks.get(candidate.domain)
+        # The bounce reduction engine, outside the unit of work below because
+        # verification is a network call and mission section 25 forbids I/O
+        # inside one. It replaces what used to be an unconditional
+        # PUBLISHED_FIRST_PARTY: provenance is still the floor, but a
+        # disposable domain, a misspelling of a webmail provider or a
+        # verification service can now say otherwise before the address is ever
+        # stored as sendable.
+        risk = await _assess_bounce_risk(candidate, mx)
+
         verdict = check_contact_eligibility(
             source=candidate.source,
-            # First-party published is the provenance. MX is passed as a
-            # disqualifier only: a domain with no route for inbound mail hard-
-            # bounces every address at it, but a domain that *does* publish MX
-            # has proved nothing about this mailbox and never upgrades the
-            # status. See contacts.mx_presence_is_not_verification.
-            verification=VerificationStatus.PUBLISHED_FIRST_PARTY,
+            verification=risk.status,
             is_active=True,
             allowed_sources=allowed,
             require_verified=require_verified,
@@ -736,7 +743,10 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
             mx=mx,
         )
         if not verdict.eligible:
-            rejected.append(f"{candidate.normalized}: {'; '.join(verdict.reasons)}")
+            reasons = list(verdict.reasons) + [
+                r for r in risk.reasons if r not in verdict.reasons
+            ]
+            rejected.append(f"{candidate.normalized}: {'; '.join(reasons)}")
             continue
 
         async with workspace_unit_of_work(workspace_id) as session:
@@ -771,7 +781,7 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                     source=candidate.source.value,
                     source_url=candidate.source_url,
                     discovered_at=_now(),
-                    verification_status=VerificationStatus.PUBLISHED_FIRST_PARTY.value,
+                    verification_status=risk.status.value,
                     confidence=candidate.confidence,
                     is_active=True,
                 )
@@ -801,15 +811,18 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
             # genuinely new check should add a row -- but an activity retry is
             # not a new check, and letting one append would turn a retry storm
             # into a verification history that never happened.
-            if newly_discovered and mx is not None:
+            if newly_discovered:
+                detail = risk.as_verification_detail()
+                if mx is not None:
+                    detail["mx"] = mx.as_verification_detail()
                 session.add(
                     ContactVerification(
                         workspace_id=workspace_id,
                         channel_id=channel_id,
-                        provider="dns_mx",
-                        result=_mx_verification_status(mx),
-                        mx_present=mx.can_receive_mail,
-                        detail=mx.as_verification_detail(),
+                        provider="bounce_risk",
+                        result=risk.status,
+                        mx_present=mx.can_receive_mail if mx is not None else None,
+                        detail=detail,
                         verified_at=_now(),
                     )
                 )
@@ -852,17 +865,46 @@ async def _resolve_mx(domains: list[str]) -> dict[str, MxCheck]:
     return dict(result.checks)
 
 
-def _mx_verification_status(mx: MxCheck) -> VerificationStatus:
-    """What an MX check is allowed to conclude about an address.
+async def _assess_bounce_risk(
+    candidate: DiscoveredContact, mx: MxCheck | None
+) -> BounceRisk:
+    """Run the bounce reduction engine over one discovered address.
 
-    Never PUBLISHED_FIRST_PARTY or PROVIDER_VERIFIED -- neither is in
-    SENDABLE_VERIFICATION_STATUSES by accident, and DNS cannot establish that a
-    mailbox exists. A positive result is recorded as UNKNOWN precisely so it
-    cannot be mistaken for verification later.
+    Two passes, because the layers differ enormously in cost. The first uses
+    only what is already in hand -- syntax, the domain lists, the MX check
+    resolved in bulk above -- and an address refused there is never sent to a
+    verification service, which is the expensive call and the one that may be
+    metered per address.
+
+    The second pass re-runs the whole assessment with the verification result
+    rather than patching the first one. Resolution then happens in exactly one
+    place, so there is no path by which a verified answer and a local answer
+    get combined differently from how ``assess`` would combine them.
     """
-    if mx.is_conclusively_undeliverable:
-        return VerificationStatus.INVALID
-    return VerificationStatus.UNKNOWN
+    risk = assess(email=candidate.normalized, source=candidate.source, mx=mx)
+    if risk.refusals:
+        return risk
+
+    verifier = build_verifier(get_settings().mailbox_verifier)
+    try:
+        result: VerificationResult = await verifier.verify(candidate.normalized)
+    except Exception as exc:
+        # A verification outage must not discard a lead whose address is
+        # probably fine. The local layers already ran; their answer stands.
+        logger.warning(
+            "mailbox verification failed; proceeding on local signals",
+            extra={"error_code": type(exc).__name__, "verifier": verifier.name},
+        )
+        return risk
+
+    if not result.is_conclusive:
+        return risk
+    return assess(
+        email=candidate.normalized,
+        source=candidate.source,
+        mx=mx,
+        verification=result,
+    )
 
 
 async def _rephrase(
