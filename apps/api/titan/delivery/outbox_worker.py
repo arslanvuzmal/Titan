@@ -563,13 +563,13 @@ class OutboxWorker:
         first_send_at = stats.first_send_at
         attempted = int(throughput.attempted or 0)
         retries = int(throughput.retries or 0)
-        warmup_limit = deliverability.warmup_limit(first_send_at=first_send_at, now=now)
+        warmup_limit = deliverability.warmup_limit(
+            first_send_at=first_send_at, now=now, target=sender.daily_send_limit
+        )
         warmup_day = (
             None
             if warmup_limit is None
-            else (
-                0 if first_send_at is None else (now.date() - first_send_at.date()).days
-            )
+            else deliverability.warmup_day(first_send_at, now)
         )
 
         snapshot = sender_health.SenderSnapshot(
@@ -812,6 +812,7 @@ class OutboxWorker:
                 first_send_at=first_send_at,
                 sent_today=sent_today,
                 now=now,
+                warmup_target=sender.daily_send_limit if sender else 0,
             )
         )
 

@@ -362,28 +362,32 @@ def test_healthy_reputation_produces_nothing() -> None:
 # ==========================================================================
 # Warm-up
 # ==========================================================================
-def test_a_brand_new_domain_is_limited_to_the_first_day() -> None:
-    assert d.warmup_limit(first_send_at=None, now=NOW) == d.WARMUP_SCHEDULE[0]
+def test_a_brand_new_mailbox_is_limited_to_the_first_day() -> None:
+    """A tenth of what it is heading for, not a figure fixed in this module.
+    See tests/delivery/test_sender_pool.py for the shape of the whole ramp."""
+    assert d.warmup_limit(first_send_at=None, now=NOW, target=100) == 10
 
 
 def test_warmup_limit_rises_each_day() -> None:
     start = NOW - dt.timedelta(days=5)
-    assert d.warmup_limit(first_send_at=start, now=NOW) == d.WARMUP_SCHEDULE[5]
-    assert d.WARMUP_SCHEDULE[5] > d.WARMUP_SCHEDULE[0]
+    day_five = d.warmup_limit(first_send_at=start, now=NOW, target=100)
+    day_one = d.warmup_limit(first_send_at=None, now=NOW, target=100)
+    assert day_five is not None and day_one is not None
+    assert day_five > day_one
 
 
 def test_warmup_ends_after_the_schedule() -> None:
     start = NOW - dt.timedelta(days=d.WARMUP_DAYS + 1)
-    assert d.warmup_limit(first_send_at=start, now=NOW) is None
+    assert d.warmup_limit(first_send_at=start, now=NOW, target=100) is None
 
 
 def test_exceeding_the_daily_warmup_limit_blocks() -> None:
-    signals = d.check_warmup(first_send_at=None, sent_today=20, now=NOW)
+    signals = d.check_warmup(first_send_at=None, sent_today=20, now=NOW, target=100)
     assert signals and signals[0].code == "warmup_limit_reached"
 
 
 def test_within_the_warmup_limit_is_allowed() -> None:
-    assert d.check_warmup(first_send_at=None, sent_today=5, now=NOW) == []
+    assert d.check_warmup(first_send_at=None, sent_today=5, now=NOW, target=100) == []
 
 
 # ==========================================================================
@@ -406,6 +410,7 @@ def healthy_context(**overrides) -> d.DeliverabilityContext:
         "first_send_at": NOW - dt.timedelta(days=60),
         "sent_today": 10,
         "now": NOW,
+        "warmup_target": 100,
         "auth_errors": (),
     }
     kwargs.update(overrides)

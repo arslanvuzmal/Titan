@@ -136,6 +136,40 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     )
 
 
+class CampaignSender(Base, WorkspaceScoped, TimestampMixin):
+    """One mailbox a campaign is allowed to send from.
+
+    Campaigns carry a single ``sender_identity_id`` as well, and it stays: it is
+    the fallback for a campaign with no pool rows, so nothing that worked before
+    this table existed stops working. Where pool rows exist they win.
+
+    A pool rather than a bigger number on one mailbox, because the constraint is
+    per-mailbox and not per-campaign. Providers rate-limit a mailbox, receivers
+    build reputation against a mailbox, and a mailbox that loses its DKIM record
+    takes only its own share of the volume down with it. Three mailboxes at 50 a
+    day is a different system from one at 150, not a scaled one.
+    """
+
+    __tablename__ = "campaign_senders"
+    __extra_table_args__ = (
+        UniqueConstraint("campaign_id", "sender_identity_id", name="uq_campaign_sender"),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    campaign_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sender_identity_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("sender_identities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+
 class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     """The persisted, authoritative policy for a campaign.
 

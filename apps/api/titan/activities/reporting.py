@@ -34,6 +34,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.delivery import sender_pool
 from titan.intelligence import lead_sources, portfolio, timing
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
@@ -237,6 +238,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         source_windows = await _lead_source_windows(session, workspace_id, now)
         region_slices = await _portfolio_slices(session, workspace_id, since)
         slot_outcomes = await _timing_slots(session, workspace_id, now)
+        mailbox_slots = await _mailbox_slots(session, workspace_id, now)
         variant_arms = await _variant_arms(session, workspace_id, now)
 
     standing = portfolio.summarise(region_slices)
@@ -275,6 +277,10 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             for window in standing.slices
         ),
         timing=timing.describe(timing_report),
+        mailboxes=tuple(
+            (slot.label, sender_pool.describe_slot(slot)) for slot in mailbox_slots
+        ),
+        sending_headroom=sender_pool.capacity(mailbox_slots),
         variants=experiments.describe(variant_result),
         lead_sources=tuple(
             (
@@ -622,3 +628,23 @@ async def _variant_arms(
         )
         for row in rows
     ]
+
+
+async def _mailbox_slots(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[sender_pool.MailboxSlot]:
+    """Every sending mailbox in the workspace and what it can still take today.
+
+    Fails soft, like the other report sections: a report missing its capacity
+    line is worth sending, and a report that never arrives is not. The guard
+    against that fail-soft hiding a broken query is
+    tests/delivery/test_sender_pool.py, which asserts rows come back.
+    """
+    try:
+        return await sender_pool.load_slots(session, workspace_id, None, now=now)
+    except Exception:
+        logger.warning(
+            "sending capacity unavailable; the rest of the report stands",
+            exc_info=True,
+        )
+        return []

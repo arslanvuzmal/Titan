@@ -16,8 +16,8 @@ This module covers the four things that actually decide it:
 3. **Reputation thresholds.** Gmail publishes a 0.3% complaint ceiling. Titan
    stops well before that, because by the time you reach it you are already
    being filtered.
-4. **Warm-up.** A brand-new domain sending at full volume looks exactly like a
-   compromised one. Volume ramps on a schedule.
+4. **Warm-up.** A brand-new mailbox sending at full volume looks exactly like
+   a compromised one. Volume ramps towards the mailbox's own configured limit.
 
 Everything here is enforced in the outbox worker, not offered as advice.
 """
@@ -25,6 +25,7 @@ Everything here is enforced in the outbox worker, not offered as advice.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -48,31 +49,51 @@ BOUNCE_RATE_WARN = 0.01  # 1%
 #: means nothing; pausing on it would make the system unusable.
 MIN_SAMPLE_FOR_RATES = 50
 
-#: Domain warm-up. Day index -> maximum sends that day. A new domain that jumps
-#: straight to hundreds of messages looks like a compromised account.
-WARMUP_SCHEDULE: tuple[int, ...] = (
-    20,
-    30,
-    40,
-    60,
-    80,
-    100,
-    120,  # week 1
-    150,
-    180,
-    220,
-    260,
-    300,
-    350,
-    400,  # week 2
-    500,
-    600,
-    700,
-    800,
-    900,
-    1000,  # week 3
+#: Mailbox warm-up. Day index -> the *fraction* of that mailbox's configured
+#: daily limit it may send that day.
+#:
+#: Fractions rather than absolute counts, and the distinction is not cosmetic.
+#: The schedule this replaced ran 20, 30, 40, 60, 80 ... up to 1000, which was
+#: written for a sending domain expected to reach four figures a day. Applied to
+#: a mailbox configured for 50 -- which is what a real cold-outreach mailbox is
+#: configured for -- every rung above 50 was clamped away by the configured
+#: limit, so the mailbox reached full volume on day four and warm-up stopped
+#: constraining anything. A ramp that finishes before it has ramped is worse
+#: than none, because it looks like protection.
+#:
+#: Geometric, not linear: deliverability reputation responds to *relative*
+#: growth, so a mailbox climbing 13% a day looks the same to a receiver whether
+#: it is heading for 50 a day or 500. Twenty days from a tenth of target to
+#: target is the conservative end of common practice, and the cost of being slow
+#: here is a delay, while the cost of being fast is the domain.
+WARMUP_RAMP: tuple[float, ...] = (
+    0.100,
+    0.113,
+    0.127,
+    0.144,
+    0.162,
+    0.183,
+    0.207,  # week 1
+    0.234,
+    0.264,
+    0.298,
+    0.336,
+    0.379,
+    0.428,
+    0.483,  # week 2
+    0.546,
+    0.616,
+    0.695,
+    0.785,
+    0.886,
+    1.000,  # week 3
 )
-WARMUP_DAYS = len(WARMUP_SCHEDULE)
+WARMUP_DAYS = len(WARMUP_RAMP)
+
+#: A warming mailbox sends at least one message a day or it never establishes
+#: any history at all. Only relevant for small targets: a tenth of 50 is five,
+#: but a tenth of 6 rounds to nothing.
+MIN_WARMUP_VOLUME = 1
 
 
 class Severity(StrEnum):
@@ -450,36 +471,75 @@ def check_reputation(window: ReputationWindow) -> list[Signal]:
 # ==========================================================================
 # Warm-up
 # ==========================================================================
-def warmup_limit(*, first_send_at: dt.datetime | None, now: dt.datetime) -> int | None:
-    """Maximum sends allowed today for a domain still warming up.
+def warmup_day(first_send_at: dt.datetime | None, now: dt.datetime) -> int:
+    """Which day of warm-up this mailbox is on, zero-indexed.
 
-    Returns None once warm-up is complete, meaning only the configured quotas
-    apply.
+    A mailbox that has never sent is on day zero, and so is one whose first send
+    is stamped in the future -- a clock skew or a backdated import should not
+    hand anything a finished ramp.
     """
     if first_send_at is None:
-        return WARMUP_SCHEDULE[0]
-    day = (now.date() - first_send_at.date()).days
-    if day < 0:
-        return WARMUP_SCHEDULE[0]
+        return 0
+    return max(0, (now.date() - first_send_at.date()).days)
+
+
+def warmup_limit(
+    *, first_send_at: dt.datetime | None, now: dt.datetime, target: int
+) -> int | None:
+    """Maximum sends allowed today for a mailbox still warming up.
+
+    ``target`` is the mailbox's configured daily limit -- the volume it is
+    ramping *towards*. Warm-up is a fraction of that, never of some absolute
+    figure chosen elsewhere, which is what makes the ramp mean the same thing
+    for a mailbox configured for 50 a day and one configured for 500.
+
+    Returns None once warm-up is complete, meaning only the configured quotas
+    apply, and 0 for a mailbox configured to send nothing -- a disabled mailbox
+    is not entitled to a warm-up floor.
+    """
+    if target <= 0:
+        return 0
+    day = warmup_day(first_send_at, now)
     if day >= WARMUP_DAYS:
         return None
-    return WARMUP_SCHEDULE[day]
+    allowed = math.ceil(WARMUP_RAMP[day] * target)
+    # Never above target: a ramp that overshoots the number a human configured
+    # would be this module quietly raising someone else's limit.
+    return max(MIN_WARMUP_VOLUME, min(allowed, target))
 
 
 def check_warmup(
-    *, first_send_at: dt.datetime | None, sent_today: int, now: dt.datetime
+    *,
+    first_send_at: dt.datetime | None,
+    sent_today: int,
+    now: dt.datetime,
+    target: int,
 ) -> list[Signal]:
-    limit = warmup_limit(first_send_at=first_send_at, now=now)
+    if target <= 0:
+        # Not a warm-up state at all: either the mailbox is configured to send
+        # nothing, or its identity row has gone. Saying "day 1 of warm-up allows
+        # 0" would describe a ramp that is not happening.
+        return [
+            Signal(
+                "no_sending_capacity",
+                Severity.BLOCK,
+                "the sending mailbox has no daily limit configured",
+                "Set a daily send limit on the sender identity, or point the "
+                "campaign at a mailbox that has one.",
+            )
+        ]
+    limit = warmup_limit(first_send_at=first_send_at, now=now, target=target)
     if limit is None or sent_today < limit:
         return []
-    day = 0 if first_send_at is None else (now.date() - first_send_at.date()).days
+    day = warmup_day(first_send_at, now)
     return [
         Signal(
             "warmup_limit_reached",
             Severity.BLOCK,
-            f"day {day + 1} of warm-up allows {limit} messages; {sent_today} sent",
+            f"day {day + 1} of {WARMUP_DAYS} of warm-up allows {limit} of the "
+            f"mailbox's {target} messages; {sent_today} sent",
             "Remaining messages are deferred to tomorrow. Ramping volume "
-            "gradually is what stops a new domain looking compromised.",
+            "gradually is what stops a new mailbox looking compromised.",
         )
     ]
 
@@ -499,6 +559,10 @@ class DeliverabilityContext:
     first_send_at: dt.datetime | None
     sent_today: int
     now: dt.datetime
+    #: The sending mailbox's configured daily limit -- the volume warm-up ramps
+    #: towards. Not a global figure: two mailboxes on the same domain can be
+    #: configured for different volumes and each warms towards its own.
+    warmup_target: int
     #: Result of titan.delivery.dns_auth.verify_sender_domain, when available.
     auth_errors: tuple[str, ...] = field(default=())
 
@@ -534,6 +598,7 @@ def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
             first_send_at=ctx.first_send_at,
             sent_today=ctx.sent_today,
             now=ctx.now,
+            target=ctx.warmup_target,
         )
     )
     return DeliverabilityReport(signals=tuple(signals))
@@ -543,7 +608,9 @@ __all__ = [
     "BOUNCE_RATE_PAUSE",
     "COMPLAINT_RATE_PAUSE",
     "MIN_SAMPLE_FOR_RATES",
-    "WARMUP_SCHEDULE",
+    "MIN_WARMUP_VOLUME",
+    "WARMUP_DAYS",
+    "WARMUP_RAMP",
     "DeliverabilityContext",
     "DeliverabilityReport",
     "ReputationWindow",
@@ -555,5 +622,6 @@ __all__ = [
     "check_required_headers",
     "check_warmup",
     "evaluate",
+    "warmup_day",
     "warmup_limit",
 ]
