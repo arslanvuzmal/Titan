@@ -78,6 +78,7 @@ from titan.intelligence.domain_health import DomainHealth, DomainWindow
 from titan.intelligence.sender_auth import is_stale
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.engine import Decision, SendContext, evaluate_send
+from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +272,12 @@ class OutboxWorker:
             contact_is_active=channel.is_active,
             recipient_timezone=location.timezone if location else None,
             recipient_domain_health=domain_health,
+            send_window=SendWindow(
+                start_hour=policy.send_window_start_hour,
+                end_hour=policy.send_window_end_hour,
+                days=tuple(int(d) for d in (policy.send_days or ())),
+            ),
+            campaign_region=campaign.region,
             evidence_count=_evidence_count(draft),
             validation_passed=draft.validation_passed,
             provider_idempotency_key=row.provider_idempotency_key,
@@ -309,7 +316,12 @@ class OutboxWorker:
         if not decision.allowed:
             # Quota and quiet hours are temporary; everything else is a block.
             if self._is_temporary(decision):
-                await self._defer(session, row, decision.reason_text())
+                await self._defer(
+                    session,
+                    row,
+                    decision.reason_text(),
+                    retry_at=self._next_window_open(ctx),
+                )
                 return ProcessResult(row.id, "deferred", decision.reason_text())
             await self._block(session, row, decision.reason_text())
             return ProcessResult(row.id, "blocked", decision.reason_text())
@@ -762,7 +774,12 @@ class OutboxWorker:
     def _is_temporary(self, decision: Decision) -> bool:
         from titan.policy.engine import DenyCode
 
-        temporary = {DenyCode.QUOTA_EXHAUSTED, DenyCode.QUIET_HOURS, DenyCode.SPACING}
+        temporary = {
+            DenyCode.QUOTA_EXHAUSTED,
+            DenyCode.QUIET_HOURS,
+            DenyCode.OUTSIDE_SEND_WINDOW,
+            DenyCode.SPACING,
+        }
         codes = set(decision.codes)
         return bool(codes) and codes <= temporary
 
@@ -968,15 +985,47 @@ class OutboxWorker:
         row.status = OutboxStatus.PENDING
         row.next_attempt_at = self._now() + dt.timedelta(seconds=delay)
 
+    def _next_window_open(self, ctx: SendContext) -> dt.datetime | None:
+        """When this campaign's window next opens for this recipient.
+
+        Returns None when there is no window, no clock, or the window is already
+        open -- in which case the deferral was for some other reason (quota,
+        spacing) and the caller falls back to the next UTC window.
+
+        Without this a message refused at 18:00 local retries at the next UTC
+        midnight, which for a Pacific recipient is the middle of their afternoon
+        and for a Sydney one is mid-morning -- neither is the start of the
+        working day the window was configured to protect, and a message refused
+        on Friday evening would wake up and be refused again every night of the
+        weekend.
+        """
+        if ctx.send_window is None or not ctx.send_window.is_usable:
+            return None
+        timezone = resolve_timezone(ctx.recipient_timezone, ctx.campaign_region)
+        local = local_time(ctx.now, timezone)
+        if local is None:
+            return None
+        opens = ctx.send_window.next_open_from(local)
+        if opens is None or opens <= local:
+            return None
+        return opens.astimezone(dt.UTC)
+
     async def _defer(
-        self, session: AsyncSession, row: OutboxMessage, reason: str
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        reason: str,
+        *,
+        retry_at: dt.datetime | None = None,
     ) -> None:
         """Quota/quiet-hours deferral. Never a permanent failure (mission 15.4)."""
         row.status = OutboxStatus.DEFERRED
         row.blocked_reason = reason[:2000]
         row.lease_owner = None
         row.leased_until = None
-        row.next_attempt_at = quotas.next_window_start(self._now(), row.dedupe_key)
+        row.next_attempt_at = retry_at or quotas.next_window_start(
+            self._now(), row.dedupe_key
+        )
 
     async def _block(
         self, session: AsyncSession, row: OutboxMessage, reason: str

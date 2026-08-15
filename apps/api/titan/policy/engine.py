@@ -30,11 +30,13 @@ from titan.db.enums import (
     CampaignStatus,
     ContactSource,
     LeadStatus,
+    Region,
     VerificationStatus,
     verification_permits_sending,
 )
 from titan.intelligence.domain_health import DomainHealth
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
+from titan.policy.schedule import SendWindow, local_time, resolve_timezone
 
 
 class DenyCode(StrEnum):
@@ -66,6 +68,7 @@ class DenyCode(StrEnum):
     FOLLOWUP_LIMIT = "followup_limit_reached"
     QUOTA_EXHAUSTED = "quota_exhausted"
     QUIET_HOURS = "recipient_quiet_hours"
+    OUTSIDE_SEND_WINDOW = "outside_campaign_send_window"
     SPACING = "minimum_spacing_not_elapsed"
     IDEMPOTENCY_KEY_MISSING = "provider_idempotency_key_missing"
     INTERNAL_ERROR = "internal_error"
@@ -168,6 +171,11 @@ class SendContext:
     #: denies nothing: a caller that cannot supply it loses a check rather than
     #: gaining a refusal.
     recipient_domain_health: DomainHealth = DomainHealth.UNKNOWN
+    #: The campaign's working hours, in the recipient's local time. None means
+    #: the caller did not supply one, and only the global quiet hours apply.
+    send_window: SendWindow | None = None
+    #: The campaign's market. Supplies a timezone for a recipient who has none.
+    campaign_region: Region = Region.UNSPECIFIED
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -357,13 +365,21 @@ def evaluate_send(ctx: SendContext) -> Decision:
                 DenyCode.QUOTA_EXHAUSTED, f"{ctx.quota_exhausted_scope} quota exhausted"
             )
         )
-    if ctx.respect_quiet_hours and _in_quiet_hours(ctx):
-        denials.append(
-            Denial(
-                DenyCode.QUIET_HOURS,
-                f"local time for {ctx.recipient_timezone} is inside quiet hours",
+    # The campaign's working hours first, then the process-wide quiet hours as
+    # a floor beneath them. Only one of the two is reported: a message at 3am on
+    # a Sunday is outside both, and saying so twice tells an operator nothing
+    # they did not learn from the first line.
+    if ctx.respect_quiet_hours:
+        outside = _outside_send_window(ctx)
+        if outside is not None:
+            denials.append(Denial(DenyCode.OUTSIDE_SEND_WINDOW, outside))
+        elif _in_quiet_hours(ctx):
+            denials.append(
+                Denial(
+                    DenyCode.QUIET_HOURS,
+                    f"local time for {ctx.recipient_timezone} is inside quiet hours",
+                )
             )
-        )
     if _spacing_violated(ctx):
         denials.append(
             Denial(
@@ -431,6 +447,38 @@ def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
             )
         )
     return denials
+
+
+def _outside_send_window(ctx: SendContext) -> str | None:
+    """Why this message may not go now, or None when the window is open.
+
+    Returns a reason rather than a boolean because there are three distinct ways
+    to be refused here and they call for different fixes: no window configured
+    at all, no clock to measure against, or simply the wrong hour.
+
+    Fails closed on an unresolvable timezone, as the quiet-hours check it
+    replaces always did -- but it fails closed far less often, because a
+    campaign that declares its market can now answer for a recipient whose
+    location Places never resolved.
+    """
+    if ctx.send_window is None:
+        return None
+    if not ctx.send_window.is_usable:
+        return f"campaign send window is not usable ({ctx.send_window.describe()})"
+
+    timezone = resolve_timezone(ctx.recipient_timezone, ctx.campaign_region)
+    local = local_time(ctx.now, timezone)
+    if local is None:
+        return (
+            "no usable timezone for the recipient and none implied by the "
+            f"campaign's market ({ctx.campaign_region.value})"
+        )
+    if ctx.send_window.is_open_at(local):
+        return None
+    return (
+        f"{local:%a %H:%M} in {timezone} is outside the campaign's send window "
+        f"({ctx.send_window.describe()})"
+    )
 
 
 def _in_quiet_hours(ctx: SendContext) -> bool:

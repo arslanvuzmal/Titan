@@ -42,11 +42,18 @@ from .conftest import NOW, build_sendable, sending_settings
 pytestmark = pytest.mark.integration
 
 
-def worker(provider: MockEmailProvider, **setting_overrides) -> OutboxWorker:
+def worker(
+    provider: MockEmailProvider, *, now_fn=None, **setting_overrides
+) -> OutboxWorker:
+    """The clock is separable from the settings.
+
+    Both are overrides but they go to different places, and passing now_fn
+    through **setting_overrides hands Settings a field it does not have.
+    """
     return OutboxWorker(
         provider,
         sending_settings(**setting_overrides),
-        now_fn=lambda: NOW,
+        now_fn=now_fn or (lambda: NOW),
     )
 
 
@@ -738,3 +745,61 @@ async def test_a_clean_domain_sends_normally(db_session, sendable) -> None:
     provider = MockEmailProvider()
     assert [r.outcome for r in await run_worker(provider)] == ["sent"]
     assert provider.delivered_count == 1
+
+
+# --------------------------------------------------------------------------
+# Deferral lands at the window, not at UTC midnight
+# --------------------------------------------------------------------------
+async def _enable_window(campaign_id: uuid.UUID, *, days: list[int]) -> None:
+    from titan.db.enums import Region
+    from titan.db.models import CampaignPolicy
+
+    async with get_sessionmaker()() as s, s.begin():
+        await s.execute(
+            update(Campaign).where(Campaign.id == campaign_id).values(region=Region.UK)
+        )
+        await s.execute(
+            update(CampaignPolicy)
+            .where(CampaignPolicy.campaign_id == campaign_id)
+            .values(respect_quiet_hours=True, send_days=days)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_message_outside_the_window_waits_for_it_to_open(
+    db_session, sendable
+) -> None:
+    """Not the next UTC midnight.
+
+    A message refused on a Friday evening that retries at midnight would wake up
+    and be refused again every night of the weekend. It should sleep until the
+    window opens and wake once.
+    """
+    await _enable_window(sendable.campaign_id, days=[0, 1, 2, 3, 4])
+
+    saturday = dt.datetime(2026, 8, 8, 12, 0, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+    results = await run_worker(provider, now_fn=lambda: saturday)
+
+    assert [r.outcome for r in results] == ["deferred"]
+    assert provider.delivered_count == 0
+
+    async with get_sessionmaker()() as s:
+        row = await outbox_row(s, sendable.outbox_id)
+    # Monday 08:00 Europe/London is 07:00 UTC in August.
+    assert row.next_attempt_at == dt.datetime(2026, 8, 10, 7, 0, tzinfo=dt.UTC)
+    assert "send window" in (row.blocked_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_a_message_inside_the_window_is_sent(db_session, sendable) -> None:
+    """The control. Without it the test above passes for a campaign that can
+    never send at all."""
+    await _enable_window(sendable.campaign_id, days=[0, 1, 2, 3, 4])
+
+    monday = dt.datetime(2026, 8, 3, 12, 0, tzinfo=dt.UTC)
+    provider = MockEmailProvider()
+
+    assert [r.outcome for r in await run_worker(provider, now_fn=lambda: monday)] == [
+        "sent"
+    ]

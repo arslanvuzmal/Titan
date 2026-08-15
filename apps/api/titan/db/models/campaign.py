@@ -142,6 +142,11 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
             name="min_lead_score_range",
         ),
         CheckConstraint("max_followups >= 0", name="max_followups_non_negative"),
+        CheckConstraint(
+            "send_window_start_hour >= 0 AND send_window_end_hour <= 24 "
+            "AND send_window_start_hour < send_window_end_hour",
+            name="send_window_ordered",
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -178,7 +183,28 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     followup_schedule_days: Mapped[list[str]] = mapped_column(
         JSONB, default=lambda: [0, 3, 7, 14], nullable=False
     )
+    #: Whether the recipient's local schedule is honoured at all. Named for
+    #: quiet hours because that is all it used to govern; it now governs the
+    #: working-hours window below, which subsumes them -- anything outside
+    #: 08:00-17:00 is also outside 08:00-20:00.
     respect_quiet_hours: Mapped[bool] = mapped_column(default=True, nullable=False)
+
+    #: The working window, in the *recipient's* local time. End hour exclusive:
+    #: 17 means the last minute is 16:59. Defaults are a conventional business
+    #: day; the market's own working week comes from
+    #: titan.policy.schedule.REGION_SEND_DAYS when a campaign is created.
+    send_window_start_hour: Mapped[int] = mapped_column(
+        default=8, server_default="8", nullable=False
+    )
+    send_window_end_hour: Mapped[int] = mapped_column(
+        default=17, server_default="17", nullable=False
+    )
+    #: Weekdays the campaign may send, Monday is 0 (datetime.weekday()).
+    #: Mon-Fri by default; a Middle East campaign wants Sun-Thu, which is why
+    #: this is per-campaign rather than a constant.
+    send_days: Mapped[list[int]] = mapped_column(
+        JSONB, default=lambda: [0, 1, 2, 3, 4], nullable=False
+    )
 
     research_budget_usd: Mapped[float] = mapped_column(default=10.0, nullable=False)
     per_lead_budget_usd: Mapped[float] = mapped_column(default=0.50, nullable=False)
