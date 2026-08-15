@@ -66,7 +66,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import get_sessionmaker
-from titan.delivery import deliverability, quotas, sender_health
+from titan.delivery import adaptive_limits, deliverability, quotas, sender_health
 from titan.delivery.providers.base import (
     EmailProvider,
     OutboundEmail,
@@ -300,7 +300,10 @@ class OutboxWorker:
         # deliverability check -- so capturing there recorded health for exactly
         # the senders that had none of it, and left the broken ones invisible.
         # The mailbox most worth monitoring is the one that has stopped working.
-        await self._capture_sender_health(session, row)
+        #
+        # It also returns today's adapted ceiling, which the quota reservation
+        # below uses in place of the sender's configured limit.
+        limit = await self._capture_sender_health(session, row)
 
         decision = evaluate_send(ctx)
         if not decision.allowed:
@@ -342,7 +345,7 @@ class OutboxWorker:
 
         # Last thing before the provider call, so every refusal above this line
         # costs nothing from the day's allowance.
-        outcome = await self._reserve_quota(session, row)
+        outcome = await self._reserve_quota(session, row, limit)
         if not outcome.granted:
             await self._defer(session, row, outcome.reason or "quota exhausted")
             return ProcessResult(row.id, "deferred", outcome.reason)
@@ -426,26 +429,31 @@ class OutboxWorker:
 
     async def _capture_sender_health(
         self, session: AsyncSession, row: OutboxMessage
-    ) -> None:
-        """Write today's health row for this sender, and alert on a downturn.
+    ) -> adaptive_limits.LimitDecision | None:
+        """Classify this mailbox, record the day's snapshot, and set today's ceiling.
 
-        Upserted rather than appended: one row per sender per day, whose values
-        are those of the last message processed that day. See the migration for
-        why a rolling aggregate is not an event log.
+        One method because it is one set of facts. Splitting the classification
+        from the persistence would gather the same aggregates twice and let the
+        throttle and the history disagree about what health the mailbox was in
+        when the message went out.
 
-        Gathers its own numbers rather than borrowing the deliverability check's.
-        That repeats one indexed aggregate per message on the sending path, and
-        buys the property that matters: this runs for every message, including
-        the ones refused before that check is ever reached.
+        Reads and classification happen here; only the write is inside a
+        savepoint. That ordering matters: the returned ceiling governs how much
+        this mailbox may send today, and it has to survive a failure to write
+        history. Losing the audit trail is a nuisance; losing the throttle would
+        let a degraded mailbox send at full volume.
 
-        Fails soft. A snapshot is a record of a decision, never an input to one,
-        so failing to write history must not change what happens to the message.
+        Returns None only when the sender has vanished, in which case the caller
+        falls back to the configured limit -- the number a human chose, which is
+        the right answer when Titan knows nothing.
         """
         sender = await session.get(SenderIdentity, row.sender_identity_id)
         if sender is None:
-            return
+            return None
         now = self._now()
         since = now - dt.timedelta(days=30)
+        day_start = dt.datetime.combine(now.date(), dt.time.min, tzinfo=dt.UTC)
+
         stats = (
             await session.execute(
                 text(
@@ -467,49 +475,11 @@ class OutboxWorker:
                     "workspace": row.workspace_id,
                     "sender": row.sender_identity_id,
                     "since": since,
-                    "day_start": dt.datetime.combine(
-                        now.date(), dt.time.min, tzinfo=dt.UTC
-                    ),
+                    "day_start": day_start,
                 },
             )
         ).one()
-        first_send_at = stats.first_send_at
-        sent_today = int(stats.sent_today or 0)
-        # A SAVEPOINT, not just a try/except. This shares the caller's
-        # transaction, and PostgreSQL aborts the whole transaction on any failed
-        # statement -- so catching the exception would leave the session
-        # poisoned and every statement after it, including the send bookkeeping,
-        # would fail. Catching without this would make the send *more* fragile
-        # than not recording health at all, which is the opposite of the intent.
-        try:
-            async with session.begin_nested():
-                await self._write_sender_health(
-                    session,
-                    row,
-                    sender=sender,
-                    stats=stats,
-                    first_send_at=first_send_at,
-                    sent_today=sent_today,
-                    now=now,
-                )
-        except Exception:
-            logger.warning(
-                "could not record sender health; the send decision is unaffected",
-                extra={"outbox_id": str(row.id), "sender_id": str(sender.id)},
-            )
 
-    async def _write_sender_health(
-        self,
-        session: AsyncSession,
-        row: OutboxMessage,
-        *,
-        sender: SenderIdentity,
-        stats: Any,
-        first_send_at: dt.datetime | None,
-        sent_today: int,
-        now: dt.datetime,
-    ) -> None:
-        """The snapshot write itself. Always called inside a savepoint."""
         throughput = (
             await session.execute(
                 text(
@@ -529,11 +499,12 @@ class OutboxWorker:
                 {
                     "workspace": row.workspace_id,
                     "sender": row.sender_identity_id,
-                    "since": now - dt.timedelta(days=30),
+                    "since": since,
                 },
             )
         ).one()
 
+        first_send_at = stats.first_send_at
         attempted = int(throughput.attempted or 0)
         retries = int(throughput.retries or 0)
         warmup_limit = deliverability.warmup_limit(first_send_at=first_send_at, now=now)
@@ -563,35 +534,109 @@ class OutboxWorker:
             attempts=attempted + retries,
             retries=retries,
             deferred=int(throughput.deferred or 0),
-            sent_today=sent_today,
+            sent_today=int(stats.sent_today or 0),
             warmup_day=warmup_day,
             warmup_limit=warmup_limit,
         )
         status = sender_health.classify(snapshot)
 
-        # The previous verdict, from an earlier day. Read before the upsert:
-        # afterwards today's own row is the most recent and the comparison
-        # would be against itself.
-        previous_status = (
-            await session.execute(
-                text(
-                    """
-                    SELECT status FROM sender_health_snapshots
-                     WHERE workspace_id = :workspace
-                       AND sender_identity_id = :sender
-                       AND captured_on < :today
-                     ORDER BY captured_on DESC
-                     LIMIT 1
-                    """
-                ),
-                {
-                    "workspace": row.workspace_id,
-                    "sender": row.sender_identity_id,
-                    "today": now.date(),
+        # Earlier days only, newest first. Read before the upsert, or today's own
+        # row is the most recent and every comparison is against itself.
+        history = tuple(
+            sender_health.SenderHealth(value)
+            for value in (
+                await session.execute(
+                    text(
+                        """
+                        SELECT status FROM sender_health_snapshots
+                         WHERE workspace_id = :workspace
+                           AND sender_identity_id = :sender
+                           AND captured_on < :today
+                         ORDER BY captured_on DESC
+                         LIMIT :lookback
+                        """
+                    ),
+                    {
+                        "workspace": row.workspace_id,
+                        "sender": row.sender_identity_id,
+                        "today": now.date(),
+                        "lookback": adaptive_limits.RECOVERY_LOOKBACK_DAYS,
+                    },
+                )
+            ).scalars()
+        )
+
+        decision = adaptive_limits.daily_limit(
+            sender.daily_send_limit,
+            recent=(status, *history),
+            warmup_limit=warmup_limit,
+        )
+        if decision.reduced:
+            logger.info(
+                "sender daily limit adapted",
+                extra={
+                    "sender_id": str(sender.id),
+                    "effective_limit": decision.effective,
+                    "configured_limit": decision.configured,
+                    "health": status.value,
                 },
             )
-        ).scalar_one_or_none()
 
+        # A SAVEPOINT, not just a try/except. This shares the caller's
+        # transaction, and PostgreSQL aborts the whole transaction on any failed
+        # statement -- so catching the exception would leave the session
+        # poisoned and every statement after it, including the send bookkeeping,
+        # would fail. Catching without this would make the send *more* fragile
+        # than not recording health at all, which is the opposite of the intent.
+        try:
+            async with session.begin_nested():
+                await self._write_sender_health(
+                    session,
+                    row,
+                    sender=sender,
+                    snapshot=snapshot,
+                    status=status,
+                    previous=history[0] if history else None,
+                    now=now,
+                )
+        except Exception:
+            logger.warning(
+                "could not record sender health; the send decision is unaffected",
+                extra={"outbox_id": str(row.id), "sender_id": str(sender.id)},
+            )
+        return decision
+
+    async def _write_sender_health(
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        *,
+        sender: SenderIdentity,
+        snapshot: sender_health.SenderSnapshot,
+        status: sender_health.SenderHealth,
+        previous: sender_health.SenderHealth | None,
+        now: dt.datetime,
+    ) -> None:
+        """The snapshot write and its alert. Always called inside a savepoint."""
+        values: dict[str, Any] = {
+            "status": status.value,
+            "domain_verified": snapshot.domain_verified,
+            "spf_ok": snapshot.spf_ok,
+            "dkim_ok": snapshot.dkim_ok,
+            "dmarc_ok": snapshot.dmarc_ok,
+            "auth_stale": snapshot.auth_stale,
+            "window_sent": snapshot.window.sent,
+            "window_delivered": snapshot.window.delivered,
+            "window_bounced": snapshot.window.hard_bounced,
+            "window_complained": snapshot.window.complained,
+            "attempts": snapshot.attempts,
+            "retries": snapshot.retries,
+            "deferred": snapshot.deferred,
+            "sent_today": snapshot.sent_today,
+            "warmup_day": snapshot.warmup_day,
+            "warmup_limit": snapshot.warmup_limit,
+            "reasons": list(sender_health.reasons(snapshot)),
+        }
         await session.execute(
             pg_insert(SenderHealthSnapshot.__table__)  # type: ignore[arg-type]
             .values(
@@ -599,60 +644,22 @@ class OutboxWorker:
                 sender_identity_id=sender.id,
                 sending_domain=sender.sending_domain,
                 captured_on=snapshot.captured_on,
-                status=status.value,
-                domain_verified=snapshot.domain_verified,
-                spf_ok=snapshot.spf_ok,
-                dkim_ok=snapshot.dkim_ok,
-                dmarc_ok=snapshot.dmarc_ok,
-                auth_stale=snapshot.auth_stale,
-                window_sent=snapshot.window.sent,
-                window_delivered=snapshot.window.delivered,
-                window_bounced=snapshot.window.hard_bounced,
-                window_complained=snapshot.window.complained,
-                attempts=snapshot.attempts,
-                retries=snapshot.retries,
-                deferred=snapshot.deferred,
-                sent_today=snapshot.sent_today,
-                warmup_day=snapshot.warmup_day,
-                warmup_limit=snapshot.warmup_limit,
-                reasons=list(sender_health.reasons(snapshot)),
+                **values,
             )
             .on_conflict_do_update(
                 constraint="uq_sender_health_day",
-                set_={
-                    "status": status.value,
-                    "domain_verified": snapshot.domain_verified,
-                    "spf_ok": snapshot.spf_ok,
-                    "dkim_ok": snapshot.dkim_ok,
-                    "dmarc_ok": snapshot.dmarc_ok,
-                    "auth_stale": snapshot.auth_stale,
-                    "window_sent": snapshot.window.sent,
-                    "window_delivered": snapshot.window.delivered,
-                    "window_bounced": snapshot.window.hard_bounced,
-                    "window_complained": snapshot.window.complained,
-                    "attempts": snapshot.attempts,
-                    "retries": snapshot.retries,
-                    "deferred": snapshot.deferred,
-                    "sent_today": snapshot.sent_today,
-                    "warmup_day": snapshot.warmup_day,
-                    "warmup_limit": snapshot.warmup_limit,
-                    "reasons": list(sender_health.reasons(snapshot)),
-                    "updated_at": now,
-                },
+                set_={**values, "updated_at": now},
             )
         )
 
-        previous = (
-            sender_health.SenderHealth(previous_status) if previous_status else None
-        )
         if sender_health.should_alert(status, previous):
             await record_notification(
                 session,
                 workspace_id=row.workspace_id,
                 kind=NotificationKind.DELIVERABILITY_ALERT,
                 title=f"{sender.from_email} is {status.value}",
-                # Keyed on the transition, not on the day: a mailbox that
-                # stays degraded for a fortnight is one alert, not fourteen.
+                # Keyed on the transition, not on the day: a mailbox that stays
+                # degraded for a fortnight is one alert, not fourteen.
                 dedupe_key=(
                     f"sender-health:{sender.id}:"
                     f"{previous.value if previous else 'new'}->{status.value}"
@@ -760,13 +767,26 @@ class OutboxWorker:
         return bool(codes) and codes <= temporary
 
     async def _quota_requests(
-        self, session: AsyncSession, row: OutboxMessage
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        limit: adaptive_limits.LimitDecision | None = None,
     ) -> list[quotas.QuotaRequest]:
         """The four scopes one send consumes.
 
         Built in one place so a release returns units to exactly the scopes the
         reservation took them from -- a release that reconstructed the list
-        differently would silently corrupt the counters.
+        differently would silently corrupt the counters. Only the scope *keys*
+        have to match for that: the release statement never reads ``limit``, so
+        passing an adapted one on reservation and omitting it on release is
+        safe, and omitting it is what the release path does.
+
+        The sender scope is the only one that adapts. Workspace and campaign
+        limits are business budgets a human set for reasons health knows nothing
+        about, and the recipient-domain limit is already backed by a hard gate --
+        a domain whose delivery record has gone bad refuses the send outright in
+        evaluate_send, and a second mechanism throttling the same thing would be
+        two rules for one decision.
         """
         settings = self._settings
         policy = (
@@ -795,7 +815,9 @@ class OutboxWorker:
             quotas.QuotaRequest(
                 quotas.QuotaScope.SENDER,
                 str(row.sender_identity_id),
-                sender.daily_send_limit if sender else settings.quota_sender_daily,
+                limit.effective
+                if limit is not None
+                else (sender.daily_send_limit if sender else settings.quota_sender_daily),
             ),
             quotas.QuotaRequest(
                 quotas.QuotaScope.RECIPIENT_DOMAIN,
@@ -805,12 +827,15 @@ class OutboxWorker:
         ]
 
     async def _reserve_quota(
-        self, session: AsyncSession, row: OutboxMessage
+        self,
+        session: AsyncSession,
+        row: OutboxMessage,
+        limit: adaptive_limits.LimitDecision | None = None,
     ) -> quotas.QuotaOutcome:
         return await quotas.reserve_all(
             session,
             workspace_id=row.workspace_id,
-            requests=await self._quota_requests(session, row),
+            requests=await self._quota_requests(session, row, limit),
             window_date=self._now().date(),
         )
 
