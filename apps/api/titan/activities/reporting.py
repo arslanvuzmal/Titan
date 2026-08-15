@@ -15,7 +15,8 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
 from titan.db.enums import DraftStatus, MessageState
@@ -32,6 +33,7 @@ from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.intelligence import lead_sources
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
     WeeklyReport,
@@ -48,6 +50,16 @@ REPORT_WINDOW = dt.timedelta(days=7)
 
 #: Named on the report so an operator can act without opening the CRM first.
 MAX_HOT_LEADS = 8
+
+#: How far back a discovery batch is still worth grading. Much wider than the
+#: report window: a batch discovered on Monday has produced almost no outcomes
+#: by Friday, and grading only this week's searches would report UNKNOWN for
+#: every one of them forever.
+SOURCE_LOOKBACK = dt.timedelta(days=90)
+
+#: Sources shown in the report. Ranked worst first, so the truncated tail is the
+#: part nobody needed to read.
+MAX_SOURCE_LINES = 5
 
 
 @activity.defn(name="generate_weekly_report")
@@ -212,6 +224,8 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             )
         ).all()
 
+        source_windows = await _lead_source_windows(session, workspace_id, now)
+
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -239,6 +253,14 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         hot_leads=tuple(
             f"{name} -- waiting since {created.date().isoformat()}"
             for name, created in hot
+        ),
+        lead_sources=tuple(
+            (
+                window.label or window.kind,
+                grade.value,
+                lead_sources.explain(window, grade),
+            )
+            for window, grade in lead_sources.rank(source_windows)[:MAX_SOURCE_LINES]
         ),
     )
 
@@ -281,3 +303,94 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
 ALL_REPORTING_ACTIVITIES = [generate_weekly_report]
 
 __all__ = ["ALL_REPORTING_ACTIVITIES", "REPORT_WINDOW", "generate_weekly_report"]
+
+
+async def _lead_source_windows(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[lead_sources.LeadSourceWindow]:
+    """What each recent discovery batch produced downstream.
+
+    One query rather than one per source: a workspace accumulates a discovery
+    batch per campaign cycle, and a report that issued a query each would grow
+    slower every week it ran.
+
+    The outcome counts are deliberately *not* windowed to the report period.
+    A batch discovered six weeks ago is graded on everything it has produced
+    since, because that is what it produced -- clipping the outcomes to the last
+    seven days would report a batch as having achieved nothing whenever its
+    replies happened to arrive in a different week from the report.
+
+    ``workspace_id`` is written into the SQL rather than left to the session.
+    ``workspace_session`` scopes ORM entity queries only and has no effect on
+    ``text()``; see the invariant test that enforces this.
+
+    Fails soft and returns nothing. The source standings are one section of a
+    report whose other twenty numbers are already gathered; losing them must not
+    cost the operator the whole week's summary.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT ls.id::text                                   AS source_id,
+                           ls.kind                                       AS kind,
+                           ls.label                                      AS label,
+                           ls.estimated_cost_usd                         AS cost_usd,
+                           count(DISTINCT l.id)                          AS leads,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.primary_contact_channel_id IS NOT NULL
+                           )                                             AS contactable,
+                           count(DISTINCT m.lead_id) FILTER (
+                               WHERE m.sent_at IS NOT NULL
+                           )                                             AS contacted,
+                           count(m.id) FILTER (WHERE m.sent_at IS NOT NULL)
+                                                                         AS sent,
+                           count(m.id) FILTER (WHERE m.delivered_at IS NOT NULL)
+                                                                         AS delivered,
+                           count(m.id) FILTER (WHERE m.bounced_at IS NOT NULL)
+                                                                         AS bounced,
+                           count(m.id) FILTER (WHERE m.complained_at IS NOT NULL)
+                                                                         AS complained,
+                           count(DISTINCT l.id) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                             AS replied
+                      FROM lead_sources ls
+                      JOIN leads l
+                        ON l.lead_source_id = ls.id
+                       AND l.workspace_id = ls.workspace_id
+                      LEFT JOIN messages m
+                        ON m.lead_id = l.id
+                       AND m.workspace_id = ls.workspace_id
+                     WHERE ls.workspace_id = :workspace
+                       AND ls.created_at >= :since
+                     GROUP BY ls.id, ls.kind, ls.label, ls.estimated_cost_usd
+                    """
+                ),
+                {"workspace": workspace_id, "since": now - SOURCE_LOOKBACK},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "lead source standings unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        lead_sources.LeadSourceWindow(
+            source_id=row.source_id,
+            kind=row.kind,
+            label=row.label or "",
+            cost_usd=float(row.cost_usd or 0.0),
+            leads=int(row.leads or 0),
+            contactable=int(row.contactable or 0),
+            contacted=int(row.contacted or 0),
+            sent=int(row.sent or 0),
+            delivered=int(row.delivered or 0),
+            bounced=int(row.bounced or 0),
+            complained=int(row.complained or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]

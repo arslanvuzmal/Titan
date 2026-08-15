@@ -101,6 +101,10 @@ class WeeklyReport:
     health: DeliverabilityHealth | None = None
     #: Named leads worth chasing, most recent first.
     hot_leads: tuple[str, ...] = field(default_factory=tuple)
+    #: (label, grade, detail) per discovery batch, worst first. Graded rather
+    #: than merely counted: lead_sources already records what a search cost and
+    #: how many rows it returned, and neither says whether the leads were good.
+    lead_sources: tuple[tuple[str, str, str], ...] = field(default_factory=tuple)
 
     @property
     def reply_rate(self) -> float:
@@ -241,6 +245,13 @@ def render(report: WeeklyReport) -> str:
     if report.hot_leads:
         lines.append("WORTH CHASING")
         lines.extend(f"  {name}" for name in report.hot_leads)
+        lines.append("")
+
+    # ---- where the leads came from --------------------------------------
+    if report.lead_sources:
+        lines.append("LEAD SOURCES")
+        for label, grade, detail in report.lead_sources:
+            lines.append(f"  [{grade}] {label}: {detail}")
         lines.append("")
 
     # ---- the numbers ---------------------------------------------------
