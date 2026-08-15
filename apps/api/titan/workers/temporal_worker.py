@@ -22,6 +22,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from titan.activities import discovery as discovery_activities
+from titan.activities import mailbox_ramp as mailbox_ramp_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
@@ -31,6 +32,7 @@ from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
+from titan.workflows.mailbox_ramp import MailboxRampWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
@@ -75,6 +77,7 @@ async def main() -> None:
             CampaignOrchestratorWorkflow,
             WeeklyReportWorkflow,
             SenderVerificationWorkflow,
+            MailboxRampWorkflow,
         ],
         activities=[
             research_activities.open_research_run,
@@ -85,6 +88,7 @@ async def main() -> None:
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
+            mailbox_ramp_activities.ramp_mailboxes,
         ],
         # Bounded concurrency. An unbounded worker will happily start more
         # crawls than the browser worker can serve and then time out on all of
