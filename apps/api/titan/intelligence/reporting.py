@@ -109,6 +109,9 @@ class WeeklyReport:
     #: almost every slot is below the sample floor and saying so at length
     #: would fill the report with the word unknown.
     timing: str = ""
+    #: Whether any phrasing variant has actually beaten another. Usually
+    #: "not yet" -- which is the honest answer, not a missing feature.
+    variants: str = ""
     #: (label, grade, detail) per discovery batch, worst first. Graded rather
     #: than merely counted: lead_sources already records what a search cost and
     #: how many rows it returned, and neither says whether the leads were good.
@@ -266,6 +269,8 @@ def render(report: WeeklyReport) -> str:
     if report.timing:
         lines.append("TIMING")
         lines.append(f"  {report.timing}")
+        if report.variants:
+            lines.append(f"  variants: {report.variants}")
         lines.append("")
 
     # ---- where the leads came from --------------------------------------

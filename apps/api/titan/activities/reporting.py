@@ -19,6 +19,7 @@ from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
+from titan.autonomy import experiments
 from titan.db.enums import DraftStatus, MessageState, Region
 from titan.db.models import (
     BusinessOpportunity,
@@ -61,6 +62,10 @@ SOURCE_LOOKBACK = dt.timedelta(days=90)
 #: month of one campaign's sending to be judgeable at all, so anything
 #: shorter reports the whole week as unknown.
 TIMING_LOOKBACK = dt.timedelta(days=90)
+
+#: How far back variants are compared. Wider than the timing lookback: an
+#: arm needs a hundred sends before it is testable at all.
+VARIANT_LOOKBACK = dt.timedelta(days=180)
 
 #: Sources shown in the report. Ranked worst first, so the truncated tail is the
 #: part nobody needed to read.
@@ -232,9 +237,11 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         source_windows = await _lead_source_windows(session, workspace_id, now)
         region_slices = await _portfolio_slices(session, workspace_id, since)
         slot_outcomes = await _timing_slots(session, workspace_id, now)
+        variant_arms = await _variant_arms(session, workspace_id, now)
 
     standing = portfolio.summarise(region_slices)
     timing_report = timing.learn(slot_outcomes)
+    variant_result = experiments.best_against_control(variant_arms)
     health = assess_deliverability(sent=sent, bounced=bounced, complained=complained)
     report = WeeklyReport(
         workspace_name=workspace_name,
@@ -268,6 +275,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             for window in standing.slices
         ),
         timing=timing.describe(timing_report),
+        variants=experiments.describe(variant_result),
         lead_sources=tuple(
             (
                 window.label or window.kind,
@@ -547,6 +555,68 @@ async def _timing_slots(
     return [
         timing.SlotOutcome(
             slot=timing.Slot(weekday=int(row.weekday), hour=int(row.hour)),
+            sent=int(row.sent or 0),
+            replied=int(row.replied or 0),
+        )
+        for row in rows
+    ]
+
+
+async def _variant_arms(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> list[experiments.Arm]:
+    """Sends and replies per phrasing variant.
+
+    Counted per lead rather than per message, and only the *first* message to
+    each lead. A lead receives four messages from one variant, so counting
+    messages would multiply every arm by its follow-up count and inflate the
+    denominators without adding a single independent observation -- which is
+    exactly the input a significance test must not be given.
+
+    Not windowed to the report period. An arm needs a hundred sends and five
+    replies before the test means anything, which at Titan's volumes is months.
+    """
+    try:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    WITH first_send AS (
+                        SELECT DISTINCT ON (m.lead_id)
+                               m.lead_id AS lead_id,
+                               d.variant AS variant
+                          FROM messages m
+                          JOIN message_drafts d ON d.id = m.draft_id
+                         WHERE m.workspace_id = :workspace
+                           AND m.sent_at IS NOT NULL
+                           AND d.variant IS NOT NULL
+                           AND m.created_at >= :since
+                         ORDER BY m.lead_id, m.sent_at
+                    )
+                    SELECT f.variant                                 AS variant,
+                           count(*)                                  AS sent,
+                           count(*) FILTER (
+                               WHERE l.replied_at IS NOT NULL
+                           )                                         AS replied
+                      FROM first_send f
+                      JOIN leads l ON l.id = f.lead_id
+                     WHERE l.workspace_id = :workspace
+                     GROUP BY f.variant
+                    """
+                ),
+                {"workspace": workspace_id, "since": now - VARIANT_LOOKBACK},
+            )
+        ).all()
+    except Exception as exc:
+        logger.warning(
+            "variant arms unavailable; the rest of the report stands",
+            extra={"error_code": type(exc).__name__},
+        )
+        return []
+
+    return [
+        experiments.Arm(
+            key=str(row.variant),
             sent=int(row.sent or 0),
             replied=int(row.replied or 0),
         )

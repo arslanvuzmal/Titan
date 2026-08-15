@@ -1226,6 +1226,9 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             ),
             validation_passed=report.passed,
             template_key=request.template_key,
+            # The composer picked this from the lead id and has always done so.
+            # Recording it is what turns a real assignment into a measurable one.
+            variant=composed.variant or None,
         )
         session.add(draft)
         await session.flush()

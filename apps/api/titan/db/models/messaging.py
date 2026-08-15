@@ -105,6 +105,14 @@ class MessageDraft(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     )
     #: Which of the 12 template shapes this draft follows (section 12.3).
     template_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    #: Which phrasing variant the composer chose, e.g. "v2" or "v2:step3".
+    #:
+    #: The composer has always picked one, deterministically from the lead id,
+    #: so the same lead has always received the same phrasing on a retry. What
+    #: it never did was write the choice down -- which meant the assignment was
+    #: real and the attribution was not, and no comparison between variants was
+    #: possible however much mail went out.
+    variant: Mapped[str | None] = mapped_column(String(40), index=True)
     superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("message_drafts.id", ondelete="SET NULL")
     )
