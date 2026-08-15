@@ -269,6 +269,67 @@ def test_all_domain_tables_are_workspace_scoped() -> None:
     )
 
 
+#: Raw SQL against a scoped table that deliberately does not name workspace_id,
+#: keyed by (file, table) with the reason it is safe.
+#:
+#: The outbox claim is genuinely cross-workspace: one worker drains every
+#: workspace's queue, which is why it runs on an unscoped session. The sender
+#: reputation queries filter on sender_identity_id, a UUID that belongs to
+#: exactly one workspace, so the predicate scopes them by construction.
+RAW_SQL_SCOPE_ALLOWLIST = {
+    ("titan/delivery/outbox_worker.py", "outbox_messages"),
+    ("titan/delivery/outbox_worker.py", "messages"),
+}
+
+
+def test_raw_sql_against_a_scoped_table_names_the_workspace() -> None:
+    """``workspace_session`` does not scope ``text()``. Not at all.
+
+    Its guard is ``with_loader_criteria``, which rewrites ORM entity queries and
+    has no effect on raw SQL; and the row-level security policy is permissive
+    when ``titan.workspace_id`` is unset, which is how migrations, the outbox
+    claim and webhook ingestion legitimately run unscoped. A raw SELECT inside a
+    scoped session therefore inherits no isolation whatsoever -- it only looks as
+    though it does, which is the dangerous part.
+
+    Found the hard way: the recipient-domain history query grouped by
+    ``to_domain`` with no workspace predicate, and one workspace's bounce record
+    silently downgraded another workspace's lead. Nothing about the call site
+    hinted at it.
+    """
+    from titan.db.models import Base
+
+    scoped_tables = {
+        mapper.class_.__tablename__
+        for mapper in Base.registry.mappers
+        if "workspace_id" in mapper.class_.__table__.c
+    }
+    # A text() block, from the opening paren to the closing triple quote.
+    blocks = re.compile(r"text\(\s*(?:\"\"\"|''')(.*?)(?:\"\"\"|''')", re.DOTALL)
+
+    offenders: list[str] = []
+    for path in python_sources():
+        rel = path.relative_to(API).as_posix()
+        if rel.startswith("titan/db/migrations/"):
+            continue
+        for sql in blocks.findall(path.read_text(encoding="utf-8")):
+            lowered = sql.lower()
+            if "workspace_id" in lowered:
+                continue
+            for table in scoped_tables:
+                if not re.search(rf"\b(?:from|join|update|into)\s+{table}\b", lowered):
+                    continue
+                if (rel, table) in RAW_SQL_SCOPE_ALLOWLIST:
+                    continue
+                offenders.append(f"{rel}: {table}")
+
+    assert not offenders, (
+        f"raw SQL touches a workspace-scoped table without naming workspace_id: "
+        f"{sorted(set(offenders))}. Add the predicate to the query -- the session "
+        "will not add it for you -- or allowlist it above with a reason."
+    )
+
+
 # ==========================================================================
 # Invariant 19: no secrets in logs or responses
 # ==========================================================================

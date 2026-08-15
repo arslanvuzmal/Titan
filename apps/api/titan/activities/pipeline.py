@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
@@ -67,6 +67,7 @@ from titan.intelligence.contacts import (
     check_contact_eligibility,
     extract_contacts_from_pages,
 )
+from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
 from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import MessageContext, validate_message
 from titan.intelligence.mx import MxCheck, check_many
@@ -714,9 +715,11 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
     # resolver, and mission section 25 forbids I/O inside a unit of work. One
     # lookup per distinct domain, not per address, so a site publishing six
     # mailboxes costs one query.
-    mx_checks = await _resolve_mx(
-        [c.domain for c in discovered if c.is_usable and c.domain]
-    )
+    candidate_domains = [c.domain for c in discovered if c.is_usable and c.domain]
+    mx_checks = await _resolve_mx(candidate_domains)
+    # Delivery history for the same domains, in one grouped query rather than
+    # one per address, and outside the write loop for the same reason.
+    history = await _domain_history(workspace_id, candidate_domains)
 
     for candidate in discovered:
         if not candidate.is_usable:
@@ -731,7 +734,7 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
         # disposable domain, a misspelling of a webmail provider or a
         # verification service can now say otherwise before the address is ever
         # stored as sendable.
-        risk = await _assess_bounce_risk(candidate, mx)
+        risk = await _assess_bounce_risk(candidate, mx, history.get(candidate.domain))
 
         verdict = check_contact_eligibility(
             source=candidate.source,
@@ -865,23 +868,101 @@ async def _resolve_mx(domains: list[str]) -> dict[str, MxCheck]:
     return dict(result.checks)
 
 
+async def _domain_history(
+    workspace_id: uuid.UUID, domains: list[str]
+) -> dict[str, DomainWindow]:
+    """Trailing delivery outcomes per recipient domain, in one query.
+
+    Computed rather than read from a counter table: ``messages`` is the record
+    of what happened, and a second copy of these numbers would drift the first
+    time a webhook was processed twice or a backfill ran. The same reasoning and
+    the same window as the sender reputation query in the outbox worker.
+
+    A failure returns nothing rather than raising. History is the one layer that
+    is purely additive -- without it the engine simply has one fewer signal --
+    so a slow or unavailable database must not abandon contact discovery.
+
+    **The workspace predicate is written out, not inherited.** The guard that
+    ``workspace_session`` installs is ``with_loader_criteria``, which rewrites
+    ORM entity queries and does not touch ``text()`` at all; and the row-level
+    security policy is permissive when ``titan.workspace_id`` is unset, which is
+    how migrations and the outbox claim legitimately run unscoped. Raw SQL in a
+    scoped session therefore has no isolation of any kind unless it says so
+    itself. Without this clause one workspace's bounce record would downgrade
+    another workspace's lead, and a test in
+    ``tests/intelligence/test_domain_history_query.py`` fails if it is removed.
+    """
+    if not domains:
+        return {}
+    since = _now() - dt.timedelta(days=WINDOW_DAYS)
+    try:
+        async with workspace_session(workspace_id) as session:
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT to_domain,
+                               count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                               count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                               count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                               count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
+                          FROM messages
+                         WHERE workspace_id = :workspace
+                           AND to_domain = ANY(:domains)
+                           AND created_at >= :since
+                         GROUP BY to_domain
+                        """
+                    ),
+                    {
+                        "workspace": workspace_id,
+                        "domains": sorted(set(domains)),
+                        "since": since,
+                    },
+                )
+            ).all()
+    except Exception as exc:
+        logger.warning(
+            "recipient domain history unavailable; proceeding without it",
+            extra={"error_code": type(exc).__name__, "domains": len(set(domains))},
+        )
+        return {}
+
+    return {
+        row.to_domain: DomainWindow(
+            domain=row.to_domain,
+            sent=int(row.sent or 0),
+            delivered=int(row.delivered or 0),
+            bounced=int(row.bounced or 0),
+            complained=int(row.complained or 0),
+        )
+        for row in rows
+    }
+
+
 async def _assess_bounce_risk(
-    candidate: DiscoveredContact, mx: MxCheck | None
+    candidate: DiscoveredContact,
+    mx: MxCheck | None,
+    history: DomainWindow | None,
 ) -> BounceRisk:
     """Run the bounce reduction engine over one discovered address.
 
     Two passes, because the layers differ enormously in cost. The first uses
-    only what is already in hand -- syntax, the domain lists, the MX check
-    resolved in bulk above -- and an address refused there is never sent to a
-    verification service, which is the expensive call and the one that may be
-    metered per address.
+    only what is already in hand -- syntax, the domain lists, and the MX check
+    and delivery history resolved in bulk above -- and an address refused there
+    is never sent to a verification service, which is the expensive call and the
+    one that may be metered per address.
 
     The second pass re-runs the whole assessment with the verification result
     rather than patching the first one. Resolution then happens in exactly one
     place, so there is no path by which a verified answer and a local answer
     get combined differently from how ``assess`` would combine them.
     """
-    risk = assess(email=candidate.normalized, source=candidate.source, mx=mx)
+    risk = assess(
+        email=candidate.normalized,
+        source=candidate.source,
+        mx=mx,
+        history=history,
+    )
     if risk.refusals:
         return risk
 
@@ -903,6 +984,7 @@ async def _assess_bounce_risk(
         email=candidate.normalized,
         source=candidate.source,
         mx=mx,
+        history=history,
         verification=result,
     )
 

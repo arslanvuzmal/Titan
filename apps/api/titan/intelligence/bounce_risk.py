@@ -17,7 +17,9 @@ question:
 3. **Lookalike domain** -- free, local, heuristic. The only layer that catches a
    *squatted* misspelling, which resolves, publishes MX and accepts the message.
 4. **MX** -- one DNS lookup, conclusive in the negative direction only.
-5. **Mailbox verification** -- a purchased round trip, the only layer that can
+5. **Our own sending history** -- one indexed query, and the only evidence
+   nobody can be wrong about: a bounce is the receiver saying so itself.
+6. **Mailbox verification** -- a purchased round trip, the only layer that can
    say a specific mailbox exists, and the only one that can detect catch-all.
 
 **Negative evidence outranks positive.** The layers are not weighted or scored.
@@ -45,6 +47,7 @@ from enum import StrEnum
 
 from titan.db.enums import ContactSource, VerificationStatus, verification_permits_sending
 from titan.intelligence.contacts import email_domain, is_valid_email, normalize_email
+from titan.intelligence.domain_health import DomainHealth, DomainWindow, classify, explain
 from titan.intelligence.mx import MxCheck
 from titan.intelligence.recipient_domains import (
     is_disposable,
@@ -128,15 +131,16 @@ def assess(
     source: ContactSource,
     mx: MxCheck | None = None,
     verification: VerificationResult | None = None,
+    history: DomainWindow | None = None,
 ) -> BounceRisk:
     """Classify a recipient as deliverable, catch-all, risky, unknown or invalid.
 
-    ``mx`` and ``verification`` are optional and absent means "not checked",
-    never "checked and found wanting". A deployment with no verification service
-    still gets the first four layers; one with a broken resolver still gets the
-    local ones. Degrading to a weaker answer is correct here, because every
-    status this can reach without them is either non-sendable or sendable on
-    provenance that was established elsewhere.
+    Every optional argument means "not checked" when absent, never "checked and
+    found wanting". A deployment with no verification service still gets the
+    local layers; one with a broken resolver still gets the rest; a domain
+    nobody has written to yet still gets everything except history. Degrading to
+    a weaker answer is correct here, because every status reachable without them
+    is either non-sendable or sendable on provenance established elsewhere.
     """
     normalized = normalize_email(email)
     signals: list[RiskSignal] = []
@@ -213,7 +217,15 @@ def assess(
             )
         )
 
-    # ---- layer 5: mailbox verification -----------------------------------
+    # ---- layer 5: our own sending history --------------------------------
+    # The only layer that can be wrong about nothing: a bounce is the receiver
+    # telling us in its own words that we were mistaken.
+    if history is not None:
+        health_signal = _history_signal(history)
+        if health_signal is not None:
+            signals.append(health_signal)
+
+    # ---- layer 6: mailbox verification -----------------------------------
     if verification is not None and verification.is_conclusive:
         signals.append(_verification_signal(verification))
 
@@ -223,6 +235,33 @@ def assess(
         email=normalized,
         signals=tuple(signals),
     )
+
+
+def _history_signal(history: DomainWindow) -> RiskSignal | None:
+    """What Titan's own delivery record at this domain argues for.
+
+    BLOCKED refuses. Everything softer downgrades or merely notes, because a
+    per-domain window at Titan's volumes holds two or three messages -- enough
+    to be suspicious of, rarely enough to be certain about. The one exception is
+    a complaint, which ``classify`` already promotes to BLOCKED on its own: a
+    person marked us as spam, and no sample size makes that ambiguous.
+    """
+    health = classify(history)
+    detail = explain(history, health)
+
+    if health is DomainHealth.BLOCKED:
+        return RiskSignal("recipient_domain_blocked", Verdict.REFUSE, detail)
+    if health is DomainHealth.DEGRADED:
+        return RiskSignal("recipient_domain_degraded", Verdict.DOWNGRADE, detail)
+    if health is DomainHealth.WATCH:
+        return RiskSignal("recipient_domain_watch", Verdict.NOTE, detail)
+    if health is DomainHealth.HEALTHY:
+        # Deliberately a NOTE, not a CONFIRM. Titan having delivered to this
+        # domain before says the domain accepts mail; it says nothing about
+        # whether *this* mailbox exists, which is the same trap MX presence
+        # sets and the same answer.
+        return RiskSignal("recipient_domain_healthy", Verdict.NOTE, detail)
+    return None
 
 
 def _verification_signal(result: VerificationResult) -> RiskSignal:
