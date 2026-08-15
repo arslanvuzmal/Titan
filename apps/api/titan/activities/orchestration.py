@@ -56,6 +56,7 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
+from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.notify.operator import NotificationKind, record_notification
@@ -541,6 +542,58 @@ async def _run_manager(
     return effective_limit, effective_score
 
 
+async def _deliverable_budget(
+    session: AsyncSession, workspace: Workspace, now: dt.datetime
+) -> int:
+    """How much the workspace may allocate today: the lower of what a human
+    approved and what the mailboxes can actually send.
+
+    The configured limit is a statement of intent. Three mailboxes at fifty a
+    day is a hundred and fifty, and it stays a hundred and fifty on the mailboxes'
+    first morning, when warm-up will let each of them send five. Dividing the
+    intent rather than the reality does not produce extra sends -- the per-mailbox
+    warm-up ceiling still refuses them at the gate -- it produces a hundred and
+    thirty-five deferrals a day and a set of campaign limits describing volume
+    that was never available. Every number downstream is then a plan against
+    capacity that does not exist.
+
+    Bounding it here fixes that at the only place it can be fixed: the allocator
+    is where a single figure becomes each campaign's share.
+
+    Fails soft *upward*, to the configured limit. That is the behaviour before
+    this existed, and it is safe for the same reason the whole function is: the
+    warm-up ceiling is enforced independently at send time, so a budget that is
+    too generous costs deferrals, never sends.
+    """
+    configured = workspace.daily_send_limit
+    try:
+        slots = await sender_pool.load_slots(session, workspace.id, None, now=now)
+    except Exception as exc:
+        logger.warning(
+            "could not read mailbox capacity; the configured limit stands",
+            extra={
+                "workspace_id": str(workspace.id),
+                "error_code": type(exc).__name__,
+            },
+        )
+        return configured
+
+    ceiling = sender_pool.daily_ceiling(slots)
+    if ceiling >= configured:
+        return configured
+
+    logger.info(
+        "daily sending is bounded by mailbox warm-up, not by configuration",
+        extra={
+            "workspace_id": str(workspace.id),
+            "configured_limit": configured,
+            "deliverable_today": ceiling,
+            "mailboxes": len(slots),
+        },
+    )
+    return ceiling
+
+
 async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> None:
     """Divide the workspace's daily sending between the campaigns competing for it.
 
@@ -605,7 +658,8 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                 )
                 states[str(campaign.id)] = (campaign.id, policy, health)
 
-            allocation = allocate(demands, workspace.daily_send_limit)
+            budget = await _deliverable_budget(session, workspace, now)
+            allocation = allocate(demands, budget)
     except Exception as exc:
         logger.warning(
             "capacity could not be reallocated; existing limits stand",

@@ -104,6 +104,22 @@ def capacity(slots: list[MailboxSlot]) -> int:
     return sum(s.headroom for s in slots)
 
 
+def daily_ceiling(slots: list[MailboxSlot]) -> int:
+    """The pool's whole-day volume, before anything is spent.
+
+    Distinct from :func:`capacity`, and the difference matters wherever a daily
+    budget is being divided. Capacity is what is *left*, so it falls as the day
+    is spent; dividing a budget by it at noon would hand each campaign a smaller
+    daily limit than it had already used that morning, and the limit would keep
+    shrinking every time the allocator ran.
+
+    This is stable across the day instead. Warm-up depends on the day number,
+    not the clock, so the answer at 09:00 and at 16:00 is the same -- which is
+    the property a daily allocation needs.
+    """
+    return sum(s.daily_limit for s in slots if s.available)
+
+
 def choose(slots: list[MailboxSlot]) -> Selection:
     """The mailbox with the most room left today.
 
@@ -321,6 +337,7 @@ __all__ = [
     "Selection",
     "capacity",
     "choose",
+    "daily_ceiling",
     "describe",
     "describe_slot",
     "load_slots",

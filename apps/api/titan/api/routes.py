@@ -12,8 +12,9 @@ exists, which is an existence oracle.
 from __future__ import annotations
 
 import datetime as dt
+import enum
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func, select
@@ -53,6 +54,8 @@ from titan.db.enums import (
     ContactSource,
     DraftStatus,
     Industry,
+    Region,
+    SubRegion,
     SuppressionReason,
 )
 from titan.db.models import (
@@ -78,6 +81,7 @@ from titan.db.session import (
 )
 from titan.delivery import quotas
 from titan.delivery.suppression import suppress
+from titan.policy.schedule import default_window_for, describe_derivation
 
 router = APIRouter(prefix="/api/v1")
 
@@ -90,6 +94,30 @@ def _request_id(request: Request) -> str | None:
 
 async def _not_found(kind: str) -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, f"{kind} not found")
+
+
+_EnumT = TypeVar("_EnumT", bound=enum.StrEnum)
+
+
+def _parse_enum(
+    kind: type[_EnumT], value: str | None, field: str, fallback: _EnumT
+) -> _EnumT:
+    """Read an optional enum field, refusing a value that is not one.
+
+    Rejects rather than falling back, because the fallback here is
+    ``unspecified`` and silently accepting a typo would leave the campaign with
+    no market -- and therefore no clock -- while the request looked successful.
+    """
+    if value is None or not value.strip():
+        return fallback
+    try:
+        return kind(value.strip().lower())
+    except ValueError:
+        allowed = ", ".join(sorted(member.value for member in kind))
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"{field} must be one of: {allowed}",
+        ) from None
 
 
 # ==========================================================================
@@ -289,6 +317,11 @@ async def create_campaign(
                 status.HTTP_409_CONFLICT, f"campaign slug {payload.slug!r} already exists"
             )
 
+        region = _parse_enum(Region, payload.region, "region", Region.UNSPECIFIED)
+        sub_region = _parse_enum(
+            SubRegion, payload.sub_region, "sub_region", SubRegion.UNSPECIFIED
+        )
+
         campaign = Campaign(
             workspace_id=principal.workspace_id,
             name=payload.name,
@@ -299,9 +332,19 @@ async def create_campaign(
             target_geography=payload.target_geography,
             target_country_code=payload.target_country_code,
             offer_summary=payload.offer_summary,
+            region=region,
+            sub_region=sub_region,
         )
         session.add(campaign)
         await session.flush()
+
+        # The market decides the working week and the hour sending opens, and it
+        # decides them *here* rather than at send time. A one-off backfill gave
+        # the campaigns that existed in August their market's working week and
+        # then nothing carried the rule forward, so every campaign created after
+        # it was Monday to Friday whatever market it was aimed at. Deriving at
+        # creation is what makes it a rule instead of an event.
+        window = default_window_for(region)
 
         # A campaign is created in the most restrictive mode with sending off.
         # It cannot be born permissive.
@@ -312,6 +355,9 @@ async def create_campaign(
                 operating_mode=OperatingMode.RESEARCH_ONLY,
                 sending_authorized=False,
                 min_lead_score=payload.min_lead_score,
+                send_window_start_hour=window.start_hour,
+                send_window_end_hour=window.end_hour,
+                send_days=list(window.days),
             )
         )
         await audit.record(
@@ -322,7 +368,17 @@ async def create_campaign(
             resource_id=str(campaign.id),
             actor_user_id=principal.user_id,
             request_id=_request_id(request),
-            detail={"slug": payload.slug, "name": payload.name},
+            detail={
+                "slug": payload.slug,
+                "name": payload.name,
+                "region": region.value,
+                "sub_region": sub_region.value,
+                # The derivation is not recoverable from the stored hours: 08:00
+                # could be a 09:00 market with an hour's lead-in or a market that
+                # starts at eight. Recorded so it stays answerable.
+                "send_window": window.describe(),
+                "send_window_reason": describe_derivation(region),
+            },
         )
         return CampaignOut.model_validate(campaign)
 

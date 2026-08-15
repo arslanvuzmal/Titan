@@ -19,6 +19,14 @@ none. The old check failed closed on that -- unknown timezone meant no send, eve
 -- which is safe and quietly discards every lead whose address Places did not
 resolve. A campaign declaring its market can now answer for them.
 
+**Sending opens an hour before work does.** The window is not the working day;
+it is the working day with an hour in front of it. A cold approach gets one
+reliable pass -- the first one, before the inbox has filled -- so arriving at
+08:00 for a 09:00 market is worth more than arriving at 11:00. That hour is
+derived from the market's working hours rather than typed in, because a literal
+``8`` is right for a 09:00 market, an hour late for Germany, and carries no
+record of which it was meant to be.
+
 **The global quiet hours stay, underneath, as a floor.** A campaign window is
 configuration, and configuration can be wrong: 22:00 to 23:00 is a legal pair of
 integers. The process-wide setting remains a bound that no campaign can
@@ -63,7 +71,26 @@ REGION_TIMEZONES: dict[Region, str | None] = {
 MONDAY_TO_FRIDAY: tuple[int, ...] = (0, 1, 2, 3, 4)
 SUNDAY_TO_THURSDAY: tuple[int, ...] = (6, 0, 1, 2, 3)
 
-#: The working week a new campaign starts with, per market.
+
+@dataclass(frozen=True, slots=True)
+class WorkingHours:
+    """When a market actually works, in its own local time.
+
+    Distinct from a :class:`SendWindow` on purpose, and the distinction is the
+    point: these are the recipient's hours, a fact about them, while the send
+    window is ours and is *derived* from these. Collapsing the two -- which is
+    what a bare ``start_hour = 8`` did -- loses the reason the window opens when
+    it does, so nobody editing it later can tell whether 08:00 was a considered
+    choice or a leftover.
+    """
+
+    #: First hour of the working day. End hour is exclusive.
+    start_hour: int
+    end_hour: int
+    days: tuple[int, ...]
+
+
+#: The local working day per market.
 #:
 #: Middle East is the one that is not Monday to Friday, and it is also the one
 #: that is genuinely contested. Saudi Arabia and most of the Levant work Sunday
@@ -72,17 +99,48 @@ SUNDAY_TO_THURSDAY: tuple[int, ...] = (6, 0, 1, 2, 3)
 #: default of the two: sending on a Sunday to somebody who does not work Sundays
 #: is a message read on Monday, while sending on a Friday to somebody observing
 #: Jumu'ah is a message read as ignorant. A UAE-specific campaign should override
-#: this, which is why it is a per-campaign field rather than a constant.
-REGION_SEND_DAYS: dict[Region, tuple[int, ...]] = {
-    Region.USA: MONDAY_TO_FRIDAY,
-    Region.CANADA: MONDAY_TO_FRIDAY,
-    Region.UK: MONDAY_TO_FRIDAY,
-    Region.EUROPE: MONDAY_TO_FRIDAY,
-    Region.AUSTRALIA: MONDAY_TO_FRIDAY,
-    Region.MIDDLE_EAST: SUNDAY_TO_THURSDAY,
-    Region.OTHER: MONDAY_TO_FRIDAY,
-    Region.UNSPECIFIED: MONDAY_TO_FRIDAY,
+#: this, which is why the result lands in per-campaign columns rather than being
+#: read from here at send time.
+#:
+#: Hours are conservative where a market is split. UK offices commonly run to
+#: 17:30 and this says 17, because the end hour is exclusive and stopping before
+#: people leave costs one hour of sending, where sending after they have left
+#: costs a reply.
+REGION_WORKING_HOURS: dict[Region, WorkingHours] = {
+    Region.USA: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
+    Region.CANADA: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
+    Region.UK: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
+    # Germany is the representative clock, and German offices start at eight.
+    # This is the one market whose lead-in reaches the floor below.
+    Region.EUROPE: WorkingHours(8, 17, MONDAY_TO_FRIDAY),
+    Region.AUSTRALIA: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
+    # Gulf offices commonly run 09:00-18:00.
+    Region.MIDDLE_EAST: WorkingHours(9, 18, SUNDAY_TO_THURSDAY),
+    Region.OTHER: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
+    Region.UNSPECIFIED: WorkingHours(9, 17, MONDAY_TO_FRIDAY),
 }
+
+#: The working week a new campaign starts with, per market. Derived rather than
+#: written out a second time: two tables that must agree eventually will not.
+REGION_SEND_DAYS: dict[Region, tuple[int, ...]] = {
+    region: hours.days for region, hours in REGION_WORKING_HOURS.items()
+}
+
+#: How far before the working day a campaign may begin sending.
+#:
+#: Mail that arrives during the working day lands partway down an inbox that has
+#: been filling since somebody sat down. Mail that arrives an hour before lands
+#: at the top of the first pass, which is the only pass a cold approach reliably
+#: gets. One hour, not three: at 06:00 the message is no longer near the top by
+#: 09:00, it is merely older, and a timestamp far outside working hours is
+#: itself a mark of automation.
+LEAD_IN_HOURS = 1
+
+#: The earliest local hour the lead-in may reach. Binds for Europe, whose
+#: working day starts at 08:00. A floor rather than an assertion because the
+#: table above is editable and a market entered with a 06:00 start would
+#: otherwise open the window at 05:00, which reads as a machine.
+EARLIEST_SEND_HOUR = 7
 
 DEFAULT_START_HOUR = 8
 DEFAULT_END_HOUR = 17
@@ -175,8 +233,61 @@ class SendWindow:
         return f"{self.start_hour:02d}:00-{self.end_hour:02d}:00 on {chosen}"
 
 
+def working_hours_for(region: Region) -> WorkingHours:
+    """The market's local working day, or a conventional one where it has none."""
+    return REGION_WORKING_HOURS.get(region, WorkingHours(9, 17, MONDAY_TO_FRIDAY))
+
+
+def lead_in_start_hour(working_start_hour: int) -> int:
+    """The hour sending opens, given the hour work begins.
+
+    Clamped at both ends. ``EARLIEST_SEND_HOUR`` stops the lead-in reaching into
+    the night, and a working day starting at midnight cannot produce -1.
+    """
+    return max(EARLIEST_SEND_HOUR, working_start_hour - LEAD_IN_HOURS, 0)
+
+
 def default_window_for(region: Region) -> SendWindow:
-    return SendWindow(days=REGION_SEND_DAYS.get(region, MONDAY_TO_FRIDAY))
+    """The send window a new campaign in this market starts with.
+
+    The window opens ``LEAD_IN_HOURS`` before the market's working day and
+    closes when it does, on the days that market works. So a US campaign sends
+    08:00-17:00 Monday to Friday, and a Middle East one sends 08:00-18:00 Sunday
+    to Thursday -- both an hour ahead of their own morning rather than an hour
+    ahead of ours.
+
+    This is a *starting point*, written into the campaign's own columns at
+    creation. It is not consulted again at send time, so a human who edits the
+    window keeps their edit.
+    """
+    hours = working_hours_for(region)
+    return SendWindow(
+        start_hour=lead_in_start_hour(hours.start_hour),
+        end_hour=hours.end_hour,
+        days=hours.days,
+    )
+
+
+def describe_derivation(region: Region) -> str:
+    """Why the window is what it is, for an audit entry or an operator.
+
+    Recorded at creation because the derivation is not recoverable from the
+    stored hours afterwards: 08:00 could be a 09:00 market with an hour's
+    lead-in, or a market that simply starts at eight.
+    """
+    hours = working_hours_for(region)
+    window = default_window_for(region)
+    opens = window.start_hour
+    clamped = (
+        " (held at the earliest permitted hour)"
+        if opens > hours.start_hour - LEAD_IN_HOURS
+        else ""
+    )
+    return (
+        f"{region.value} works {hours.start_hour:02d}:00-{hours.end_hour:02d}:00 "
+        f"local; sending opens {opens:02d}:00{clamped}, "
+        f"{LEAD_IN_HOURS}h ahead of the working day"
+    )
 
 
 def resolve_timezone(
@@ -227,12 +338,19 @@ def local_time(moment: dt.datetime, timezone: str | None) -> dt.datetime | None:
 __all__ = [
     "DEFAULT_END_HOUR",
     "DEFAULT_START_HOUR",
+    "EARLIEST_SEND_HOUR",
+    "LEAD_IN_HOURS",
     "MONDAY_TO_FRIDAY",
     "REGION_SEND_DAYS",
     "REGION_TIMEZONES",
+    "REGION_WORKING_HOURS",
     "SUNDAY_TO_THURSDAY",
     "SendWindow",
+    "WorkingHours",
     "default_window_for",
+    "describe_derivation",
+    "lead_in_start_hour",
     "local_time",
     "resolve_timezone",
+    "working_hours_for",
 ]
