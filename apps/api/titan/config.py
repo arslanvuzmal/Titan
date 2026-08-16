@@ -102,8 +102,13 @@ class Settings(BaseSettings):
     crawl_timeout_seconds: int = Field(default=120, ge=5, le=900)
     crawl_max_response_bytes: int = Field(default=5_000_000, ge=10_000)
     crawl_max_redirects: int = Field(default=5, ge=0, le=20)
+    #: Sent to every site Titan crawls, and the one place the system names
+    #: itself to a stranger. The URL has to resolve to something a person can
+    #: read to decide whether to allow the crawler -- a domain the owner does
+    #: not use makes the identification worthless and the crawl anonymous in
+    #: practice.
     crawl_user_agent: str = (
-        "TitanOS-Research/0.2 (+https://arslanvuzmallone.dev/bot; evidence-only)"
+        "TitanOS-Research/0.2 (+https://arslanvuzmallone.com/bot; evidence-only)"
     )
     crawl_respect_robots: bool = True
 
@@ -329,7 +334,7 @@ class Settings(BaseSettings):
     #: is deliberately configuration rather than a hardcoded string that goes
     #: stale without anyone noticing.
     owner_years_experience: int = Field(default=2, ge=0, le=80)
-    owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.dev")
+    owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.com")
     owner_portfolio_fallback_url: AnyHttpUrl = AnyHttpUrl(
         "https://arslanvuzmallone.vercel.app"
     )

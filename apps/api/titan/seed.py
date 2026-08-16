@@ -106,10 +106,10 @@ async def ensure_workspace(slug: str, owner_email: str) -> tuple[uuid.UUID, uuid
                 SenderIdentity(
                     workspace_id=workspace.id,
                     label="primary",
-                    from_email="arslan@mail.arslanvuzmallone.dev",
+                    from_email="outreach@arslanvuzmallone.com",
                     from_name=settings.owner_name,
-                    reply_to_email="arslan@mail.arslanvuzmallone.dev",
-                    sending_domain="mail.arslanvuzmallone.dev",
+                    reply_to_email="outreach@arslanvuzmallone.com",
+                    sending_domain="arslanvuzmallone.com",
                     domain_verified=False,
                     spf_ok=False,
                     dkim_ok=False,
@@ -297,7 +297,7 @@ async def main() -> int:
     parser.add_argument("--region", default="GB")
     parser.add_argument("--limit", type=int, default=12)
     parser.add_argument("--workspace", default="titan")
-    parser.add_argument("--email", default="arslan@arslanvuzmallone.dev")
+    parser.add_argument("--email", default="arslan@arslanvuzmallone.com")
     parser.add_argument("--campaign", default="uk-dental-practices")
     args = parser.parse_args()
 

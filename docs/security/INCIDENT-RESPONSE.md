@@ -56,7 +56,7 @@ Content-Type: application/json
 1. **Containment:** Automatically paused by outbox worker when daily threshold exceeded.
 2. **Analysis:** Export list of bounced/complained addresses from `provider_events`.
 3. **Suppression Enforcement:** Verify addresses are present in `suppression_entries`.
-4. **Deliverability Check:** Validate SPF (`v=spf1 include:resend.com ~all`), DKIM, and DMARC (`p=reject`) DNS records for `arslanvuzmallone.dev` using `dig txt`.
+4. **Deliverability Check:** Validate SPF (`v=spf1 include:resend.com ~all`), DKIM, and DMARC (`p=reject`) DNS records for `arslanvuzmallone.com` using `dig txt`.
 
 ### Playbook C: SSRF Alarm Triggered
 

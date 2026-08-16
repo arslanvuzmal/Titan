@@ -116,6 +116,35 @@ async def variant_comparison(
     return experiments.best_against_control(arms)
 
 
+#: The markets outreach is actually aimed at. ``OTHER`` and ``UNSPECIFIED`` are
+#: excluded deliberately: one means "somewhere else", the other means "nobody
+#: said", and neither is a market capacity could be moved into.
+REAL_REGIONS: tuple[Region, ...] = (
+    Region.USA,
+    Region.CANADA,
+    Region.UK,
+    Region.EUROPE,
+    Region.AUSTRALIA,
+    Region.MIDDLE_EAST,
+)
+
+
+def unconfigured_markets(book: portfolio.Portfolio) -> tuple[Region, ...]:
+    """Markets with no campaign at all, in declaration order.
+
+    Reported beside the portfolio rather than folded into it as zero-filled
+    slices. A market nobody has configured has no delivery record, and giving it
+    a row of zeros would let it be sorted and compared against markets that have
+    one -- "0% bounced" for a market that has never sent reads as the healthiest
+    row in the table.
+
+    This is what makes the view the *six* markets rather than only the occupied
+    corners of it: capacity can only be reallocated toward somewhere you can see.
+    """
+    present = {slice_.region for slice_ in book.slices}
+    return tuple(region for region in REAL_REGIONS if region not in present)
+
+
 async def portfolio_view(
     session: AsyncSession,
     *,
@@ -197,4 +226,10 @@ async def portfolio_view(
     return portfolio.summarise(slices)
 
 
-__all__ = ["portfolio_view", "timing_report", "variant_comparison"]
+__all__ = [
+    "REAL_REGIONS",
+    "portfolio_view",
+    "timing_report",
+    "unconfigured_markets",
+    "variant_comparison",
+]
