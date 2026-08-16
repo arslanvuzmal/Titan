@@ -29,7 +29,6 @@ from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import Select, func, or_, select
 from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,7 +84,6 @@ from titan.db.models import (
 from titan.db.session import workspace_session
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.suppression import is_suppressed
-from titan.intelligence import insights, timing
 from titan.intelligence import domain_health, insights, timing
 from titan.intelligence import portfolio as portfolio_mod
 from titan.intelligence.contacts import check_contact_eligibility
