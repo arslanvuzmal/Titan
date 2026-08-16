@@ -25,9 +25,6 @@ from titan.db.models import (
     MessageDraft,
     OrganizationLocation,
 )
-from sqlalchemy import select
-from titan.db.enums import DraftStatus, MessageState
-from titan.db.models import Lead, Message, MessageDraft
 from titan.delivery.smartlead_reconcile import dedupe_key, reconcile_send
 
 from tests.delivery.conftest import build_sendable

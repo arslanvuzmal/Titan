@@ -23,11 +23,12 @@ capability checks and audit writes live.
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +44,8 @@ from titan.api.schemas import (
     OrganizationLocationOut,
     OrganizationOut,
     OrganizationSummary,
+    OutcomeRollupOut,
+    OutcomeSliceOut,
     TimelineEventOut,
 )
 from titan.api.security import Principal, require
@@ -70,8 +73,14 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import workspace_session
+from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence.contacts import check_contact_eligibility
+from titan.intelligence.rollups import (
+    DEFAULT_WINDOW_DAYS,
+    Dimension,
+    outcomes_by,
+)
 from titan.intelligence.scoring import band_for
 
 router = APIRouter(prefix="/api/v1", tags=["crm"])
@@ -852,6 +861,81 @@ async def list_meetings(
             )
             for row, name in await session.execute(query)
         ]
+
+
+@router.get("/analytics/outcomes", response_model=list[OutcomeRollupOut], tags=["crm"])
+async def outcome_rollups(
+    principal: Principal = Depends(require("research:read")),
+    dimension: str | None = Query(
+        None,
+        description=(
+            "campaign, sender, recipient_domain, lead_source, local_slot or "
+            "variant. Omitted returns every grouping."
+        ),
+    ),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+    campaign_id: uuid.UUID | None = Query(None),
+) -> list[OutcomeRollupOut]:
+    """Delivery outcomes, grouped the ways decisions are actually made.
+
+    The counters are the same across every grouping on purpose. A bounce rate
+    computed one way for senders and another for domains would make the two
+    incomparable, and comparing them is what this is for.
+
+    Rates come back null below the sample floor rather than as a number nobody
+    should act on. A client rendering these must show "not enough data yet"
+    rather than 0% -- the difference between "measured clean" and "not measured"
+    is the whole point.
+    """
+    if dimension is not None:
+        try:
+            wanted = [Dimension(dimension)]
+        except ValueError:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"unknown dimension {dimension!r}; expected one of "
+                + ", ".join(d.value for d in Dimension),
+            ) from None
+    else:
+        wanted = list(Dimension)
+
+    now = dt.datetime.now(dt.UTC)
+    rollups: list[OutcomeRollupOut] = []
+    async with workspace_session(principal.workspace_id) as session:
+        for each in wanted:
+            slices = await outcomes_by(
+                session,
+                each,
+                now=now,
+                window_days=window_days,
+                campaign_id=campaign_id,
+            )
+            rollups.append(
+                OutcomeRollupOut(
+                    dimension=each.value,
+                    window_days=window_days,
+                    sample_floor=MIN_SAMPLE_FOR_RATES,
+                    slices=[
+                        OutcomeSliceOut(
+                            key=s.key,
+                            label=s.label,
+                            sent=s.sent,
+                            delivered=s.delivered,
+                            bounced=s.bounced,
+                            complained=s.complained,
+                            replied=s.replied,
+                            positive_replies=s.positive_replies,
+                            meetings=s.meetings,
+                            has_signal=s.has_signal,
+                            bounce_rate=s.bounce_rate,
+                            reply_rate=s.reply_rate,
+                            positive_reply_rate=s.positive_reply_rate,
+                        )
+                        for s in slices
+                    ],
+                )
+            )
+    return rollups
 
 
 __all__ = ["apply_lead_filters", "enrich_leads", "router"]

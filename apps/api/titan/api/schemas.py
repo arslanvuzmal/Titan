@@ -453,6 +453,40 @@ class UsageOut(BaseModel):
     model_calls: int
 
 
+class OutcomeSliceOut(BaseModel):
+    """One group's delivery record. Rates are null below the sample floor.
+
+    Null is deliberate and is not the same as zero. A slice with four sends and
+    one bounce has no bounce rate -- publishing 25% invites acting on it, and
+    any ranking built from such numbers sorts mostly by who has the smallest
+    sample. The UI should render "not enough data yet", never "0%".
+    """
+
+    key: str
+    label: str
+    sent: int
+    delivered: int
+    bounced: int
+    complained: int
+    replied: int
+    positive_replies: int
+    meetings: int
+    has_signal: bool
+    bounce_rate: float | None = None
+    reply_rate: float | None = None
+    positive_reply_rate: float | None = None
+
+
+class OutcomeRollupOut(BaseModel):
+    """Delivery outcomes grouped one way, plus what the grouping means."""
+
+    dimension: str
+    window_days: int
+    #: Below this many sends a slice carries no rate at all.
+    sample_floor: int
+    slices: list[OutcomeSliceOut]
+
+
 __all__ = [
     "ApprovalDecisionRequest",
     "ApprovalOut",
@@ -473,6 +507,8 @@ __all__ = [
     "OrganizationLocationOut",
     "OrganizationOut",
     "OrganizationSummary",
+    "OutcomeRollupOut",
+    "OutcomeSliceOut",
     "Page",
     "ResearchStartRequest",
     "ScoreOut",

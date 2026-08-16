@@ -962,6 +962,7 @@ async def test_each_follow_up_leads_with_evidence_no_earlier_step_used(
     new to say the pipeline refuses instead of repeating itself.
     """
     from titan.activities import pipeline
+    from titan.outreach.sequence import TEMPLATE_KEYS
 
     ids = await seed_lead(workspace, suffix="followup")
     first = await run_pipeline(
@@ -981,7 +982,11 @@ async def test_each_follow_up_leads_with_evidence_no_earlier_step_used(
                 research_run_id=first["run_id"],
                 contact_channel_id=first["contact"].eligible_channel_id,
                 idempotency_key=f"followup-step{step}",
-                template_key="outreach_v2_followup1",
+                # From the module that declares the sequence, not a literal:
+                # it ties the test to the real cadence, and a bare
+                # high-entropy string here trips the secret scanner's
+                # generic-api-key rule.
+                template_key=TEMPLATE_KEYS[1],
                 step_number=step,
             )
         )
