@@ -300,8 +300,8 @@ def check_alignment(
     """Whether the visible From: domain aligns with the authenticated domain.
 
     DMARC only passes if SPF or DKIM authenticates a domain that *aligns* with
-    the From: header. Sending as ``arslan@arslanvuzmallone.dev`` through a
-    subdomain that signs as ``mail.arslanvuzmallone.dev`` aligns in relaxed mode
+    the From: header. Sending as ``arslan@arslanvuzmallone.com`` through a
+    subdomain that signs as ``mail.arslanvuzmallone.com`` aligns in relaxed mode
     (shared organizational domain) but fails in strict mode. Getting this wrong
     is the single most common cause of "everything looks configured but mail
     still goes to spam".

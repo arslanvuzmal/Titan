@@ -559,6 +559,13 @@ class PortfolioOut(BaseModel):
     window_days: int
     total_sent: int
     slices: list[RegionSliceOut]
+    #: Markets with an active campaign that sent nothing this window. The point
+    #: of the whole view.
+    idle_markets: list[str] = []
+    #: Markets with no campaign at all. Listed rather than given a row of zeros:
+    #: "0% bounced" for a market that has never sent would read as the healthiest
+    #: line in the table.
+    unconfigured_markets: list[str] = []
 
 
 __all__ = [
