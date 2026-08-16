@@ -83,6 +83,7 @@ from titan.db.session import (
 )
 from titan.delivery import quotas
 from titan.delivery.suppression import suppress
+from titan.outreach.provisioning import ensure_sequence
 from titan.policy.schedule import default_window_for, describe_derivation
 
 router = APIRouter(prefix="/api/v1")
@@ -362,6 +363,16 @@ async def create_campaign(
                 send_days=list(window.days),
             )
         )
+        # The follow-up sequence, created with the campaign rather than left to
+        # be added later. Left to be added later is exactly what happened: the
+        # steps and the scheduler both existed, nothing wrote the row that joins
+        # them, and every campaign contacted each lead once and stopped.
+        await ensure_sequence(
+            session,
+            workspace_id=principal.workspace_id,
+            campaign_id=campaign.id,
+        )
+
         await audit.record(
             session,
             workspace_id=principal.workspace_id,

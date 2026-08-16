@@ -8,6 +8,7 @@
                            # or list/manage campaigns and sending accounts
     titan set-passcode     # give an existing account a username and passcode
     titan schedules        # install the recurring jobs that close the loop
+    titan sequences        # backfill the follow-up sequence on older campaigns
 
 ``env-example`` exists so that the documented environment and the code that
 reads it cannot drift: the file is generated, never hand-maintained, which is
@@ -558,6 +559,72 @@ def cmd_schedules(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def cmd_sequences(args: argparse.Namespace) -> int:
+    """Give campaigns created before sequence provisioning existed their steps.
+
+    Every campaign made before this was wired has no ``email_sequences`` row, so
+    the follow-up scheduler finds nothing owed and each lead is contacted once.
+    New campaigns get theirs at creation; this is for the ones that predate it.
+
+    Idempotent: a campaign that already has an active sequence is left alone,
+    because replacing it would orphan the drafts referencing its steps.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Campaign, Workspace
+    from titan.db.session import workspace_unit_of_work
+    from titan.outreach.provisioning import ensure_sequence
+
+    async def run() -> int:
+        from titan.db.session import get_sessionmaker
+
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id, Workspace.slug)
+            if args.workspace:
+                query = query.where(
+                    Workspace.slug == args.workspace
+                    if not _looks_like_uuid(args.workspace)
+                    else Workspace.id == _uuid.UUID(args.workspace)
+                )
+            workspaces = (await session.execute(query)).all()
+
+        if not workspaces:
+            print("no workspaces matched")
+            return 1
+
+        created = 0
+        skipped = 0
+        for workspace_id, slug in workspaces:
+            async with workspace_unit_of_work(workspace_id) as session:
+                campaigns = (await session.execute(select(Campaign))).scalars().all()
+                for campaign in campaigns:
+                    if args.dry_run:
+                        print(f"  would check  {slug}/{campaign.slug}")
+                        continue
+                    sequence = await ensure_sequence(
+                        session,
+                        workspace_id=workspace_id,
+                        campaign_id=campaign.id,
+                    )
+                    if sequence is None:
+                        skipped += 1
+                        print(f"  has one      {slug}/{campaign.slug}")
+                    else:
+                        created += 1
+                        print(f"  provisioned  {slug}/{campaign.slug}")
+
+        if args.dry_run:
+            print("PLAN (nothing was changed)")
+            return 0
+        print(f"{created} provisioned, {skipped} already had a sequence")
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="titan", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -641,6 +708,20 @@ def main() -> int:
         ),
     )
     schedules_parser.set_defaults(func=cmd_schedules)
+
+    sequences_parser = sub.add_parser(
+        "sequences",
+        help="give campaigns created before provisioning existed their steps",
+    )
+    sequences_parser.add_argument(
+        "--workspace", default=None, help="workspace slug or id (default: all)"
+    )
+    sequences_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print which campaigns would be checked and change nothing",
+    )
+    sequences_parser.set_defaults(func=cmd_sequences)
 
     args = parser.parse_args()
     return int(args.func(args))
