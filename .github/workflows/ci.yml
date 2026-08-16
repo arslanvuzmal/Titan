@@ -256,6 +256,27 @@ jobs:
   # own, and the 403 above has some other cause. Left unresolved rather than
   # guessed at a third time -- the next push to main will say.
   #
+  # 2026-08-14, read rather than guessed:
+  #
+  #   GET /repos/arslanvuzmal/titan-os/actions/permissions/workflow
+  #   {"default_workflow_permissions": "read", ...}
+  #
+  # and the package did not exist -- GET /users/arslanvuzmal/packages listed
+  # two unrelated containers and no titan-api. So every failure so far was on
+  # *creating* a package, never on writing to one that was already there, which
+  # is a different permission check and the one the note above did not separate.
+  #
+  # The default is now "write". That does not prove the elevation argument above
+  # was wrong; it removes the variable, which is worth more than being right
+  # about it. If a push to main still 403s, the remaining cause is package
+  # creation policy rather than token scope, and the fix is a PAT with
+  # write:packages in repository secrets instead of GITHUB_TOKEN.
+  #
+  # Still unproven either way until something actually pushes: this cannot be
+  # tested from a branch. workflow_dispatch only sees workflows present on the
+  # default branch, so a throwaway probe workflow on a side branch is not
+  # dispatchable, and the publish step here is guarded on refs/heads/main.
+  #
   # This is why the failure looked intermittent and tree-independent: images are
   # only pushed from main (see `push:` below), so every branch and pull-request
   # run passes regardless. A green PR does not prove main will build.
