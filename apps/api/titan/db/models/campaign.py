@@ -170,6 +170,55 @@ class CampaignSender(Base, WorkspaceScoped, TimestampMixin):
     )
 
 
+class MailboxRampState(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
+    """What the ramp must remember about one provider mailbox between runs.
+
+    Only two things, and both exist because the provider has a single
+    ``max_email_per_day`` field per mailbox and the ramp writes it.
+
+    ``ceiling`` is the number a human configured. It cannot be re-read from the
+    provider each run, because by then it is the ramp's own last output -- see
+    :func:`titan.delivery.mailbox_ramp.observe_ceiling` for what that costs.
+
+    ``last_written_limit`` is what makes a human's edit distinguishable from the
+    ramp's own write, and so it is the only thing that lets the ceiling move.
+
+    Keyed on the provider's id rather than on a Titan sender identity: these
+    mailboxes exist in Smartlead and may have no row here at all. The mailbox is
+    the thing receivers judge, so the mailbox is the thing tracked.
+    """
+
+    __tablename__ = "mailbox_ramp_state"
+    __extra_table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "provider",
+            "external_id",
+            name="uq_mailbox_ramp_state_mailbox",
+        ),
+        CheckConstraint("ceiling >= 0", name="ceiling_non_negative"),
+        CheckConstraint(
+            "last_written_limit IS NULL OR last_written_limit >= 0",
+            name="last_written_non_negative",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    #: Which system the mailbox lives in, so a second provider cannot collide
+    #: with Smartlead on a numeric id that means something else there.
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Carried for diagnosis only. The provider's id is the key; an address can
+    #: be reassigned to a different account without the ramp's history moving.
+    from_email: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_written_limit: Mapped[int | None] = mapped_column(Integer)
+    #: When the ramp last wrote, so an operator can tell a mailbox this manages
+    #: from one it has only ever observed.
+    last_written_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     """The persisted, authoritative policy for a campaign.
 

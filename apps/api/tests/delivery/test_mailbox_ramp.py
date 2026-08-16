@@ -12,12 +12,15 @@ climbing past what a human authorised.
 from __future__ import annotations
 
 import datetime as dt
+import itertools
+import math
 
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES, ReputationWindow
 from titan.delivery.mailbox_ramp import (
     MIN_DAILY,
     WEEKLY_STEPS,
     decide,
+    observe_ceiling,
     scheduled_share,
     summarise,
     week_index,
@@ -239,3 +242,103 @@ def test_each_decision_explains_itself_in_its_own_terms() -> None:
     argue with."""
     assert "sample floor" in ramp(evidence=unmeasured(3)).describe()
     assert "cut on delivery evidence" in ramp(current=40, evidence=bouncing()).describe()
+
+
+# ---------------------------------------------------------------- the ceiling
+#
+# The ramp writes the provider's only volume field, so the ceiling cannot be
+# read back from it. These are the tests for that, and the first one is the
+# regression: without ``observe_ceiling`` the ramp consumed its own output and
+# drove every mailbox to the floor within a week.
+
+
+def _ratchet(days: int, *, remember: bool) -> list[int]:
+    """Consecutive daily runs against a mailbox a human set to 50.
+
+    ``remember=False`` reproduces the original defect, where ceiling and current
+    were both read from ``message_per_day``.
+
+    The evidence is deliberately thin. That is not a contrived case -- it is
+    the state every new mailbox is in, and it was the live state when this was
+    found: forty sends against a fifty-send floor, so no rate meant anything
+    yet. The below-floor branch holds at ``min(current, scheduled)``, and it is
+    that ``scheduled`` that silently became a share of the previous output.
+    """
+    limit = 50
+    stored: int | None = None
+    written: int | None = None
+    history = [limit]
+    for day in range(days):
+        if remember:
+            ceiling = observe_ceiling(
+                observed=limit, stored_ceiling=stored, last_written=written
+            )
+            stored = ceiling
+        else:
+            ceiling = limit
+        decision = decide(
+            mailbox="m@example.com",
+            ceiling=ceiling,
+            current=limit,
+            first_send_at=NOW - dt.timedelta(days=9),
+            now=NOW + dt.timedelta(days=day),
+            evidence=unmeasured(40),
+        )
+        if decision.changed:
+            written = decision.target
+        limit = decision.target
+        history.append(limit)
+    return history
+
+
+def test_the_ramp_consumed_its_own_output_before_the_ceiling_was_remembered() -> None:
+    """The defect, kept as a test so it cannot come back quietly.
+
+    A mailbox a human set to 50 ends at the floor -- not because anything was
+    wrong with it, but because each write became the next run's ceiling.
+    """
+    history = _ratchet(6, remember=False)
+
+    assert history[0] == 50
+    assert history[-1] == MIN_DAILY
+    # Monotonically down, never once back up: recovery is impossible because
+    # every share is a share of a ceiling that no longer exists.
+    assert all(b <= a for a, b in itertools.pairwise(history))
+
+
+def test_a_remembered_ceiling_holds_the_mailbox_at_its_scheduled_share() -> None:
+    """The fix. Same mailbox, same evidence, same six runs."""
+    history = _ratchet(6, remember=True)
+
+    week_two_share = WEEKLY_STEPS[1]
+    assert history[-1] == math.ceil(week_two_share * 50)
+    # It steps once, to what week two allows, and then stays there.
+    assert len(set(history[1:])) == 1
+
+
+def test_first_sight_adopts_whatever_the_operator_configured() -> None:
+    assert observe_ceiling(observed=50, stored_ceiling=None, last_written=None) == 50
+
+
+def test_the_ramps_own_value_does_not_move_the_ceiling() -> None:
+    assert (
+        observe_ceiling(observed=18, stored_ceiling=50, last_written=18) == 50
+    ), "reading back the ramp's own write must not lower what a human authorised"
+
+
+def test_a_human_raising_the_limit_raises_the_ceiling() -> None:
+    assert observe_ceiling(observed=80, stored_ceiling=50, last_written=18) == 80
+
+
+def test_a_human_lowering_the_limit_lowers_the_ceiling() -> None:
+    """Adopted in both directions.
+
+    A person asking for less is the one instruction this module may never climb
+    back over, so a reduction is a new ceiling rather than a number to grow out
+    of.
+    """
+    assert observe_ceiling(observed=20, stored_ceiling=50, last_written=18) == 20
+
+
+def test_a_ceiling_is_never_negative() -> None:
+    assert observe_ceiling(observed=-5, stored_ceiling=None, last_written=None) == 0

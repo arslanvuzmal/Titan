@@ -15,6 +15,7 @@ from titan.db.models.campaign import (
     CampaignPolicy,
     CampaignSender,
     IndustryPlaybook,
+    MailboxRampState,
 )
 from titan.db.models.compliance import (
     AuditLog,
@@ -96,6 +97,7 @@ __all__ = [
     "Lead",
     "LeadScore",
     "LeadSource",
+    "MailboxRampState",
     "Meeting",
     "Message",
     "MessageApproval",

@@ -21,6 +21,15 @@ other autonomous decision here: the manager may only ever be *more* conservative
 than what a person configured. Wanting more volume than the ceiling is a request
 to change the ceiling, and that is not a decision this makes.
 
+**And the ceiling is remembered, not re-read from the field being written.** The
+provider has exactly one number per mailbox, ``max_email_per_day``, and the ramp
+writes it. Taking the ceiling from that same field would make the ceiling the
+ramp's own last output: a step down lowers the ceiling, the next step takes a
+share of the lowered number, and a mailbox at 50 reaches the floor in three days
+with nothing able to bring it back -- recovery multiplies a share by a ceiling
+that no longer exists. :func:`observe_ceiling` is the fix, and it is the reason
+this module needs a stored state at all.
+
 **Absence of evidence is not evidence of safety.** Below the sample floor no
 rate means anything, so the ramp *holds* rather than stepping up. That is the
 asymmetry that matters: a mailbox with four sends and no bounces has not earned
@@ -113,6 +122,38 @@ def scheduled_share(week: int) -> float:
     return WEEKLY_STEPS[max(0, week)]
 
 
+def observe_ceiling(
+    *,
+    observed: int,
+    stored_ceiling: int | None,
+    last_written: int | None,
+) -> int:
+    """The ceiling after seeing what the provider currently has set.
+
+    Only a person moves the ceiling. The ramp writes the same field, so the
+    question this answers is "did a human set this number, or did I?" --
+    answered by remembering the last value written rather than by guessing from
+    its size.
+
+    A human's edit is adopted in *both* directions. Lowering the limit is a
+    person asking for less, and the whole bound of this module is that it may
+    only ever be more conservative than what a person configured; treating a
+    reduction as anything other than a new ceiling would let the ramp climb back
+    over an instruction it was given.
+
+    The one case that cannot be distinguished is a human setting, by hand, the
+    exact number the ramp last wrote. The ceiling then stands, which is the
+    reading that loses nothing: it is what the ramp already believed.
+    """
+    if stored_ceiling is None:
+        # First sight. Whatever a person has configured is the ceiling, and
+        # there is no prior belief to defend.
+        return max(0, observed)
+    if last_written is not None and observed == last_written:
+        return stored_ceiling
+    return max(0, observed)
+
+
 def _bounded(value: int, ceiling: int) -> int:
     if ceiling <= 0:
         return 0
@@ -203,6 +244,7 @@ __all__ = [
     "WEEKLY_STEPS",
     "RampDecision",
     "decide",
+    "observe_ceiling",
     "scheduled_share",
     "summarise",
     "week_index",
