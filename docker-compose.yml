@@ -28,6 +28,24 @@ x-titan-env: &titan-env
   TITAN_RESEND_API_KEY: ${TITAN_RESEND_API_KEY:-}
   TITAN_RESEND_WEBHOOK_SECRET: ${TITAN_RESEND_WEBHOOK_SECRET:-}
   TITAN_SENDER_MAILING_ADDRESS: ${TITAN_SENDER_MAILING_ADDRESS:-}
+  # --- smartlead ---
+  # These were absent from this file entirely, so no container could reach
+  # Smartlead: the provider, the mailbox ramp and the delivery-event poller all
+  # fell through to "no Smartlead API key is configured" and did nothing. They
+  # failed soft and said so, which is why it read as quiet rather than broken.
+  #
+  # The key alone is read-mostly -- it is what lets the poller collect delivery
+  # outcomes. The two switches below are what allow *writing*, and they keep the
+  # same discipline as TITAN_PRODUCTION_SENDING_ENABLED above: never defaulted
+  # to true, so a fresh checkout cannot push leads or send on its own.
+  TITAN_SMARTLEAD_API_KEY: ${TITAN_SMARTLEAD_API_KEY:-}
+  TITAN_SMARTLEAD_BASE_URL: ${TITAN_SMARTLEAD_BASE_URL:-https://server.smartlead.ai/api/v1}
+  TITAN_SMARTLEAD_CAMPAIGN_ID: ${TITAN_SMARTLEAD_CAMPAIGN_ID:-}
+  TITAN_SMARTLEAD_SANDBOX_CAMPAIGN_ID: ${TITAN_SMARTLEAD_SANDBOX_CAMPAIGN_ID:-}
+  TITAN_SMARTLEAD_TIMEOUT_SECONDS: ${TITAN_SMARTLEAD_TIMEOUT_SECONDS:-30}
+  TITAN_SMARTLEAD_WEBHOOK_SECRET: ${TITAN_SMARTLEAD_WEBHOOK_SECRET:-}
+  TITAN_SMARTLEAD_PRODUCTION_ENABLED: ${TITAN_SMARTLEAD_PRODUCTION_ENABLED:-false}
+  TITAN_SMARTLEAD_IMPORT_ENABLED: ${TITAN_SMARTLEAD_IMPORT_ENABLED:-false}
   # --- reply collection (inbound-worker) ---
   # No kill switch here, unlike sending. Reading replies is how unsubscribes,
   # complaints and bounces are honoured, so the safe default is *on* wherever
