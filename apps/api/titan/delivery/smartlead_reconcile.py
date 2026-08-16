@@ -34,8 +34,16 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from titan.db.enums import DELIVERY_RANK, DraftStatus, MessageState
-from titan.db.models import Lead, Message, MessageDraft, SenderIdentity
+from titan.db.enums import DELIVERY_RANK, DraftStatus, MessageState, Region, SubRegion
+from titan.db.models import (
+    Campaign,
+    Lead,
+    Message,
+    MessageDraft,
+    OrganizationLocation,
+    SenderIdentity,
+)
+from titan.policy.schedule import local_time, resolve_timezone
 
 #: Prefix for the dedupe key, so a reconciled row is identifiable as one and can
 #: never collide with a key the outbox worker generates.
@@ -146,6 +154,64 @@ async def _sender_for(
     ).scalar_one_or_none()
 
 
+async def _local_frame(
+    session: AsyncSession,
+    *,
+    lead: Lead,
+    campaign_id: uuid.UUID,
+    sent_at: dt.datetime,
+) -> dict[str, object]:
+    """When this send landed in the recipient's own day.
+
+    The same resolution the outbox worker applies to Titan's own sends, reached
+    through the same two functions rather than reimplemented -- a second answer
+    to "what time was it for them" would disagree with the first exactly where
+    the data is thinnest, which is where the learning query needs it most.
+
+    Without this the column exists, is indexed, and holds nothing for the only
+    mail the system has actually sent: the outbox stamps it, and everything real
+    went out through Smartlead.
+
+    Every field stays None when the clock cannot be resolved. Null reads as
+    "unknown" to the learning query; midnight would read as a pile of messages
+    sent at 3am, and be acted on.
+    """
+    empty: dict[str, object] = {
+        "local_sent_hour": None,
+        "local_sent_weekday": None,
+        "sent_timezone": None,
+    }
+
+    recipient_timezone: str | None = None
+    if lead.organization_id is not None:
+        recipient_timezone = (
+            await session.execute(
+                select(OrganizationLocation.timezone)
+                .where(
+                    OrganizationLocation.organization_id == lead.organization_id,
+                    OrganizationLocation.timezone.is_not(None),
+                )
+                .order_by(OrganizationLocation.is_primary.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    campaign = await session.get(Campaign, campaign_id)
+    timezone = resolve_timezone(
+        recipient_timezone,
+        campaign.region if campaign else Region.UNSPECIFIED,
+        campaign_subregion=campaign.sub_region if campaign else SubRegion.UNSPECIFIED,
+    )
+    local = local_time(sent_at, timezone)
+    if local is None:
+        return empty
+    return {
+        "local_sent_hour": local.hour,
+        "local_sent_weekday": local.weekday(),
+        "sent_timezone": timezone,
+    }
+
+
 async def reconcile_send(
     session: AsyncSession,
     *,
@@ -181,6 +247,12 @@ async def reconcile_send(
         return ReconcileOutcome(created=False, skipped_reason="no sender identity")
 
     normalized = to_email.strip().lower()
+    # Stamped at write time, from the moment the send actually happened rather
+    # than from now: the recipient's local hour for a message sent last Thursday
+    # is a fact about last Thursday.
+    frame = await _local_frame(
+        session, lead=lead, campaign_id=draft.campaign_id, sent_at=sent_at
+    )
     message = Message(
         workspace_id=workspace_id,
         draft_id=draft.id,
@@ -199,6 +271,7 @@ async def reconcile_send(
         sent_at=sent_at,
         provider="smartlead",
         provider_message_id=stats_id,
+        **frame,  # type: ignore[arg-type]
     )
     session.add(message)
     await session.flush()

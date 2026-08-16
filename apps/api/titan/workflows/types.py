@@ -131,6 +131,11 @@ class DraftActivityInput:
     contact_channel_id: str
     idempotency_key: str
     template_key: str = "first_observation"
+    #: Which sequence step this draft is. 0 is the opener; 1 and above are
+    #: follow-ups, and a follow-up must lead with a finding no earlier step has
+    #: already cited (mission section 13) -- otherwise it is the first message
+    #: again in different words, which is the thing the rule forbids.
+    step_number: int = 0
 
 
 @dataclasses.dataclass(frozen=True)

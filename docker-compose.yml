@@ -291,9 +291,20 @@ services:
     restart: unless-stopped
 
   web:
-    build: {context: ., dockerfile: apps/web/Dockerfile}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # Passed as a build argument, not only as an environment variable:
+      # NEXT_PUBLIC_* is compiled into the browser bundle, so a runtime value
+      # is never seen by the page that needs it. Defaults to the API's own host
+      # port so the two cannot drift -- they had, and the dashboard called 8000
+      # while the API listened on 8010.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      # Kept for server-side rendering, which reads it at runtime. Origin only:
+      # the client appends /api/v1 itself.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:${API_HOST_PORT:-8000}}
       NODE_ENV: production
     ports: ["${WEB_HOST_PORT:-3000}:3000"]
     depends_on: [api]

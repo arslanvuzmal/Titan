@@ -1062,6 +1062,38 @@ async def _rephrase(
 # ==========================================================================
 # 5. Generate draft
 # ==========================================================================
+async def _findings_already_cited(
+    session: AsyncSession, *, lead_id: uuid.UUID
+) -> set[str]:
+    """Finding ids this lead's earlier drafts have already led with.
+
+    Taken from the stored claim maps, which are the record of what each message
+    actually asserted. A separate list of "findings used" would be a second
+    account of the same fact and would drift from it the first time a draft was
+    superseded.
+
+    Every draft counts, whatever its status. A rejected draft still showed the
+    reviewer that observation, and a follow-up that re-raises it is repeating
+    something a person already declined to send.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(MessageDraft.claim_map).where(MessageDraft.lead_id == lead_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cited: set[str] = set()
+    for claim_map in rows:
+        for claim in claim_map or []:
+            finding_id = (claim or {}).get("finding_id")
+            if finding_id:
+                cited.add(str(finding_id))
+    return cited
+
+
 @activity.defn(name="generate_draft")
 async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
     """Compose a message from evidence and validate it before it can be approved."""
@@ -1153,6 +1185,30 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             violation_codes=("no_evidence_backed_claims",),
         )
 
+    # A follow-up leads with something the recipient has not been shown yet.
+    # Mission section 13: each step must contribute new evidence rather than
+    # restating the first message, and the cheapest way to violate that is to
+    # compose step 2 from the same headline finding as step 1.
+    #
+    # Read back out of the earlier drafts' claim maps rather than tracked in a
+    # column: the claim map is what the message actually asserted, and a
+    # separate "cited findings" list would be free to disagree with it.
+    if request.step_number > 0:
+        already_cited = await _findings_already_cited(
+            session, lead_id=uuid.UUID(request.lead_id)
+        )
+        unused = [f for f in pitchable if str(f.id) not in already_cited]
+        if not unused:
+            # Refused, not degraded. Sending the same observation twice with a
+            # different opener is exactly what the rule exists to stop, and a
+            # lead with nothing further to say to is a lead to leave alone.
+            return DraftActivityResult(
+                draft_id="",
+                validation_passed=False,
+                violation_codes=("no_unused_evidence_for_a_follow_up",),
+            )
+        pitchable = unused
+
     headline = pitchable[0]
     offers = select_offers(org_industry, {f.issue_type for f in pitchable})
     if not offers:
@@ -1187,6 +1243,10 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             # Seeding on anything that varies between runs would produce a
             # second, differently worded draft on an activity retry.
             variant_seed=request.lead_id,
+            # Above zero the composer prefixes a follow-up opener rather than
+            # opening cold, and stamps the step into the variant so the A/B
+            # decision can tell step 2's wording from step 1's.
+            step_number=request.step_number,
         )
     )
     # A model may rephrase what the composer wrote, never what it asserted.

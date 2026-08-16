@@ -35,3 +35,8 @@ htmlcov/
 # explicitly re-included rather than swallowed by the wildcard.
 .env*
 !.env.example
+
+# Database dumps. These hold real lead data -- names, addresses and email
+# addresses of businesses that never opted in -- and must never be committed.
+backups/
+*.sql.gz
