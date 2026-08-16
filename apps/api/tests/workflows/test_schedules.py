@@ -108,6 +108,7 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         "WeeklyReportWorkflow",
         "SenderVerificationWorkflow",
         "MailboxRampWorkflow",
+        "DeliveryEventPollWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 
@@ -115,6 +116,7 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
 def test_the_crons_come_from_the_workflows_not_from_here() -> None:
     """The workflows already declared when they should run. Restating the cron
     in the installer would let the two drift silently."""
+    from titan.workflows.delivery_events import DEFAULT_CRON as poll_cron
     from titan.workflows.reporting import DEFAULT_CRON as report_cron
     from titan.workflows.verification import DEFAULT_CRON as verify_cron
 
@@ -122,6 +124,21 @@ def test_the_crons_come_from_the_workflows_not_from_here() -> None:
 
     assert crons["WeeklyReportWorkflow"] == report_cron
     assert crons["SenderVerificationWorkflow"] == verify_cron
+    assert crons["DeliveryEventPollWorkflow"] == poll_cron
+
+
+def test_the_delivery_event_poll_is_scheduled_at_all() -> None:
+    """The whole reason the event table stayed empty.
+
+    Everything downstream -- suppression, the reply that stops a follow-up, the
+    deliverability window the ramp reads -- waits on outcomes arriving. Built
+    and never scheduled is indistinguishable at runtime from never built, and
+    that is precisely the state this was found in.
+    """
+    jobs = {j.workflow: j for j in plan_schedules(WS, task_queue=QUEUE)}
+
+    assert "DeliveryEventPollWorkflow" in jobs
+    assert jobs["DeliveryEventPollWorkflow"].arg.workspace_id == str(WS)
 
 
 def test_measurement_is_not_installed_switched_off() -> None:

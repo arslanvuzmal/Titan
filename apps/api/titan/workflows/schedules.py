@@ -51,6 +51,8 @@ from enum import StrEnum
 from typing import Any
 
 from titan.db.enums import CampaignStatus
+from titan.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
+from titan.workflows.delivery_events import delivery_event_poll_workflow_id
 from titan.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
 from titan.workflows.mailbox_ramp import mailbox_ramp_workflow_id
 from titan.workflows.orchestrator import orchestrator_workflow_id
@@ -58,6 +60,7 @@ from titan.workflows.reporting import DEFAULT_CRON as REPORT_CRON
 from titan.workflows.reporting import weekly_report_workflow_id
 from titan.workflows.types import (
     CampaignOrchestratorInput,
+    PollDeliveryEventsInput,
     RampMailboxesInput,
     VerifySendersInput,
     WeeklyReportInput,
@@ -161,6 +164,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=RampMailboxesInput(workspace_id=ws),
             task_queue=task_queue,
             note="grows each mailbox's daily volume as it earns it",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-delivery-events::{ws}",
+            workflow="DeliveryEventPollWorkflow",
+            workflow_id=delivery_event_poll_workflow_id(ws),
+            cron=POLL_CRON,
+            arg=PollDeliveryEventsInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="pulls what happened to every send, so the rest can learn",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

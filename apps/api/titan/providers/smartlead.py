@@ -251,6 +251,49 @@ class SmartleadClient:
         result = await self._request("GET", f"/campaigns/{campaign_id}/analytics")
         return result if isinstance(result, dict) else {}
 
+    async def campaign_email_accounts(self, campaign_id: int) -> list[dict[str, Any]]:
+        """The mailboxes this campaign is allowed to send from.
+
+        The account list endpoint reports ``is_connected_to_campaign`` as null
+        and ``campaign_count`` as zero for every account regardless of truth --
+        verified against the live API -- so attachment can only be established
+        from the campaign's side. That matters: it is the difference between a
+        mailbox this system may reconfigure and one a person deliberately kept
+        out of outreach.
+        """
+        payload = await self._request("GET", f"/campaigns/{campaign_id}/email-accounts")
+        rows = payload if isinstance(payload, list) else (payload or {}).get("data", [])
+        return [row for row in rows if isinstance(row, dict)]
+
+    async def campaign_statistics(
+        self, campaign_id: int, *, offset: int = 0, limit: int = 100
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Per-lead, per-step delivery outcomes. Returns the page and the total.
+
+        This is the only place Smartlead exposes what happened to an individual
+        send. ``/analytics`` gives campaign totals, which cannot answer "which
+        addresses bounced" or "did step 2 ever go out"; the webhook callbacks
+        would answer both but require a public endpoint to receive them, and
+        there is not one. Polling this is how a system with no inbound HTTP
+        surface still learns from its own sending.
+
+        Each row carries a ``stats_id``, stable across pages and across calls,
+        which is what makes repeated polling idempotent rather than duplicative.
+        """
+        payload = await self._request(
+            "GET",
+            f"/campaigns/{campaign_id}/statistics",
+            params={"offset": offset, "limit": limit},
+        )
+        if not isinstance(payload, dict):
+            return [], 0
+        rows = [row for row in (payload.get("data") or []) if isinstance(row, dict)]
+        try:
+            total = int(payload.get("total_stats") or 0)
+        except (TypeError, ValueError):
+            total = 0
+        return rows, total
+
     # ----------------------------------------------------------------- leads
     async def add_leads(
         self,

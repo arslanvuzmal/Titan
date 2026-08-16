@@ -21,6 +21,7 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from titan.activities import delivery_events as delivery_event_activities
 from titan.activities import discovery as discovery_activities
 from titan.activities import mailbox_ramp as mailbox_ramp_activities
 from titan.activities import orchestration as orchestration_activities
@@ -32,6 +33,7 @@ from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
+from titan.workflows.delivery_events import DeliveryEventPollWorkflow
 from titan.workflows.mailbox_ramp import MailboxRampWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
@@ -77,6 +79,7 @@ async def main() -> None:
             CampaignOrchestratorWorkflow,
             WeeklyReportWorkflow,
             SenderVerificationWorkflow,
+            DeliveryEventPollWorkflow,
             MailboxRampWorkflow,
         ],
         activities=[
@@ -88,6 +91,7 @@ async def main() -> None:
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
+            delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
         ],
         # Bounded concurrency. An unbounded worker will happily start more

@@ -382,6 +382,25 @@ class RampMailboxesResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class PollDeliveryEventsInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class PollDeliveryEventsResult:
+    #: Statistics rows examined. One row can carry several events.
+    rows_read: int = 0
+    #: Events recorded for the first time. A run that reads a thousand rows and
+    #: records nothing is the normal steady state, not a failure.
+    recorded: int = 0
+    #: Recorded, but matching no lead. Worth watching: a number that climbs is
+    #: attribution breaking, not sending stopping.
+    unattributed: int = 0
+    detail: tuple[str, ...] = ()
+    unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class VerifySendersResult:
     checked: int = 0
     #: Distinct domains looked up. Lower than ``checked`` whenever several
