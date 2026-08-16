@@ -568,6 +568,39 @@ class PortfolioOut(BaseModel):
     unconfigured_markets: list[str] = []
 
 
+class RecipientDomainOut(BaseModel):
+    """One recipient domain's delivery record, and what it means for sending.
+
+    `health` is the verdict the admission decision already uses -- surfaced here
+    rather than recomputed, so the number an operator reads is the number the
+    gate acted on.
+
+    `bounce_rate` is null below the sample floor. A domain with two sends and
+    one bounce is not a 50% bounce rate, and a list sorted by that number would
+    put the least-measured domains at the top.
+    """
+
+    domain: str
+    health: str
+    sent: int
+    delivered: int
+    bounced: int
+    complained: int
+    bounce_rate: float | None = None
+    has_history: bool = False
+    leads: int = 0
+    explanation: str
+
+
+class RecipientDomainsOut(BaseModel):
+    """Recipient domains, worst first. The other half of "a bad source is a
+    number rather than a hunch"."""
+
+    window_days: int
+    sample_floor: int
+    domains: list[RecipientDomainOut]
+
+
 __all__ = [
     "ApprovalDecisionRequest",
     "ApprovalOut",
@@ -592,6 +625,8 @@ __all__ = [
     "OutcomeSliceOut",
     "Page",
     "PortfolioOut",
+    "RecipientDomainOut",
+    "RecipientDomainsOut",
     "RegionSliceOut",
     "ResearchStartRequest",
     "ScoreOut",
