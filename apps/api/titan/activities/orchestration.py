@@ -28,6 +28,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
+from titan.autonomy import markets
 from titan.autonomy import markets, promotion
 from titan.autonomy.actuator import (
     Actuation,
@@ -61,6 +62,7 @@ from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of
 from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
+from titan.intelligence.insights import portfolio_view
 from titan.intelligence.composer import VARIANT_REGISTERS
 from titan.intelligence.insights import portfolio_view, variant_comparison
 from titan.notify.operator import NotificationKind, record_notification
