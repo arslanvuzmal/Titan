@@ -18,6 +18,7 @@ import datetime as dt
 import httpx
 import pytest
 import pytest_asyncio
+from titan.db.enums import WorkspaceRole
 from sqlalchemy import update
 from titan.db.enums import WorkspaceRole
 from titan.db.models import Message
@@ -112,6 +113,9 @@ async def test_a_thin_slice_reports_a_null_rate_not_zero(
 
     Collapsing the two is how an unmeasured mailbox reads as a healthy one.
     """
+    from sqlalchemy import update
+    from titan.db.models import Message
+
     built = await build_sendable(db_session, workspace, suffix="thinslice")
     await db_session.execute(
         update(Message)
