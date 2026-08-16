@@ -28,6 +28,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
+from titan.autonomy import markets
 from titan.autonomy.actuator import (
     Actuation,
     Bounds,
@@ -60,6 +61,7 @@ from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of
 from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
+from titan.intelligence.insights import portfolio_view
 from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import (
     CampaignCycleInput,
@@ -665,6 +667,16 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
             if not rows:
                 return
 
+            # How each market performed, once per cycle rather than per
+            # campaign: it is a property of the portfolio, and recomputing it
+            # inside the loop would ask the same question eleven times and
+            # invite eleven slightly different answers.
+            #
+            # Returns no-opinion multipliers until at least two markets clear
+            # the sample floor, so this is inert on a workspace that has not
+            # sent enough to compare anything.
+            market_weights = markets.weigh(await portfolio_view(session, now=now))
+
             demands: list[CampaignDemand] = []
             states: dict[str, tuple[uuid.UUID, CampaignPolicy, CampaignHealth]] = {}
             for campaign, policy in rows:
@@ -698,6 +710,9 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                         health=health,
                         configured_limit=policy.daily_send_limit,
                         leads_available=leads,
+                        market_multiplier=markets.multiplier_for(
+                            market_weights, campaign.region
+                        ),
                     )
                 )
                 states[str(campaign.id)] = (campaign.id, policy, health)
