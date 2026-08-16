@@ -52,7 +52,23 @@ _ISOLATION = (
 
 def upgrade() -> None:
     for table in TABLES:
+        # ENABLE is already idempotent in PostgreSQL; CREATE POLICY is not, and
+        # the deployed database turned out to have both policies already.
+        #
+        # The docstring above says production lacked them. That was inferred
+        # from the recovered migration rather than from the database, and the
+        # recovery reproduced the tables without their policies -- so the belief
+        # was about a reconstruction, not about production. Running this against
+        # the real database is what established it: `DuplicateObject: policy
+        # "smartlead_import_batches_workspace_isolation" ... already exists`.
+        #
+        # Dropping first rather than skipping on conflict, because the point of
+        # this migration is that the policy text is exactly the one every other
+        # scoped table has. A pre-existing policy of the same name might not be
+        # that text, and leaving it would mean the migration reported success
+        # while the isolation guarantee stayed unverified.
         op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
+        op.execute(f'DROP POLICY IF EXISTS {table}_workspace_isolation ON "{table}"')
         op.execute(
             f'CREATE POLICY {table}_workspace_isolation ON "{table}" '
             f"USING ({_ISOLATION}) WITH CHECK ({_ISOLATION})"
