@@ -77,9 +77,7 @@ def test_a_different_step_to_the_same_lead_is_a_different_event() -> None:
     step_one = events_from_row(row(stats_id="a"), campaign_id=CAMPAIGN)
     step_two = events_from_row(row(stats_id="b"), campaign_id=CAMPAIGN)
 
-    assert {e.fingerprint for e in step_one}.isdisjoint(
-        {e.fingerprint for e in step_two}
-    )
+    assert {e.fingerprint for e in step_one}.isdisjoint({e.fingerprint for e in step_two})
 
 
 def test_the_fingerprint_fits_the_column() -> None:

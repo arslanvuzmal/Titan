@@ -321,9 +321,9 @@ def test_first_sight_adopts_whatever_the_operator_configured() -> None:
 
 
 def test_the_ramps_own_value_does_not_move_the_ceiling() -> None:
-    assert (
-        observe_ceiling(observed=18, stored_ceiling=50, last_written=18) == 50
-    ), "reading back the ramp's own write must not lower what a human authorised"
+    assert observe_ceiling(observed=18, stored_ceiling=50, last_written=18) == 50, (
+        "reading back the ramp's own write must not lower what a human authorised"
+    )
 
 
 def test_a_human_raising_the_limit_raises_the_ceiling() -> None:

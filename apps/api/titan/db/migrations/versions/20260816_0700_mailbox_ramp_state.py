@@ -102,7 +102,7 @@ def upgrade() -> None:
     )
     op.execute(f'ALTER TABLE "{TABLE}" ENABLE ROW LEVEL SECURITY')
     op.execute(
-        f"CREATE POLICY {TABLE}_workspace_isolation ON \"{TABLE}\" "
+        f'CREATE POLICY {TABLE}_workspace_isolation ON "{TABLE}" '
         f"USING ({_ISOLATION}) WITH CHECK ({_ISOLATION})"
     )
 
