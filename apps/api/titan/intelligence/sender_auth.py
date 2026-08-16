@@ -6,7 +6,7 @@ delivery gates. Nothing ever set them from evidence. They were assertions
 somebody typed, and a gate that reads an assertion is not a gate.
 
 Found in the live database on 2026-08-11: twenty identities on
-``mail.arslanvuzmallone.dev`` with all four flags true and
+``arslanvuzmallone.com`` with all four flags true and
 ``domain_verified=True``. That domain has no DNS at all -- no MX, no A record,
 nothing. Every message from it would have failed SPF, failed DKIM, failed
 DMARC, and arrived from a domain the receiver cannot even resolve. The gate

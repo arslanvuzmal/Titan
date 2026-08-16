@@ -163,4 +163,4 @@ Enabling outreach is a deliberate, documented operator action:
 
 ---
 
-**Owner:** Arslan Vuzmal Lone · [arslanvuzmallone.dev](https://arslanvuzmallone.dev)
+**Owner:** Arslan Vuzmal Lone · [arslanvuzmallone.com](https://arslanvuzmallone.com)

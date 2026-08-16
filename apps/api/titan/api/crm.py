@@ -1046,6 +1046,8 @@ async def portfolio_view(
     return PortfolioOut(
         window_days=window_days,
         total_sent=book.sent,
+        idle_markets=[s.region.value for s in book.idle],
+        unconfigured_markets=[r.value for r in insights.unconfigured_markets(book)],
         slices=[
             RegionSliceOut(
                 region=s.region.value,

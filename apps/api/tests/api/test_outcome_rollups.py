@@ -227,3 +227,40 @@ async def test_the_portfolio_counts_each_message_once(
 
     assert response.status_code == 200
     assert response.json()["total_sent"] == 1
+
+
+async def test_the_portfolio_names_the_markets_it_is_not_in(
+    client, db_session, workspace
+) -> None:
+    """ "The six markets as one object" has to include the empty ones.
+
+    Listed rather than given rows of zeros: a market that has never sent would
+    otherwise sort into the table as "0% bounced", which reads as the healthiest
+    line on the page.
+    """
+    built = await build_sendable(db_session, workspace, suffix="markets")
+    await db_session.execute(
+        update(Message)
+        .where(Message.id == built.message_id)
+        .values(sent_at=dt.datetime.now(dt.UTC))
+    )
+    await db_session.commit()
+
+    headers = await _headers(client, workspace, tag="port2")
+    body = (await client.get("/api/v1/analytics/portfolio", headers=headers)).json()
+
+    configured = {s["region"] for s in body["slices"]}
+    unconfigured = set(body["unconfigured_markets"])
+
+    assert configured, "no market was configured; the test proves nothing"
+    assert configured.isdisjoint(unconfigured), "a market cannot be both"
+    assert configured | unconfigured >= {
+        "usa",
+        "canada",
+        "uk",
+        "europe",
+        "australia",
+        "middle_east",
+    }
+    # A market nobody configured has no numbers to be ranked on.
+    assert all(m not in configured for m in unconfigured)
