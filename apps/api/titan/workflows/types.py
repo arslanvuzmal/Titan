@@ -131,6 +131,11 @@ class DraftActivityInput:
     contact_channel_id: str
     idempotency_key: str
     template_key: str = "first_observation"
+    #: Which sequence step this draft is. 0 is the opener; 1 and above are
+    #: follow-ups, and a follow-up must lead with a finding no earlier step has
+    #: already cited (mission section 13) -- otherwise it is the first message
+    #: again in different words, which is the thing the rule forbids.
+    step_number: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -402,6 +407,20 @@ class PollDeliveryEventsResult:
     #: Recorded, but matching no lead. Worth watching: a number that climbs is
     #: attribution breaking, not sending stopping.
     unattributed: int = 0
+    detail: tuple[str, ...] = ()
+    unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureSenderHealthInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureSenderHealthResult:
+    #: Identities given a point today. One row each, upserted, so this is the
+    #: number of senders measured rather than the number of rows written.
+    captured: int = 0
     detail: tuple[str, ...] = ()
     unavailable: str | None = None
 

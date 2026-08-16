@@ -17,6 +17,17 @@ COPY --from=deps /app ./
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# NEXT_PUBLIC_* is inlined into the client bundle at build time, so it has to be
+# a build argument. Setting it only under `environment:` in compose does nothing
+# -- the browser downloads whatever string was compiled in, which is how the
+# dashboard ended up calling port 8000 while the API was published on 8010.
+#
+# Origin only, no path: the supported client builds `${API_BASE}/api/v1/...`
+# itself, so a value ending in /api/v1 produces /api/v1/api/v1/... .
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 RUN npm install -g pnpm@8 && pnpm --filter titan-web build
 
 # Runner stage

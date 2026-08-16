@@ -942,3 +942,87 @@ async def test_a_matching_offer_still_drafts(db_session, workspace) -> None:
     draft = out["draft"]
     assert draft is not None
     assert "no_offer_matching_the_evidence" not in (draft.violation_codes or ())
+
+
+# ==========================================================================
+# Follow-ups: the same pipeline, one step further, and never the same evidence
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_each_follow_up_leads_with_evidence_no_earlier_step_used(
+    db_session, workspace
+) -> None:
+    """Mission section 13, enforced where the message is actually made.
+
+    The cheapest way to violate "each step contributes new evidence" is to
+    compose step 2 from the same headline finding as step 1 and change only the
+    opener -- the first message again in different words.
+
+    Composing follow-ups until they run out proves both halves at once: every
+    draft cites a finding none before it did, and the moment there is nothing
+    new to say the pipeline refuses instead of repeating itself.
+    """
+    from titan.activities import pipeline
+    from titan.outreach.sequence import TEMPLATE_KEYS
+
+    ids = await seed_lead(workspace, suffix="followup")
+    first = await run_pipeline(
+        workspace, ids, payload=crawl_payload(), run_key="followup-1"
+    )
+    assert first["draft"] is not None
+    assert first["draft"].draft_id, "the opener did not draft; the test proves nothing"
+
+    cited: list[set[str]] = []
+    refusal = None
+    for step in range(1, 8):
+        result = await pipeline.generate_draft(
+            DraftActivityInput(
+                workspace_id=str(workspace),
+                lead_id=ids["lead_id"],
+                campaign_id=ids["campaign_id"],
+                research_run_id=first["run_id"],
+                contact_channel_id=first["contact"].eligible_channel_id,
+                idempotency_key=f"followup-step{step}",
+                # From the module that declares the sequence, not a literal:
+                # it ties the test to the real cadence, and a bare
+                # high-entropy string here trips the secret scanner's
+                # generic-api-key rule.
+                template_key=TEMPLATE_KEYS[1],
+                step_number=step,
+            )
+        )
+        if not result.draft_id:
+            refusal = result
+            break
+        from titan.db.models import MessageDraft
+
+        async with get_sessionmaker()() as session:
+            draft = await session.get(MessageDraft, uuid.UUID(result.draft_id))
+            cited.append(
+                {str(c["finding_id"]) for c in draft.claim_map if c.get("finding_id")}
+            )
+
+    assert refusal is not None, "follow-ups never ran out; the refusal is untested"
+    assert "no_unused_evidence_for_a_follow_up" in refusal.violation_codes
+
+    # No finding appears in two steps. Overlap anywhere is the rule failing.
+    seen: set[str] = set()
+    for step_findings in cited:
+        assert not (seen & step_findings), "a follow-up repeated earlier evidence"
+        seen |= step_findings
+
+
+@pytest.mark.asyncio
+async def test_the_opener_is_not_subject_to_the_new_evidence_rule(
+    db_session, workspace
+) -> None:
+    """Step 0 has nothing prior to differ from.
+
+    Applying the rule to the first message would make every lead undraftable,
+    so the contrast is asserted rather than assumed.
+    """
+    ids = await seed_lead(workspace, suffix="opener")
+    out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="opener-1")
+
+    draft = out["draft"]
+    assert draft is not None
+    assert "no_unused_evidence_for_a_follow_up" not in (draft.violation_codes or ())

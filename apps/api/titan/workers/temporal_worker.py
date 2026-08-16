@@ -28,6 +28,7 @@ from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
+from titan.activities import sender_health as sender_health_activities
 from titan.activities import verification as verification_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
@@ -38,6 +39,7 @@ from titan.workflows.mailbox_ramp import MailboxRampWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
+from titan.workflows.sender_health import SenderHealthSnapshotWorkflow
 from titan.workflows.verification import SenderVerificationWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
@@ -77,6 +79,7 @@ async def main() -> None:
         workflows=[
             LeadResearchWorkflow,
             CampaignOrchestratorWorkflow,
+            SenderHealthSnapshotWorkflow,
             WeeklyReportWorkflow,
             SenderVerificationWorkflow,
             DeliveryEventPollWorkflow,
@@ -93,6 +96,7 @@ async def main() -> None:
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
+            sender_health_activities.capture_sender_health,
         ],
         # Bounded concurrency. An unbounded worker will happily start more
         # crawls than the browser worker can serve and then time out on all of

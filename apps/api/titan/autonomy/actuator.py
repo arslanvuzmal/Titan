@@ -41,6 +41,11 @@ class Actuation(StrEnum):
 
     SET_DAILY_LIMIT = "set_daily_limit"
     SET_MIN_LEAD_SCORE = "set_min_lead_score"
+    #: Which phrasing register new drafts should use. Widening the manager from
+    #: "how much and to whom" to "in what words", and the narrowest form of it
+    #: available: a choice between registers that are already written, approved
+    #: and validated, never a licence to author anything.
+    SET_PROMOTED_VARIANT = "set_promoted_variant"
 
 
 #: A lead score the manager may never demand more than, however badly a campaign
@@ -64,6 +69,10 @@ class Bounds:
 
     configured_daily_limit: int
     configured_min_lead_score: int
+    #: How many phrasing registers exist. A promotion outside this range is a
+    #: bug upstream and is refused rather than clamped: clamping would silently
+    #: promote a register nobody tested.
+    variant_count: int = 0
 
     @property
     def floor_daily_limit(self) -> int:
@@ -138,6 +147,25 @@ def evaluate(proposal: Proposal, bounds: Bounds) -> Verdict:
             value=stepped,
             note="one step" if stepped != proposal.proposed else None,
         )
+
+    if proposal.actuation is Actuation.SET_PROMOTED_VARIANT:
+        # Refused, not clamped, and this is the one place that asymmetry is
+        # right. Clamping a limit to the ceiling still executes the intent --
+        # the manager wanted more and gets as much as it may have. Clamping a
+        # register index would promote a *different phrasing* from the one the
+        # evidence was about, which is not a smaller version of the intent but a
+        # different decision made silently.
+        if not 0 <= proposal.proposed < bounds.variant_count:
+            return Verdict(
+                proposal=proposal,
+                applied_value=proposal.current,
+                refused=True,
+                refusal=(
+                    f"register {proposal.proposed} does not exist; "
+                    f"{bounds.variant_count} are defined"
+                ),
+            )
+        return Verdict(proposal=proposal, applied_value=proposal.proposed)
 
     return Verdict(
         proposal=proposal,

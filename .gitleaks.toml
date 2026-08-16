@@ -1,0 +1,33 @@
+# Secret-scanning configuration.
+#
+# The default rule set is kept in full -- this file extends it rather than
+# replacing it, so every rule gitleaks ships with still runs.
+#
+# Allowlisting is a claim that something is *not* a secret, and a wrong claim
+# here is invisible until it matters. So each entry names the exact rule, the
+# exact path, and the reason, and none of them is a bare path exclusion.
+
+[extend]
+useDefault = true
+
+[[rules]]
+# Retained from the default set purely so the allowlist below can attach to it
+# by id. The regex is gitleaks' own generic-api-key pattern.
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:key|api|token|secret|client|passwd|password|auth|access)(?:[0-9a-z\-_\t .]{0,20})(?:[\s|']|[\s|"]){0,3}(?:=|>|:{1,3}=|\|\||:|<=|=>|:=)(?:'|\"|\s|=|\x60){0,5}([0-9a-z\-_.=]{10,150})(?:['|\"|\n|\r|\s|\x60|;]|$)'''
+keywords = ["key", "api", "token", "secret", "password", "auth", "access"]
+
+  [[rules.allowlists]]
+  description = """
+  Sequence template keys are not credentials. `outreach_v2_followup1` and its
+  siblings are declared in titan/outreach/sequence.py as TEMPLATE_KEYS and name
+  which step of the outreach cadence a draft belongs to. They match
+  generic-api-key only because the rule fires on `key = <high-entropy string>`.
+
+  Scoped to the test tree and to that one rule: a real credential appearing in
+  these files under any other rule still fails the scan, and this says nothing
+  about titan/ or scripts/.
+  """
+  paths = ['''apps/api/tests/.*\.py''']
+  regexes = ['''template_key\s*=\s*["']outreach_v2_[a-z0-9_]+["']''']

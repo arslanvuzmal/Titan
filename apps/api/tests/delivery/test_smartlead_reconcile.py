@@ -19,6 +19,15 @@ import pytest
 from sqlalchemy import select
 from titan.db.enums import DraftStatus, MessageState
 from titan.db.models import Lead, Message, MessageDraft
+from sqlalchemy import select, update
+from titan.db.enums import DraftStatus, MessageState, Region
+from titan.db.models import (
+    Campaign,
+    Lead,
+    Message,
+    MessageDraft,
+    OrganizationLocation,
+)
 from titan.delivery.smartlead_reconcile import dedupe_key, reconcile_send
 
 from tests.delivery.conftest import build_sendable
@@ -245,3 +254,52 @@ async def test_a_reconciled_message_is_identifiable_as_one(db_session, workspace
     message = await db_session.get(Message, outcome.message_id)
     assert message.dedupe_key.startswith("smartlead:")
     assert uuid.UUID(str(message.id))
+
+
+# ----------------------------------------------------------------- local frame
+
+
+async def test_the_send_is_stamped_in_the_recipients_own_clock(
+    db_session, workspace
+) -> None:
+    """The column existed, was indexed, and held nothing that mattered.
+
+    The outbox worker stamps it for Titan's own sends, and everything real went
+    out through Smartlead -- so time-of-day learning had an index over an empty
+    set. The fixture's organisation is in Europe/London.
+    """
+    lead, _ = await _fixture(db_session, workspace, suffix="clock")
+
+    outcome = await _reconcile(db_session, workspace, lead, stats_id="s-clock")
+
+    message = await db_session.get(Message, outcome.message_id)
+    assert message.sent_timezone == "Europe/London"
+    # 09:12 UTC on 2026-08-14 is 10:12 in London, a Friday.
+    assert message.local_sent_hour == 10
+    assert message.local_sent_weekday == 4
+
+
+async def test_an_unresolvable_clock_stays_null_rather_than_guessing(
+    db_session, workspace
+) -> None:
+    """Null reads as "unknown" to the learning query.
+
+    Defaulting to midnight would read as a pile of messages sent at 3am, and it
+    would be acted on.
+    """
+    lead, _ = await _fixture(db_session, workspace, suffix="noclock")
+    await db_session.execute(
+        update(OrganizationLocation)
+        .where(OrganizationLocation.organization_id == lead.organization_id)
+        .values(timezone=None)
+    )
+    campaign = await db_session.get(Campaign, lead.campaign_id)
+    campaign.region = Region.UNSPECIFIED
+    await db_session.flush()
+
+    outcome = await _reconcile(db_session, workspace, lead, stats_id="s-noclock")
+
+    message = await db_session.get(Message, outcome.message_id)
+    assert message.sent_timezone is None
+    assert message.local_sent_hour is None
+    assert message.local_sent_weekday is None

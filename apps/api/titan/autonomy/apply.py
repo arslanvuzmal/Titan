@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 _COLUMN_FOR: dict[Actuation, str] = {
     Actuation.SET_DAILY_LIMIT: "managed_daily_send_limit",
     Actuation.SET_MIN_LEAD_SCORE: "managed_min_lead_score",
+    Actuation.SET_PROMOTED_VARIANT: "managed_promoted_variant",
 }
 
 

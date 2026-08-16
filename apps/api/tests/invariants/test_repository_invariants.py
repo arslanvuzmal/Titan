@@ -35,12 +35,22 @@ def parse(path: pathlib.Path) -> ast.Module:
 
 
 def imported_modules(tree: ast.Module) -> set[str]:
+    """Every module a file imports, by dotted path.
+
+    ``from titan.delivery import suppression`` records BOTH ``titan.delivery``
+    and ``titan.delivery.suppression``. Recording only the former -- which is
+    what ``node.module`` gives -- left every import ban below blind to the most
+    natural way of writing the import it bans. Found by planting
+    ``from titan.delivery import suppression`` inside the campaign manager and
+    watching the boundary test pass.
+    """
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
     return found
 
 
@@ -521,6 +531,12 @@ FORBIDDEN_TO_THE_MANAGER = (
     "titan.delivery.providers.smtp",
     "titan.intelligence.composer",
     "titan.intelligence.message_validator",
+    # The send decision itself, and the counters it spends. Absent from this
+    # tuple until the boundary was audited line by line against section five:
+    # the manager could not *bypass* a gate, but nothing stopped it importing
+    # the module that decides one.
+    "titan.policy.engine",
+    "titan.delivery.quotas",
 )
 
 
@@ -559,12 +575,21 @@ def test_the_manager_writes_to_no_column_a_human_owns() -> None:
     """
     from titan.autonomy.apply import _COLUMN_FOR
 
+    # Every column the manager may write, and the widening is deliberate:
+    # adding one here is the change that says "the manager may now decide this
+    # too", and it should be as hard to do by accident as this test makes it.
     assert set(_COLUMN_FOR.values()) == {
         "managed_daily_send_limit",
         "managed_min_lead_score",
+        "managed_promoted_variant",
     }
     forbidden = {"daily_send_limit", "min_lead_score", "sending_authorized"}
     assert not (set(_COLUMN_FOR.values()) & forbidden)
+
+    # The general form of the same rule, so a column added to the set above
+    # still fails unless it is one of the manager's own. The explicit set says
+    # which columns; this says what kind of column may ever be on it.
+    assert all(c.startswith("managed_") for c in _COLUMN_FOR.values())
 
 
 @pytest.mark.parametrize(
