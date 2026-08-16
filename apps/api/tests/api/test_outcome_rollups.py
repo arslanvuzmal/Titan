@@ -18,7 +18,9 @@ import datetime as dt
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import update
 from titan.db.enums import WorkspaceRole
+from titan.db.models import Message
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 
 from tests.delivery.conftest import build_sendable
@@ -110,9 +112,6 @@ async def test_a_thin_slice_reports_a_null_rate_not_zero(
 
     Collapsing the two is how an unmeasured mailbox reads as a healthy one.
     """
-    from sqlalchemy import update
-    from titan.db.models import Message
-
     built = await build_sendable(db_session, workspace, suffix="thinslice")
     await db_session.execute(
         update(Message)
@@ -141,3 +140,90 @@ async def test_the_rollups_require_authentication(client) -> None:
     response = await client.get("/api/v1/analytics/outcomes")
 
     assert response.status_code in (401, 403)
+
+
+# ----------------------------------------------------- the three judgements
+#
+# timing.py, experiments.py and portfolio.py were each written, tested, and
+# imported by nothing. These assert the routes that finally call them.
+
+
+async def test_the_timing_report_is_reachable(client, workspace) -> None:
+    """`timing.py` deferred wiring because there was no history to read.
+
+    Reconciling Smartlead's sends gave every real message a local weekday and
+    hour, so the reason for the deferral no longer holds.
+    """
+    headers = await _headers(client, workspace, tag="tim1")
+
+    response = await client.get("/api/v1/analytics/timing", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "has_enough_to_rank" in body
+    assert body["min_sends_per_slot"] > 0
+    assert isinstance(body["slots"], list)
+
+
+async def test_a_slot_below_the_floor_reports_no_reply_rate(
+    client, db_session, workspace
+) -> None:
+    """Same discipline as the rollups: unmeasured is not the same as clean."""
+    built = await build_sendable(db_session, workspace, suffix="timslot")
+    await db_session.execute(
+        update(Message)
+        .where(Message.id == built.message_id)
+        .values(
+            sent_at=dt.datetime.now(dt.UTC),
+            local_sent_hour=9,
+            local_sent_weekday=1,
+            sent_timezone="Europe/London",
+        )
+    )
+    await db_session.commit()
+
+    headers = await _headers(client, workspace, tag="tim2")
+    response = await client.get("/api/v1/analytics/timing", headers=headers)
+
+    slots = response.json()["slots"]
+    assert slots, "the send did not appear; the test proves nothing"
+    assert slots[0]["reply_rate"] is None
+    assert slots[0]["label"] == "Tue 09:00"
+
+
+async def test_one_variant_is_not_a_comparison(client, workspace) -> None:
+    """Null is the honest answer to "which won" when there is one arm.
+
+    Naming a winner from a single variant, or from arms of nine sends, would be
+    noise with a p-value attached.
+    """
+    headers = await _headers(client, workspace, tag="var1")
+
+    response = await client.get("/api/v1/analytics/variants", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+async def test_the_portfolio_counts_each_message_once(
+    client, db_session, workspace
+) -> None:
+    """The bug this caught before it shipped.
+
+    Joining campaigns to leads and to messages separately crosses the two within
+    each campaign, so a plain count multiplies every message by the number of
+    leads in its campaign -- 40 real sends were reported as 1,415.
+    """
+    built = await build_sendable(db_session, workspace, suffix="portfolio")
+    await db_session.execute(
+        update(Message)
+        .where(Message.id == built.message_id)
+        .values(sent_at=dt.datetime.now(dt.UTC))
+    )
+    await db_session.commit()
+
+    headers = await _headers(client, workspace, tag="port1")
+    response = await client.get("/api/v1/analytics/portfolio", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["total_sent"] == 1

@@ -46,9 +46,16 @@ from titan.api.schemas import (
     OrganizationSummary,
     OutcomeRollupOut,
     OutcomeSliceOut,
+    PortfolioOut,
+    RegionSliceOut,
     TimelineEventOut,
+    TimingReportOut,
+    TimingSlotOut,
+    VariantArmOut,
+    VariantComparisonOut,
 )
 from titan.api.security import Principal, require
+from titan.autonomy import experiments
 from titan.config import get_settings
 from titan.db.enums import ContactSource, LeadStatus
 from titan.db.models import (
@@ -75,6 +82,8 @@ from titan.db.models import (
 from titan.db.session import workspace_session
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.suppression import is_suppressed
+from titan.intelligence import insights, timing
+from titan.intelligence import portfolio as portfolio_mod
 from titan.intelligence.contacts import check_contact_eligibility
 from titan.intelligence.rollups import (
     DEFAULT_WINDOW_DAYS,
@@ -936,6 +945,123 @@ async def outcome_rollups(
                 )
             )
     return rollups
+
+
+@router.get("/analytics/timing", response_model=TimingReportOut, tags=["crm"])
+async def timing_report(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+    campaign_id: uuid.UUID | None = Query(None),
+) -> TimingReportOut:
+    """Which hours of the recipient's week are worth writing in.
+
+    A working week is forty-five slots and cold reply rates are single-digit
+    percentages, so most slots hold too little to judge. `has_enough_to_rank`
+    is the honest headline: below it this is an inventory of what was sent, not
+    a recommendation about when to send.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        report = await insights.timing_report(
+            session, now=now, window_days=window_days, campaign_id=campaign_id
+        )
+    return TimingReportOut(
+        total_sent=report.total_sent,
+        slots=[
+            TimingSlotOut(
+                weekday=o.slot.weekday,
+                hour=o.slot.hour,
+                label=str(o.slot),
+                sent=o.sent,
+                replied=o.replied,
+                reply_rate=o.reply_rate if o.has_signal else None,
+                verdict=report.verdict_for(o).value,
+            )
+            for o in report.outcomes
+        ],
+        baseline_reply_rate=report.baseline,
+        judged=report.judged,
+        min_sends_per_slot=timing.MIN_SENDS_PER_SLOT,
+        slots_needed_to_rank=timing.MIN_SLOTS_TO_RANK,
+        has_enough_to_rank=report.has_enough_to_rank,
+        summary=timing.describe(report),
+    )
+
+
+@router.get(
+    "/analytics/variants", response_model=VariantComparisonOut | None, tags=["crm"]
+)
+async def variant_comparison(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+    campaign_id: uuid.UUID | None = Query(None),
+) -> VariantComparisonOut | None:
+    """Whether one phrasing actually beat another, or merely differed.
+
+    Returns null when there is nothing to compare -- one variant, or every arm
+    below its floor. Null is the honest answer to "which won"; naming a winner
+    from two arms of nine sends would be noise with a p-value attached.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        result = await insights.variant_comparison(
+            session, now=now, window_days=window_days, campaign_id=campaign_id
+        )
+    if result is None:
+        return None
+
+    def arm(a: experiments.Arm) -> VariantArmOut:
+        return VariantArmOut(
+            key=a.key,
+            sent=a.sent,
+            replied=a.replied,
+            positive_replies=a.positive_replies,
+        )
+
+    return VariantComparisonOut(
+        control=arm(result.control),
+        challenger=arm(result.challenger),
+        verdict=result.verdict.value,
+        lift=result.lift,
+        p_value=result.p_value,
+        winner=result.winner.key if result.winner else None,
+        summary=experiments.describe(result),
+    )
+
+
+@router.get("/analytics/portfolio", response_model=PortfolioOut, tags=["crm"])
+async def portfolio_view(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+) -> PortfolioOut:
+    """The six markets as one object, busiest first.
+
+    Campaign and lead counts are lifetime; delivery counters are the window. A
+    market with three hundred leads and nothing sent this month is the shape
+    worth seeing, and one window over both would hide it.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        book = await insights.portfolio_view(session, now=now, window_days=window_days)
+    return PortfolioOut(
+        window_days=window_days,
+        total_sent=book.sent,
+        slices=[
+            RegionSliceOut(
+                region=s.region.value,
+                campaigns=s.campaigns,
+                active_campaigns=s.active_campaigns,
+                leads=s.leads,
+                contacted=s.contacted,
+                sent=s.sent,
+                bounced=s.bounced,
+                replied=s.replied,
+                share_of_sending=book.share_of_sending(s.region),
+                summary=portfolio_mod.describe(s, book),
+            )
+            for s in book.slices
+        ],
+    )
 
 
 __all__ = ["apply_lead_filters", "enrich_leads", "router"]
