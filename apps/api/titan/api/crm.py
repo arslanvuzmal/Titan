@@ -30,6 +30,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.api.schemas import (
@@ -46,9 +47,18 @@ from titan.api.schemas import (
     OrganizationSummary,
     OutcomeRollupOut,
     OutcomeSliceOut,
+    PortfolioOut,
+    RecipientDomainOut,
+    RecipientDomainsOut,
+    RegionSliceOut,
     TimelineEventOut,
+    TimingReportOut,
+    TimingSlotOut,
+    VariantArmOut,
+    VariantComparisonOut,
 )
 from titan.api.security import Principal, require
+from titan.autonomy import experiments
 from titan.config import get_settings
 from titan.db.enums import ContactSource, LeadStatus
 from titan.db.models import (
@@ -75,6 +85,9 @@ from titan.db.models import (
 from titan.db.session import workspace_session
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.suppression import is_suppressed
+from titan.intelligence import insights, timing
+from titan.intelligence import domain_health, insights, timing
+from titan.intelligence import portfolio as portfolio_mod
 from titan.intelligence.contacts import check_contact_eligibility
 from titan.intelligence.rollups import (
     DEFAULT_WINDOW_DAYS,
@@ -936,6 +949,223 @@ async def outcome_rollups(
                 )
             )
     return rollups
+
+
+@router.get("/analytics/timing", response_model=TimingReportOut, tags=["crm"])
+async def timing_report(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+    campaign_id: uuid.UUID | None = Query(None),
+) -> TimingReportOut:
+    """Which hours of the recipient's week are worth writing in.
+
+    A working week is forty-five slots and cold reply rates are single-digit
+    percentages, so most slots hold too little to judge. `has_enough_to_rank`
+    is the honest headline: below it this is an inventory of what was sent, not
+    a recommendation about when to send.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        report = await insights.timing_report(
+            session, now=now, window_days=window_days, campaign_id=campaign_id
+        )
+    return TimingReportOut(
+        total_sent=report.total_sent,
+        slots=[
+            TimingSlotOut(
+                weekday=o.slot.weekday,
+                hour=o.slot.hour,
+                label=str(o.slot),
+                sent=o.sent,
+                replied=o.replied,
+                reply_rate=o.reply_rate if o.has_signal else None,
+                verdict=report.verdict_for(o).value,
+            )
+            for o in report.outcomes
+        ],
+        baseline_reply_rate=report.baseline,
+        judged=report.judged,
+        min_sends_per_slot=timing.MIN_SENDS_PER_SLOT,
+        slots_needed_to_rank=timing.MIN_SLOTS_TO_RANK,
+        has_enough_to_rank=report.has_enough_to_rank,
+        summary=timing.describe(report),
+    )
+
+
+@router.get(
+    "/analytics/variants", response_model=VariantComparisonOut | None, tags=["crm"]
+)
+async def variant_comparison(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+    campaign_id: uuid.UUID | None = Query(None),
+) -> VariantComparisonOut | None:
+    """Whether one phrasing actually beat another, or merely differed.
+
+    Returns null when there is nothing to compare -- one variant, or every arm
+    below its floor. Null is the honest answer to "which won"; naming a winner
+    from two arms of nine sends would be noise with a p-value attached.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        result = await insights.variant_comparison(
+            session, now=now, window_days=window_days, campaign_id=campaign_id
+        )
+    if result is None:
+        return None
+
+    def arm(a: experiments.Arm) -> VariantArmOut:
+        return VariantArmOut(
+            key=a.key,
+            sent=a.sent,
+            replied=a.replied,
+            positive_replies=a.positive_replies,
+        )
+
+    return VariantComparisonOut(
+        control=arm(result.control),
+        challenger=arm(result.challenger),
+        verdict=result.verdict.value,
+        lift=result.lift,
+        p_value=result.p_value,
+        winner=result.winner.key if result.winner else None,
+        summary=experiments.describe(result),
+    )
+
+
+@router.get("/analytics/portfolio", response_model=PortfolioOut, tags=["crm"])
+async def portfolio_view(
+    principal: Principal = Depends(require("research:read")),
+    window_days: int = Query(DEFAULT_WINDOW_DAYS, ge=1, le=365),
+) -> PortfolioOut:
+    """The six markets as one object, busiest first.
+
+    Campaign and lead counts are lifetime; delivery counters are the window. A
+    market with three hundred leads and nothing sent this month is the shape
+    worth seeing, and one window over both would hide it.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        book = await insights.portfolio_view(session, now=now, window_days=window_days)
+    return PortfolioOut(
+        window_days=window_days,
+        total_sent=book.sent,
+        idle_markets=[s.region.value for s in book.idle],
+        unconfigured_markets=[r.value for r in insights.unconfigured_markets(book)],
+        slices=[
+            RegionSliceOut(
+                region=s.region.value,
+                campaigns=s.campaigns,
+                active_campaigns=s.active_campaigns,
+                leads=s.leads,
+                contacted=s.contacted,
+                sent=s.sent,
+                bounced=s.bounced,
+                replied=s.replied,
+                share_of_sending=book.share_of_sending(s.region),
+                summary=portfolio_mod.describe(s, book),
+            )
+            for s in book.slices
+        ],
+    )
+
+
+@router.get("/recipient-domains", response_model=RecipientDomainsOut, tags=["crm"])
+async def recipient_domains(
+    principal: Principal = Depends(require("research:read")),
+    limit: int = Query(200, ge=1, le=1000),
+) -> RecipientDomainsOut:
+    """What Titan's own sending says about each recipient domain, worst first.
+
+    Phase 02 promised that a bad source is visible as a number rather than a
+    hunch. The lead-source half of that is the rollup; this is the domain half,
+    and it was the one nothing could reach: `domain_health` has decided
+    admission since it was written and had no reader outside the pipeline and
+    the outbox worker.
+
+    Computed from `messages`, never materialised -- the same query the gate runs,
+    so what an operator reads is what the gate acted on rather than a counter
+    kept alongside it. See `titan.intelligence.domain_health` on why a table
+    here would drift.
+    """
+    since = dt.datetime.now(dt.UTC) - dt.timedelta(days=domain_health.WINDOW_DAYS)
+    async with workspace_session(principal.workspace_id) as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT m.to_domain                                    AS domain,
+                           count(*) FILTER (WHERE m.sent_at IS NOT NULL)   AS sent,
+                           count(*) FILTER (
+                               WHERE m.delivered_at IS NOT NULL
+                           )                                              AS delivered,
+                           count(*) FILTER (
+                               WHERE m.bounced_at IS NOT NULL
+                           )                                              AS bounced,
+                           count(*) FILTER (
+                               WHERE m.complained_at IS NOT NULL
+                           )                                              AS complained,
+                           count(DISTINCT m.lead_id)                      AS leads
+                      FROM messages m
+                     WHERE m.workspace_id = :workspace
+                       AND m.to_domain IS NOT NULL
+                       AND m.created_at >= :since
+                     GROUP BY m.to_domain
+                     LIMIT :limit
+                    """
+                ),
+                {
+                    "workspace": principal.workspace_id,
+                    "since": since,
+                    "limit": limit,
+                },
+            )
+        ).all()
+
+    out: list[RecipientDomainOut] = []
+    for row in rows:
+        window = domain_health.DomainWindow(
+            domain=row.domain,
+            sent=int(row.sent),
+            delivered=int(row.delivered),
+            bounced=int(row.bounced),
+            complained=int(row.complained),
+        )
+        health = domain_health.classify(window)
+        out.append(
+            RecipientDomainOut(
+                domain=row.domain,
+                health=health.value,
+                sent=window.sent,
+                delivered=window.delivered,
+                bounced=window.bounced,
+                complained=window.complained,
+                # Gated on the rate floor, not on `has_history` -- those are
+                # different questions. `has_history` is "have we sent here at
+                # all"; a *rate* needs MIN_SENDS_FOR_RATE behind it. One send
+                # and one bounce has history and no meaningful rate, and
+                # publishing 100% for it would rank it worst on the page.
+                bounce_rate=(
+                    window.bounce_rate
+                    if window.sent >= domain_health.MIN_SENDS_FOR_RATE
+                    else None
+                ),
+                has_history=window.has_history,
+                leads=int(row.leads),
+                explanation=domain_health.explain(window, health),
+            )
+        )
+
+    # Worst first, and unmeasured domains last rather than first: an unknown
+    # domain is not a problem, it is an absence of evidence about one.
+    severity = {"degraded": 0, "watch": 1, "healthy": 2, "unknown": 3}
+    out.sort(key=lambda d: (severity.get(d.health, 9), -(d.bounce_rate or 0), -d.sent))
+
+    return RecipientDomainsOut(
+        window_days=domain_health.WINDOW_DAYS,
+        sample_floor=domain_health.MIN_SENDS_FOR_RATE,
+        domains=out,
+    )
 
 
 __all__ = ["apply_lead_filters", "enrich_leads", "router"]

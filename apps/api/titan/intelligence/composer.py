@@ -77,6 +77,14 @@ class ComposerContext:
     contact_first_name: str | None = None
     #: Seeds register selection. The lead id, so the choice is stable per lead.
     variant_seed: str = ""
+    #: A register the campaign manager has promoted on measured evidence. None
+    #: means no opinion, and selection stays per lead as it always has.
+    #:
+    #: Promotion narrows what gets sent to one already-written register; it
+    #: never supplies wording. Out-of-range values are ignored rather than
+    #: wrapped, because a modulo here would quietly promote a register nobody
+    #: measured.
+    promoted_variant: int | None = None
     #: 0 for the first message. Follow-ups open differently -- repeating the
     #: original opening at somebody who ignored it reads as a broken robot.
     step_number: int = 0
@@ -180,9 +188,14 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     template, the claim map still describes the old wording, and the validator
     passes a sentence nothing actually supports.
     """
-    index = _register_index(
-        ctx.variant_seed or ctx.org_domain, len(_OBSERVATION_REGISTERS)
-    )
+    if ctx.promoted_variant is not None and (
+        0 <= ctx.promoted_variant < len(_OBSERVATION_REGISTERS)
+    ):
+        index = ctx.promoted_variant
+    else:
+        index = _register_index(
+            ctx.variant_seed or ctx.org_domain, len(_OBSERVATION_REGISTERS)
+        )
     finding = ctx.finding
 
     description = _describe(finding)
@@ -257,6 +270,12 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     )
 
 
+#: How many phrasing registers exist. Public because the campaign manager needs
+#: to bound a promotion against it, and reaching into the private tuple from
+#: outside would couple the actuator's bound to this module's internals.
+VARIANT_REGISTERS = len(_OBSERVATION_REGISTERS)
+
+
 def _register_index(seed: str, modulo: int) -> int:
     """Pick a register from a stable hash of the lead.
 
@@ -301,6 +320,7 @@ def _finding_id(finding: FindingLike) -> str:
 
 __all__ = [
     "FALLBACK_GREETING",
+    "VARIANT_REGISTERS",
     "ComposedMessage",
     "ComposerContext",
     "FindingLike",

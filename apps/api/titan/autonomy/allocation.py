@@ -97,10 +97,32 @@ class CampaignDemand:
     #: Qualified leads waiting. Capacity given to a campaign with none is
     #: capacity nobody sends, taken from a campaign that would have.
     leads_available: int = 0
+    #: How the campaign's market performed against the others, from
+    #: :func:`titan.autonomy.markets.weigh`. Exactly 1.0 -- no opinion -- unless
+    #: at least two markets cleared the sample floor, so this is inert until
+    #: there is something to compare.
+    market_multiplier: float = 1.0
+
+    @property
+    def health_weight(self) -> int:
+        """Weight from health alone, before the market shades it."""
+        return HEALTH_WEIGHT.get(self.health, 0)
 
     @property
     def weight(self) -> int:
         return HEALTH_WEIGHT.get(self.health, 0)
+
+    @property
+    def effective_weight(self) -> float:
+        """Health, shaded by how the campaign's market is doing.
+
+        Multiplied rather than added, so a market cannot conjure weight where
+        health granted none: zero times anything is still zero, and a Degraded
+        campaign in the best market in the portfolio stays at zero. That is the
+        point -- being somewhere promising is not evidence that this campaign is
+        well.
+        """
+        return self.weight * self.market_multiplier
 
     @property
     def wants_more(self) -> bool:
@@ -168,7 +190,10 @@ def allocate(demands: list[CampaignDemand], workspace_limit: int) -> Allocation:
             break
         winner = max(
             eligible,
-            key=lambda d: (d.weight / (allocated[d.campaign_id] + 1), d.campaign_id),
+            key=lambda d: (
+                d.effective_weight / (allocated[d.campaign_id] + 1),
+                d.campaign_id,
+            ),
         )
         allocated[winner.campaign_id] += 1
         remaining -= 1

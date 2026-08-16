@@ -487,6 +487,120 @@ class OutcomeRollupOut(BaseModel):
     slices: list[OutcomeSliceOut]
 
 
+class TimingSlotOut(BaseModel):
+    """One hour of one weekday, in the recipient's local time."""
+
+    weekday: int
+    hour: int
+    label: str
+    sent: int
+    replied: int
+    reply_rate: float | None = None
+    verdict: str
+
+
+class TimingReportOut(BaseModel):
+    """What the week looks like, and how much of it is actually known.
+
+    `judged` is the denominator of every claim here. When it is below
+    `slots_needed_to_rank` the report is an inventory, not a ranking, and
+    `has_enough_to_rank` says so rather than leaving a caller to infer it.
+    """
+
+    total_sent: int
+    slots: list[TimingSlotOut]
+    baseline_reply_rate: float
+    judged: int
+    min_sends_per_slot: int
+    slots_needed_to_rank: int
+    has_enough_to_rank: bool
+    summary: str
+
+
+class VariantArmOut(BaseModel):
+    key: str
+    sent: int
+    replied: int
+    positive_replies: int
+
+
+class VariantComparisonOut(BaseModel):
+    """Whether one phrasing beat another, or merely differed.
+
+    `p_value` is null when the arms were too small to test -- not 1.0, which
+    would read as "tested and found identical" and is a different claim.
+    """
+
+    control: VariantArmOut
+    challenger: VariantArmOut
+    verdict: str
+    lift: float | None = None
+    p_value: float | None = None
+    winner: str | None = None
+    summary: str
+
+
+class RegionSliceOut(BaseModel):
+    region: str
+    campaigns: int
+    active_campaigns: int
+    leads: int
+    contacted: int
+    sent: int
+    bounced: int
+    replied: int
+    share_of_sending: float
+    summary: str
+
+
+class PortfolioOut(BaseModel):
+    """The six markets as one object, busiest first."""
+
+    window_days: int
+    total_sent: int
+    slices: list[RegionSliceOut]
+    #: Markets with an active campaign that sent nothing this window. The point
+    #: of the whole view.
+    idle_markets: list[str] = []
+    #: Markets with no campaign at all. Listed rather than given a row of zeros:
+    #: "0% bounced" for a market that has never sent would read as the healthiest
+    #: line in the table.
+    unconfigured_markets: list[str] = []
+
+
+class RecipientDomainOut(BaseModel):
+    """One recipient domain's delivery record, and what it means for sending.
+
+    `health` is the verdict the admission decision already uses -- surfaced here
+    rather than recomputed, so the number an operator reads is the number the
+    gate acted on.
+
+    `bounce_rate` is null below the sample floor. A domain with two sends and
+    one bounce is not a 50% bounce rate, and a list sorted by that number would
+    put the least-measured domains at the top.
+    """
+
+    domain: str
+    health: str
+    sent: int
+    delivered: int
+    bounced: int
+    complained: int
+    bounce_rate: float | None = None
+    has_history: bool = False
+    leads: int = 0
+    explanation: str
+
+
+class RecipientDomainsOut(BaseModel):
+    """Recipient domains, worst first. The other half of "a bad source is a
+    number rather than a hunch"."""
+
+    window_days: int
+    sample_floor: int
+    domains: list[RecipientDomainOut]
+
+
 __all__ = [
     "ApprovalDecisionRequest",
     "ApprovalOut",
@@ -510,14 +624,22 @@ __all__ = [
     "OutcomeRollupOut",
     "OutcomeSliceOut",
     "Page",
+    "PortfolioOut",
+    "RecipientDomainOut",
+    "RecipientDomainsOut",
+    "RegionSliceOut",
     "ResearchStartRequest",
     "ScoreOut",
     "SendingAuthorizationRequest",
     "SuppressionCreate",
     "SuppressionOut",
     "TimelineEventOut",
+    "TimingReportOut",
+    "TimingSlotOut",
     "TokenResponse",
     "UsageOut",
+    "VariantArmOut",
+    "VariantComparisonOut",
     "WorkflowRunOut",
     "WorkspaceOut",
 ]
