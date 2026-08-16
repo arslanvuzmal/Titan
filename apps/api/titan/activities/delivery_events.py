@@ -36,10 +36,11 @@ from temporalio import activity
 
 from titan.config import get_settings
 from titan.db.enums import SmartleadEventType, SuppressionReason
-from titan.db.models import Lead, SmartleadWebhookEvent
+from titan.db.models import Lead, Message, SmartleadWebhookEvent
 from titan.db.session import workspace_unit_of_work
 from titan.delivery.bounces import BounceKind, record_bounce
 from titan.delivery.smartlead_events import DeliveryEvent, events_from_row
+from titan.delivery.smartlead_reconcile import dedupe_key, reconcile_send
 from titan.delivery.suppression import suppress
 from titan.delivery.webhooks import record_reply
 from titan.workflows.types import PollDeliveryEventsInput, PollDeliveryEventsResult
@@ -105,6 +106,7 @@ async def _apply(
     workspace_id: uuid.UUID,
     lead_id: uuid.UUID | None,
     now: dt.datetime,
+    message_id: uuid.UUID | None = None,
 ) -> None:
     """What this event means for whether the address is contacted again."""
     if event.event_type is SmartleadEventType.BOUNCED:
@@ -122,6 +124,12 @@ async def _apply(
             source=SOURCE,
             source_reference=event.fingerprint,
             lead_id=lead_id,
+            # Named explicitly. Without it record_bounce falls back to the most
+            # recent message to the address, so a lead that bounced on two
+            # sequence steps would stamp one message twice and leave the other
+            # unmarked -- understating the soft-bounce count for exactly the
+            # addresses bouncing most.
+            message_id=message_id,
             now=now,
         )
         return
@@ -149,6 +157,32 @@ async def _apply(
         )
 
 
+async def _unstamped_message(
+    session: AsyncSession, *, workspace_id: uuid.UUID, stats_id: str
+) -> uuid.UUID | None:
+    """Whether this send exists but has no bounce recorded against it.
+
+    The question is asked of the ``messages`` row rather than of the event,
+    because the message is what ``record_bounce`` stamps and what the soft-bounce
+    count reads. Once stamped, this is False and the consequence cannot fire a
+    second time -- which is what keeps an hourly full re-read from re-suppressing
+    an address every hour.
+    """
+    if not stats_id:
+        return None
+    message = (
+        await session.execute(
+            select(Message).where(
+                Message.workspace_id == workspace_id,
+                Message.dedupe_key == dedupe_key(stats_id),
+            )
+        )
+    ).scalar_one_or_none()
+    if message is None or message.bounced_at is not None:
+        return None
+    return message.id
+
+
 @activity.defn(name="poll_delivery_events")
 async def poll_delivery_events(
     request: PollDeliveryEventsInput,
@@ -165,6 +199,8 @@ async def poll_delivery_events(
     now = _now()
     rows_read = 0
     recorded = 0
+    reconciled = 0
+    healed = 0
     unattributed = 0
     by_type: dict[str, int] = {}
 
@@ -206,8 +242,51 @@ async def poll_delivery_events(
                     rows_read += len(rows)
 
                     for row in rows:
-                        for event in events_from_row(row, campaign_id=campaign_id):
-                            lead_id = leads.get(event.normalized_email)
+                        events = events_from_row(row, campaign_id=campaign_id)
+                        if not events:
+                            continue
+                        lead_id = leads.get(events[0].normalized_email)
+
+                        # The send is reconciled into `messages` before its own
+                        # events are applied, and the order is load-bearing: a
+                        # bounce is only counted when it can be tied to a send,
+                        # so a row carrying both would otherwise have its bounce
+                        # discarded on the same pass that created the send.
+                        message_id: uuid.UUID | None = None
+                        sent = next(
+                            (
+                                e
+                                for e in events
+                                if e.event_type is SmartleadEventType.SENT
+                            ),
+                            None,
+                        )
+                        if lead_id is not None and sent is not None:
+                            lead = await session.get(Lead, lead_id)
+                            if lead is not None:
+                                outcome = await reconcile_send(
+                                    session,
+                                    workspace_id=workspace_id,
+                                    lead=lead,
+                                    stats_id=str(row.get("stats_id") or ""),
+                                    to_email=str(row.get("lead_email") or ""),
+                                    subject=row.get("email_subject"),
+                                    sequence_number=sent.sequence_number,
+                                    sent_at=sent.occurred_at,
+                                )
+                                message_id = outcome.message_id
+                                if outcome.created:
+                                    reconciled += 1
+                                elif outcome.skipped_reason:
+                                    logger.info(
+                                        "could not reconcile a Smartlead send",
+                                        extra={
+                                            "reason": outcome.skipped_reason,
+                                            "stats_id": str(row.get("stats_id") or ""),
+                                        },
+                                    )
+
+                        for event in events:
                             inserted = await _store(
                                 session,
                                 event,
@@ -216,6 +295,35 @@ async def poll_delivery_events(
                                 received_at=now,
                             )
                             if not inserted:
+                                # Already recorded -- but a consequence only
+                                # ever fires on an event's first sighting, and
+                                # a bounce first seen before its send existed
+                                # was correctly declined and would never be
+                                # retried. Re-apply exactly those, identified
+                                # by the send still carrying no bounce stamp,
+                                # so the ordering heals itself instead of
+                                # needing a backfill.
+                                if (
+                                    lead_id is not None
+                                    and event.event_type is SmartleadEventType.BOUNCED
+                                    and (
+                                        pending := await _unstamped_message(
+                                            session,
+                                            workspace_id=workspace_id,
+                                            stats_id=str(row.get("stats_id") or ""),
+                                        )
+                                    )
+                                    is not None
+                                ):
+                                    await _apply(
+                                        session,
+                                        event,
+                                        workspace_id=workspace_id,
+                                        lead_id=lead_id,
+                                        now=now,
+                                        message_id=pending,
+                                    )
+                                    healed += 1
                                 continue
                             recorded += 1
                             by_type[event.event_type.value] = (
@@ -233,6 +341,7 @@ async def poll_delivery_events(
                                 workspace_id=workspace_id,
                                 lead_id=lead_id,
                                 now=now,
+                                message_id=message_id,
                             )
 
                     if len(rows) < PAGE_SIZE:
@@ -249,6 +358,8 @@ async def poll_delivery_events(
     return PollDeliveryEventsResult(
         rows_read=rows_read,
         recorded=recorded,
+        reconciled=reconciled,
+        healed=healed,
         unattributed=unattributed,
         detail=tuple(f"{name}={count}" for name, count in sorted(by_type.items())),
     )
