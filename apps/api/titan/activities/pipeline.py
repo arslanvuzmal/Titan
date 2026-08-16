@@ -1130,6 +1130,16 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         org_domain = org.canonical_domain or org.display_name
         org_industry = org.industry
         channel_id = channel_row.id
+        # Read here rather than passed in: invariant 18 says a workflow may
+        # reference a campaign but never carry its policy, so the promoted
+        # register is looked up at execution time like every other bound.
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == uuid.UUID(request.campaign_id)
+                )
+            )
+        ).scalar_one_or_none()
         campaign_row = await session.get(Campaign, uuid.UUID(request.campaign_id))
         sender_row = (
             await session.get(SenderIdentity, campaign_row.sender_identity_id)
@@ -1247,6 +1257,12 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             # opening cold, and stamps the step into the variant so the A/B
             # decision can tell step 2's wording from step 1's.
             step_number=request.step_number,
+            # None unless the manager has promoted a register on measured
+            # evidence, in which case every lead gets it instead of the one
+            # their id happened to select.
+            promoted_variant=(
+                policy.managed_promoted_variant if policy is not None else None
+            ),
         )
     )
     # A model may rephrase what the composer wrote, never what it asserted.

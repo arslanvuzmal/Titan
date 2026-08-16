@@ -283,6 +283,15 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     #: managed value can only ever be more conservative than what was approved.
     managed_daily_send_limit: Mapped[int | None] = mapped_column(Integer)
     managed_min_lead_score: Mapped[int | None] = mapped_column(Integer)
+    #: The phrasing register the manager has promoted, or null for "no opinion",
+    #: in which case the composer keeps picking per lead as it always has.
+    #:
+    #: An index rather than the variant string, because that is what the
+    #: composer selects with and what the actuator can bound. A name would have
+    #: to be parsed and validated at the point of use, which is the point where
+    #: an unrecognised value would silently fall back to the old behaviour and
+    #: look like the promotion never happened.
+    managed_promoted_variant: Mapped[int | None] = mapped_column(Integer)
     recipient_domain_daily_limit: Mapped[int] = mapped_column(default=2, nullable=False)
     min_spacing_seconds: Mapped[int] = mapped_column(default=90, nullable=False)
     max_followups: Mapped[int] = mapped_column(default=3, nullable=False)

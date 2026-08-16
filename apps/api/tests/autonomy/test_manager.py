@@ -113,10 +113,22 @@ def test_no_managed_value_means_the_configured_one_stands() -> None:
     assert effective_min_lead_score(70, None) == 70
 
 
-def test_the_actuation_surface_is_two_things() -> None:
+def test_the_actuation_surface_is_three_things() -> None:
     """Adding a member is a deliberate widening of autonomy, and this is the
-    test that makes it deliberate."""
-    assert {a.value for a in Actuation} == {"set_daily_limit", "set_min_lead_score"}
+    test that makes it deliberate.
+
+    The third was added for Phase 05's automatic promotion, and it is the first
+    that touches *what a recipient reads* rather than how much or to whom. It is
+    the narrowest form of that available: a choice between phrasing registers
+    that are already written, reviewed and validated, never a licence to author
+    anything. Widening it further -- to compose, to edit, to choose a claim --
+    would be a different kind of decision and should fail here first.
+    """
+    assert {a.value for a in Actuation} == {
+        "set_daily_limit",
+        "set_min_lead_score",
+        "set_promoted_variant",
+    }
 
 
 def test_a_reduction_never_reaches_zero_by_arithmetic() -> None:
