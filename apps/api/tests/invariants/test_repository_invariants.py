@@ -35,12 +35,22 @@ def parse(path: pathlib.Path) -> ast.Module:
 
 
 def imported_modules(tree: ast.Module) -> set[str]:
+    """Every module a file imports, by dotted path.
+
+    ``from titan.delivery import suppression`` records BOTH ``titan.delivery``
+    and ``titan.delivery.suppression``. Recording only the former -- which is
+    what ``node.module`` gives -- left every import ban below blind to the most
+    natural way of writing the import it bans. Found by planting
+    ``from titan.delivery import suppression`` inside the campaign manager and
+    watching the boundary test pass.
+    """
     found: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             found.add(node.module)
+            found.update(f"{node.module}.{alias.name}" for alias in node.names)
     return found
 
 
@@ -521,6 +531,12 @@ FORBIDDEN_TO_THE_MANAGER = (
     "titan.delivery.providers.smtp",
     "titan.intelligence.composer",
     "titan.intelligence.message_validator",
+    # The send decision itself, and the counters it spends. Absent from this
+    # tuple until the boundary was audited line by line against section five:
+    # the manager could not *bypass* a gate, but nothing stopped it importing
+    # the module that decides one.
+    "titan.policy.engine",
+    "titan.delivery.quotas",
 )
 
 
