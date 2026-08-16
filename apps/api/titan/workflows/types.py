@@ -393,6 +393,12 @@ class PollDeliveryEventsResult:
     #: Events recorded for the first time. A run that reads a thousand rows and
     #: records nothing is the normal steady state, not a failure.
     recorded: int = 0
+    #: Sends given a `messages` row for the first time. This is what makes the
+    #: CRM, the bounce counting and every outcome query see Smartlead's mail.
+    reconciled: int = 0
+    #: Bounces whose consequence was applied late, because the send they refer
+    #: to did not exist in `messages` when the event was first seen.
+    healed: int = 0
     #: Recorded, but matching no lead. Worth watching: a number that climbs is
     #: attribution breaking, not sending stopping.
     unattributed: int = 0
