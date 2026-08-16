@@ -412,6 +412,20 @@ class PollDeliveryEventsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class CaptureSenderHealthInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CaptureSenderHealthResult:
+    #: Identities given a point today. One row each, upserted, so this is the
+    #: number of senders measured rather than the number of rows written.
+    captured: int = 0
+    detail: tuple[str, ...] = ()
+    unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class VerifySendersResult:
     checked: int = 0
     #: Distinct domains looked up. Lower than ``checked`` whenever several
