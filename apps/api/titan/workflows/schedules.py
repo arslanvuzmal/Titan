@@ -58,8 +58,11 @@ from titan.workflows.mailbox_ramp import mailbox_ramp_workflow_id
 from titan.workflows.orchestrator import orchestrator_workflow_id
 from titan.workflows.reporting import DEFAULT_CRON as REPORT_CRON
 from titan.workflows.reporting import weekly_report_workflow_id
+from titan.workflows.sender_health import DEFAULT_CRON as HEALTH_CRON
+from titan.workflows.sender_health import sender_health_workflow_id
 from titan.workflows.types import (
     CampaignOrchestratorInput,
+    CaptureSenderHealthInput,
     PollDeliveryEventsInput,
     RampMailboxesInput,
     VerifySendersInput,
@@ -173,6 +176,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=PollDeliveryEventsInput(workspace_id=ws),
             task_queue=task_queue,
             note="pulls what happened to every send, so the rest can learn",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-sender-health::{ws}",
+            workflow="SenderHealthSnapshotWorkflow",
+            workflow_id=sender_health_workflow_id(ws),
+            cron=HEALTH_CRON,
+            arg=CaptureSenderHealthInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="records each sender's health so a trend exists to respond to",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

@@ -29,7 +29,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.api.schemas import (
@@ -47,6 +47,8 @@ from titan.api.schemas import (
     OutcomeRollupOut,
     OutcomeSliceOut,
     PortfolioOut,
+    RecipientDomainOut,
+    RecipientDomainsOut,
     RegionSliceOut,
     TimelineEventOut,
     TimingReportOut,
@@ -83,6 +85,7 @@ from titan.db.session import workspace_session
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence import insights, timing
+from titan.intelligence import domain_health, insights, timing
 from titan.intelligence import portfolio as portfolio_mod
 from titan.intelligence.contacts import check_contact_eligibility
 from titan.intelligence.rollups import (
@@ -1063,6 +1066,104 @@ async def portfolio_view(
             )
             for s in book.slices
         ],
+    )
+
+
+@router.get("/recipient-domains", response_model=RecipientDomainsOut, tags=["crm"])
+async def recipient_domains(
+    principal: Principal = Depends(require("research:read")),
+    limit: int = Query(200, ge=1, le=1000),
+) -> RecipientDomainsOut:
+    """What Titan's own sending says about each recipient domain, worst first.
+
+    Phase 02 promised that a bad source is visible as a number rather than a
+    hunch. The lead-source half of that is the rollup; this is the domain half,
+    and it was the one nothing could reach: `domain_health` has decided
+    admission since it was written and had no reader outside the pipeline and
+    the outbox worker.
+
+    Computed from `messages`, never materialised -- the same query the gate runs,
+    so what an operator reads is what the gate acted on rather than a counter
+    kept alongside it. See `titan.intelligence.domain_health` on why a table
+    here would drift.
+    """
+    since = dt.datetime.now(dt.UTC) - dt.timedelta(days=domain_health.WINDOW_DAYS)
+    async with workspace_session(principal.workspace_id) as session:
+        rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT m.to_domain                                    AS domain,
+                           count(*) FILTER (WHERE m.sent_at IS NOT NULL)   AS sent,
+                           count(*) FILTER (
+                               WHERE m.delivered_at IS NOT NULL
+                           )                                              AS delivered,
+                           count(*) FILTER (
+                               WHERE m.bounced_at IS NOT NULL
+                           )                                              AS bounced,
+                           count(*) FILTER (
+                               WHERE m.complained_at IS NOT NULL
+                           )                                              AS complained,
+                           count(DISTINCT m.lead_id)                      AS leads
+                      FROM messages m
+                     WHERE m.workspace_id = :workspace
+                       AND m.to_domain IS NOT NULL
+                       AND m.created_at >= :since
+                     GROUP BY m.to_domain
+                     LIMIT :limit
+                    """
+                ),
+                {
+                    "workspace": principal.workspace_id,
+                    "since": since,
+                    "limit": limit,
+                },
+            )
+        ).all()
+
+    out: list[RecipientDomainOut] = []
+    for row in rows:
+        window = domain_health.DomainWindow(
+            domain=row.domain,
+            sent=int(row.sent),
+            delivered=int(row.delivered),
+            bounced=int(row.bounced),
+            complained=int(row.complained),
+        )
+        health = domain_health.classify(window)
+        out.append(
+            RecipientDomainOut(
+                domain=row.domain,
+                health=health.value,
+                sent=window.sent,
+                delivered=window.delivered,
+                bounced=window.bounced,
+                complained=window.complained,
+                # Gated on the rate floor, not on `has_history` -- those are
+                # different questions. `has_history` is "have we sent here at
+                # all"; a *rate* needs MIN_SENDS_FOR_RATE behind it. One send
+                # and one bounce has history and no meaningful rate, and
+                # publishing 100% for it would rank it worst on the page.
+                bounce_rate=(
+                    window.bounce_rate
+                    if window.sent >= domain_health.MIN_SENDS_FOR_RATE
+                    else None
+                ),
+                has_history=window.has_history,
+                leads=int(row.leads),
+                explanation=domain_health.explain(window, health),
+            )
+        )
+
+    # Worst first, and unmeasured domains last rather than first: an unknown
+    # domain is not a problem, it is an absence of evidence about one.
+    severity = {"degraded": 0, "watch": 1, "healthy": 2, "unknown": 3}
+    out.sort(key=lambda d: (severity.get(d.health, 9), -(d.bounce_rate or 0), -d.sent))
+
+    return RecipientDomainsOut(
+        window_days=domain_health.WINDOW_DAYS,
+        sample_floor=domain_health.MIN_SENDS_FOR_RATE,
+        domains=out,
     )
 
 

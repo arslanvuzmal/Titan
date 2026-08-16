@@ -264,3 +264,75 @@ async def test_the_portfolio_names_the_markets_it_is_not_in(
     }
     # A market nobody configured has no numbers to be ranked on.
     assert all(m not in configured for m in unconfigured)
+
+
+# ------------------------------------------------- recipient domain health
+#
+# Phase 02 promised a bad source visible as a number rather than a hunch. The
+# lead-source half is the rollup; this is the domain half, and it was the one
+# nothing could reach — domain_health has decided admission since it was
+# written and had no reader outside the pipeline and the outbox worker.
+
+
+async def test_recipient_domains_are_reachable(client, workspace) -> None:
+    headers = await _headers(client, workspace, tag="dom1")
+
+    response = await client.get("/api/v1/recipient-domains", headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window_days"] > 0
+    assert body["sample_floor"] > 0
+    assert isinstance(body["domains"], list)
+
+
+async def test_a_domain_below_the_floor_reports_no_bounce_rate(
+    client, db_session, workspace
+) -> None:
+    """Two sends and one bounce is not a 50% bounce rate.
+
+    A list sorted on that number would put the least-measured domains at the
+    top, which is the opposite of useful.
+    """
+    built = await build_sendable(db_session, workspace, suffix="domhealth")
+    await db_session.execute(
+        update(Message)
+        .where(Message.id == built.message_id)
+        .values(sent_at=dt.datetime.now(dt.UTC), bounced_at=dt.datetime.now(dt.UTC))
+    )
+    await db_session.commit()
+
+    headers = await _headers(client, workspace, tag="dom2")
+    body = (await client.get("/api/v1/recipient-domains", headers=headers)).json()
+
+    assert body["domains"], "the send did not appear; the test proves nothing"
+    domain = body["domains"][0]
+    assert domain["sent"] == 1
+    assert domain["bounced"] == 1
+    # has_history is "have we sent here at all"; a rate needs the floor behind
+    # it. One send and one bounce is history without a meaningful rate.
+    assert domain["has_history"] is True
+    assert domain["bounce_rate"] is None
+    assert domain["explanation"]
+
+
+async def test_an_unmeasured_domain_sorts_last_not_first(client, workspace) -> None:
+    """An unknown domain is not a problem, it is an absence of evidence.
+
+    Sorting it alongside degraded domains would put every new domain at the top
+    of a list whose whole purpose is to surface the bad ones.
+    """
+    headers = await _headers(client, workspace, tag="dom3")
+    body = (await client.get("/api/v1/recipient-domains", headers=headers)).json()
+
+    healths = [d["health"] for d in body["domains"]]
+    if "unknown" in healths and len(set(healths)) > 1:
+        assert healths.index("unknown") >= max(
+            healths.index(h) for h in healths if h != "unknown"
+        )
+
+
+async def test_recipient_domains_require_authentication(client) -> None:
+    response = await client.get("/api/v1/recipient-domains")
+
+    assert response.status_code in (401, 403)

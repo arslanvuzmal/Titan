@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
 from titan.autonomy import markets
+from titan.autonomy import markets, promotion
 from titan.autonomy.actuator import (
     Actuation,
     Bounds,
@@ -62,6 +63,8 @@ from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.intelligence.insights import portfolio_view
+from titan.intelligence.composer import VARIANT_REGISTERS
+from titan.intelligence.insights import portfolio_view, variant_comparison
 from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import (
     CampaignCycleInput,
@@ -771,6 +774,55 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
         except Exception as exc:
             logger.warning(
                 "could not apply a capacity allocation",
+                extra={
+                    "campaign_id": str(campaign_id),
+                    "error_code": type(exc).__name__,
+                },
+            )
+
+    # ---- promotion ------------------------------------------------------
+    # A separate pass, because the loop above skips any campaign whose capacity
+    # did not move and a phrasing decision is not conditional on that.
+    #
+    # Refusals are applied too. `proposal_for` gives them `proposed == current`,
+    # so the actuator writes nothing and `apply_all` still records the row --
+    # which is what makes "every refusal to promote" readable months later. Only
+    # the case where no comparison was possible produces nothing, because the
+    # absence of a question is not a refusal to answer it.
+    for demand in demands:
+        campaign_id, policy, health = states[demand.campaign_id]
+        try:
+            async with workspace_unit_of_work(workspace_id) as session:
+                comparison = await variant_comparison(
+                    session, now=now, campaign_id=campaign_id
+                )
+                decision = promotion.decide(
+                    comparison, currently_promoted=policy.managed_promoted_variant
+                )
+                proposal = promotion.proposal_for(
+                    decision,
+                    campaign_id=demand.campaign_id,
+                    currently_promoted=policy.managed_promoted_variant,
+                    comparison=comparison,
+                )
+                if proposal is None:
+                    continue
+                await apply_all(
+                    session,
+                    workspace_id=workspace_id,
+                    campaign_id=campaign_id,
+                    health=health,
+                    proposals=[proposal],
+                    bounds=Bounds(
+                        configured_daily_limit=policy.daily_send_limit,
+                        configured_min_lead_score=policy.min_lead_score,
+                        variant_count=VARIANT_REGISTERS,
+                    ),
+                    now=now,
+                )
+        except Exception as exc:
+            logger.warning(
+                "could not decide a variant promotion",
                 extra={
                     "campaign_id": str(campaign_id),
                     "error_code": type(exc).__name__,
