@@ -18,7 +18,6 @@ import datetime as dt
 import httpx
 import pytest
 import pytest_asyncio
-from titan.db.enums import WorkspaceRole
 from sqlalchemy import update
 from titan.db.enums import WorkspaceRole
 from titan.db.models import Message
