@@ -2,9 +2,17 @@
 
     python -m titan.provision_smartlead            # show the plan, change nothing
     python -m titan.provision_smartlead --apply
+    python -m titan.provision_smartlead --apply --record <workspace-id>
 
 There was one campaign in the account and its clock was ``Europe/London`` for
 every lead in every market. This gives each market its own.
+
+**Creating them is half the job.** ``--record`` writes each carrier's id onto
+the Titan campaigns for that market, which is what the delivery path reads.
+Without it the ids exist only in Smartlead, ``campaigns.smartlead_campaign_id``
+stays null everywhere, and every message keeps leaving through the single
+carrier in ``TITAN_SMARTLEAD_CAMPAIGN_ID`` -- so the markets would be provisioned
+and unused, which looks like success and changes nothing.
 
 **Every write is read back.** ``POST /campaigns/{id}/schedule`` returns a
 success shape whether or not it understood the body, and the account then holds
@@ -21,10 +29,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, replace
 from typing import Any
 
+from sqlalchemy import select
+
 from titan.config import get_settings
+from titan.db.enums import Region
+from titan.db.models import Campaign
+from titan.db.session import workspace_unit_of_work
 from titan.outreach.smartlead_markets import (
     SEQUENCE_STEPS,
     MarketSchedule,
@@ -48,6 +62,37 @@ class Result:
     created: bool
     schedule_ok: bool
     detail: str
+    #: Titan campaigns pointed at this carrier by ``--record``. None means the
+    #: writeback was not asked for, which reads differently from zero matched.
+    recorded: int | None = None
+
+
+async def record_carriers(
+    workspace_id: uuid.UUID, carriers: dict[Region, int]
+) -> dict[Region, int]:
+    """Point each Titan campaign at the carrier for its own market.
+
+    Without this the ``smartlead_campaign_id`` column stays null on every row
+    and delivery falls back to ``TITAN_SMARTLEAD_CAMPAIGN_ID`` -- which is the
+    single-carrier behaviour these per-market campaigns exist to replace. So
+    creating them in Smartlead is only half the job; this is the half that makes
+    a Dubai lead leave through the Dubai campaign.
+
+    Scoped to one workspace and written through the ORM, so the workspace guard
+    applies. Returns the number of campaigns updated per market.
+    """
+    updated: dict[Region, int] = {}
+    async with workspace_unit_of_work(workspace_id) as session:
+        for region, carrier_id in carriers.items():
+            campaigns = (
+                (await session.execute(select(Campaign).where(Campaign.region == region)))
+                .scalars()
+                .all()
+            )
+            for campaign in campaigns:
+                campaign.smartlead_campaign_id = carrier_id
+            updated[region] = len(campaigns)
+    return updated
 
 
 def _read_back(campaign: dict[str, Any], wanted: MarketSchedule) -> tuple[bool, str]:
@@ -82,7 +127,9 @@ async def _existing(client: SmartleadClient) -> dict[str, int]:
     return {c.name.strip(): c.id for c in await client.list_campaigns()}
 
 
-async def provision(*, apply: bool, attach: bool) -> list[Result]:
+async def provision(
+    *, apply: bool, attach: bool, workspace_id: uuid.UUID | None = None
+) -> list[Result]:
     settings = get_settings()
     if settings.smartlead_api_key is None:
         raise SystemExit("TITAN_SMARTLEAD_API_KEY is not configured")
@@ -98,6 +145,7 @@ async def provision(*, apply: bool, attach: bool) -> list[Result]:
         # this cannot be used to push any single mailbox past its setting.
         capacity = daily_capacity(accounts, forbidden=forbidden)
         mailbox_ids = excluded_mailboxes(accounts, forbidden=forbidden) if attach else []
+        carriers: dict[Region, int] = {}
 
         for wanted in all_schedules():
             name = campaign_name(wanted.region)
@@ -130,8 +178,24 @@ async def provision(*, apply: bool, attach: bool) -> list[Result]:
             fresh = await client.get_campaign(campaign_id)
             ok, detail = _read_back(fresh.raw, wanted)
             results.append(Result(name, campaign_id, created, ok, detail))
+            if ok:
+                # Only a carrier whose clock read back correctly. Routing leads
+                # into one that failed verification would schedule them against
+                # a schedule nobody has confirmed, which is the exact failure
+                # the read-back exists to catch.
+                carriers[wanted.region] = campaign_id
     finally:
         await client.aclose()
+
+    if workspace_id is not None and carriers:
+        updated = await record_carriers(workspace_id, carriers)
+        by_region = {campaign_name(region): count for region, count in updated.items()}
+        results = [
+            replace(result, recorded=by_region.get(result.market))
+            if result.market in by_region
+            else result
+            for result in results
+        ]
     return results
 
 
@@ -143,15 +207,35 @@ async def main() -> int:
         action="store_true",
         help="skip attaching mailboxes; create the campaign and its clock only",
     )
+    parser.add_argument(
+        "--record",
+        metavar="WORKSPACE_ID",
+        help=(
+            "point this workspace's campaigns at the carrier for their market. "
+            "Without it the ids are created in Smartlead and nothing in Titan "
+            "knows about them, so delivery keeps using the single configured "
+            "carrier."
+        ),
+    )
     args = parser.parse_args()
 
-    results = await provision(apply=args.apply, attach=not args.no_attach)
+    workspace_id = uuid.UUID(args.record) if args.record else None
+    if workspace_id is not None and not args.apply:
+        raise SystemExit("--record writes to the database; it requires --apply")
+
+    results = await provision(
+        apply=args.apply, attach=not args.no_attach, workspace_id=workspace_id
+    )
     print("dry run -- nothing written" if not args.apply else "applied")
     for result in results:
         mark = "+" if result.created else "="
         status = "ok " if result.schedule_ok else "BAD"
         campaign = result.campaign_id if result.campaign_id is not None else "-"
-        print(f"  {mark} {status} {result.market:<24} {campaign!s:<9} {result.detail}")
+        recorded = "" if result.recorded is None else f" [{result.recorded} campaigns]"
+        print(
+            f"  {mark} {status} {result.market:<24} {campaign!s:<9} "
+            f"{result.detail}{recorded}"
+        )
     print()
     print("Campaigns are created DRAFTED. Nothing here starts one or attaches a lead.")
     return 0 if all(r.schedule_ok for r in results) else 1

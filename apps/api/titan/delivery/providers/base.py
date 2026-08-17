@@ -77,6 +77,11 @@ class OutboundEmail:
     list_unsubscribe_post: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
     tags: dict[str, str] = field(default_factory=dict)
+    #: Which of the provider's own campaigns to hand this to, for providers that
+    #: have them. None means the one the worker was configured with. Set per
+    #: message because a campaign's market decides its clock, and one carrier for
+    #: every market is what scheduled a Dubai recipient to London hours.
+    carrier_campaign_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

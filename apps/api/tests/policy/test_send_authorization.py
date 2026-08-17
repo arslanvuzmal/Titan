@@ -362,13 +362,51 @@ def test_expired_approval_blocks() -> None:
 
 
 def test_autopilot_does_not_require_a_human_approval_record() -> None:
-    """The one place approval may be absent -- and only in full autopilot."""
+    """The one place approval may be absent -- autopilot, and opted in."""
     decision = evaluate_send(
         sendable_context(
-            approval_decision=None, approval_draft_version=None, approval_expires_at=None
+            campaign_auto_approve=True,
+            approval_decision=None,
+            approval_draft_version=None,
+            approval_expires_at=None,
         )
     )
     assert decision.allowed, decision.reason_text()
+
+
+def test_autopilot_alone_does_not_drop_the_human_gate() -> None:
+    """Autopilot is permission to auto-approve, not an instruction to.
+
+    The mode is the minimum of process, workspace and campaign, and the process
+    ceiling comes from the global sending kill switch -- so without this, turning
+    production sending on would have removed the human gate from every campaign
+    at once, which is a per-campaign decision nobody made.
+    """
+    decision = evaluate_send(
+        sendable_context(
+            campaign_auto_approve=False,
+            approval_decision=None,
+            approval_draft_version=None,
+            approval_expires_at=None,
+        )
+    )
+    assert not decision.allowed
+    assert DenyCode.APPROVAL_MISSING in decision.codes
+
+
+def test_opting_in_does_not_by_itself_grant_autopilot() -> None:
+    """The flag is the second half of an AND, not a way round the mode ladder."""
+    decision = evaluate_send(
+        sendable_context(
+            campaign_mode=OperatingMode.APPROVAL_REQUIRED,
+            campaign_auto_approve=True,
+            approval_decision=None,
+            approval_draft_version=None,
+            approval_expires_at=None,
+        )
+    )
+    assert not decision.allowed
+    assert DenyCode.APPROVAL_MISSING in decision.codes
 
 
 # --------------------------------------------------------------------------

@@ -178,6 +178,17 @@ class SendContext:
     send_window: SendWindow | None = None
     #: The campaign's market. Supplies a timezone for a recipient who has none.
     campaign_region: Region = Region.UNSPECIFIED
+    #: Whether this campaign was opted in to approving its own drafts. ANDed
+    #: with the AUTO_APPROVE capability, never a substitute for it.
+    #:
+    #: Defaults false because that is the closed position: a caller that cannot
+    #: supply it falls back to requiring a human, which is the same rule the
+    #: approval read follows when it cannot see a policy row.
+    campaign_auto_approve: bool = False
+    #: Which carrier campaign this message is handed to, when the provider is
+    #: one that has them. None means the process-wide default configured for the
+    #: worker -- which is what every message used before markets existed.
+    carrier_campaign_id: int | None = None
     #: The band this recipient's own address falls in, derived from their state
     #: and coordinates. More specific than anything the campaign can declare.
     recipient_subregion: SubRegion = SubRegion.UNSPECIFIED
@@ -423,9 +434,19 @@ def _process_mode(settings: Settings) -> OperatingMode:
 
 def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
     denials: list[Denial] = []
-    if mode.allows(Capability.AUTO_APPROVE) and ctx.approval_decision is None:
-        # controlled_autopilot: the policy decision itself stands in for the
-        # human one, and is recorded with the same rigour.
+    if (
+        mode.allows(Capability.AUTO_APPROVE)
+        and ctx.campaign_auto_approve
+        and ctx.approval_decision is None
+    ):
+        # controlled_autopilot, and this campaign was opted in: the policy
+        # decision itself stands in for the human one, and is recorded with the
+        # same rigour.
+        #
+        # Both halves are required. The mode is resolved from process,
+        # workspace and campaign, so autopilot alone made the kill switch a
+        # global answer to a per-campaign question -- enabling production
+        # sending would have dropped the human gate from every campaign at once.
         return denials
 
     if ctx.approval_decision is None:
