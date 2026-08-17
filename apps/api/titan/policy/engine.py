@@ -434,11 +434,7 @@ def _process_mode(settings: Settings) -> OperatingMode:
 
 def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
     denials: list[Denial] = []
-    if (
-        mode.allows(Capability.AUTO_APPROVE)
-        and ctx.campaign_auto_approve
-        and ctx.approval_decision is None
-    ):
+    if mode.allows(Capability.AUTO_APPROVE) and ctx.campaign_auto_approve:
         # controlled_autopilot, and this campaign was opted in: the policy
         # decision itself stands in for the human one, and is recorded with the
         # same rigour.
@@ -447,6 +443,26 @@ def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
         # workspace and campaign, so autopilot alone made the kill switch a
         # global answer to a per-campaign question -- enabling production
         # sending would have dropped the human gate from every campaign at once.
+        #
+        # A *rejection* still stands. Somebody looked at this message and said
+        # no, and no amount of autonomy should overturn that -- the operator
+        # removed the requirement to review, not the authority of a review that
+        # happened.
+        if ctx.approval_decision is not None and ctx.approval_decision != "approved":
+            return [
+                Denial(
+                    DenyCode.APPROVAL_MISSING,
+                    f"a person decided {ctx.approval_decision!r} on this draft",
+                )
+            ]
+        # A stale *approval* does not. This check used to require
+        # ``approval_decision is None``, which made a draft that had once been
+        # reviewed harder to send than one that never had: the version guard
+        # below fired on the old record and refused. That guard exists so
+        # "approve, then edit, then send" cannot bypass human review -- and
+        # under autopilot there is no human review to bypass. Observed on the
+        # live workspace as "approval covers draft version 1 but the draft is
+        # now version 3" on drafts nothing was waiting to review.
         return denials
 
     if ctx.approval_decision is None:
