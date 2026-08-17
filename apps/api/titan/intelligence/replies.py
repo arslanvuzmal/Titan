@@ -122,6 +122,46 @@ _AUTO_SUBJECTS = (
     re.compile(r"\bthank you for (contacting|your (email|message|enquiry))\b", re.I),
 )
 
+#: Auto-reply phrases that appear in the *body*.
+#:
+#: Needed because the header and subject rules above have nothing to read on
+#: every intake but IMAP. Smartlead's message history returns a body and no
+#: headers, and its ``subject`` is null on replies -- so an out-of-office
+#: arriving that way was classified as a human reply, which stops the sequence
+#: permanently and counts as an outcome. The live example:
+#:
+#:     Thank you for your email. I am currently on annual leave until
+#:     Wed 19th August 2026
+#:
+#: **Tense is what separates these from a human.** "I am currently on annual
+#: leave" is a responder; "sorry for the delay, I was on annual leave last
+#: week" is a person, and treating that person as a machine means Titan keeps
+#: mailing somebody who answered -- the worse of the two errors, per this
+#: module's own preamble. So every pattern here is anchored to present or future
+#: framing, and none matches a past-tense mention.
+_AUTO_BODY = (
+    re.compile(r"\bi(?: am|'m) (currently )?(out of (the )?office|away)\b", re.I),
+    re.compile(
+        r"\bi(?: am|'m) (currently )?on (annual |parental |maternity |paternity |sick )?"
+        r"(leave|holiday|vacation)\b",
+        re.I,
+    ),
+    re.compile(r"\b(currently|presently) (out of (the )?office|on leave)\b", re.I),
+    re.compile(r"\bi will be (out of (the )?office|away|on leave)\b", re.I),
+    re.compile(r"\b(this is an )?automat(ic|ed) (reply|response|message)\b", re.I),
+    re.compile(r"\bi(?: will)?(?: be)? (back|return(ing)?) (on|to the office)\b", re.I),
+    re.compile(r"\bwill be (answered|responded to) (on|when i return)\b", re.I),
+)
+
+#: How far into a body the phrases above are looked for.
+#:
+#: An automatic responder leads with its notice; a person mentioning last
+#: week's holiday does so partway through a real message. Without this bound,
+#: "thanks -- sorry for the slow reply, I was on leave" matches on a sentence
+#: that is evidence of a human, not of a machine.
+_AUTO_BODY_WINDOW = 400
+
+
 #: RFC 3462's marker for a delivery status report, matched tolerantly.
 #:
 #: The parameter value is quoted or bare depending on who serialised the header:
@@ -256,6 +296,19 @@ def classify_reply(message: InboundMessage) -> ReplyClassification:
             ReplyKind.AUTO,
             tuple(signals),
             "subject matches an automatic responder; the sequence continues",
+        )
+
+    # Body last, and only its opening. The header and subject rules are the
+    # reliable ones; this exists because two of the three intakes supply
+    # neither, and an out-of-office read as a human reply stops outreach for
+    # good.
+    opening = (message.body_text or "")[:_AUTO_BODY_WINDOW]
+    if _any(_AUTO_BODY, opening):
+        signals.append("auto_reply_body")
+        return ReplyClassification(
+            ReplyKind.AUTO,
+            tuple(signals),
+            "the message opens with an absence notice; the sequence continues",
         )
 
     # ---- 5. a person wrote back -------------------------------------------

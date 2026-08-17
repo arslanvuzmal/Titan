@@ -146,6 +146,28 @@ class DraftActivityResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class CollectRepliesInput:
+    """One pass over the carrier campaigns, looking for replies Titan has not
+    seen."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CollectRepliesResult:
+    carriers: int = 0
+    #: Inbound messages found in Smartlead's threads, new or already ingested.
+    seen: int = 0
+    #: Of those, the ones this pass recorded for the first time.
+    ingested: int = 0
+    #: Replies from addresses Titan holds no lead for. Not an error -- Smartlead
+    #: holds leads that were never imported -- but a rising number means the two
+    #: systems have drifted apart.
+    unmatched: int = 0
+    refused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class SweepStrandedInput:
     """One pass over the approved drafts nothing ever queued."""
 
@@ -491,6 +513,8 @@ __all__ = [
     "CampaignCycleInput",
     "CampaignCyclePlan",
     "CampaignOrchestratorInput",
+    "CollectRepliesInput",
+    "CollectRepliesResult",
     "ContactActivityInput",
     "ContactActivityResult",
     "CrawlActivityInput",

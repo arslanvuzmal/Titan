@@ -333,17 +333,35 @@ async def record_reply(
     workspace_id: uuid.UUID,
     lead_id: uuid.UUID,
     replied_at: dt.datetime,
+    stops_sequence: bool = True,
 ) -> None:
     """Stop all future outreach the moment a human replies (invariant 15).
 
     Sets ``replied_at`` unconditionally but only advances status from a
     non-terminal state, so a later reply cannot resurrect a suppressed lead.
+
+    ``stops_sequence`` separates two facts that used to be one. *Something came
+    back* is knowable from a timestamp alone -- Smartlead's ``reply_time`` says
+    so without carrying a body. *A human engaged* is only knowable from the
+    body, and it is the one that should halt a sequence and count as an outcome.
+
+    Collapsing them is not a small error. The single reply in this workspace
+    reads "I am currently on annual leave until Wed 19th August 2026". Treated
+    as a human reply it permanently stops outreach to that lead and counts as a
+    success in every rate the system tunes on; classified from its body it is
+    ``OUT_OF_OFFICE``, and the right response is to write again next week.
+
+    So the timestamp-only path passes False and records that something arrived.
+    ``ingest_inbound``, which has read the message, passes True when the class
+    says a person is actually there.
     """
     await session.execute(
         update(Lead)
         .where(Lead.id == lead_id, Lead.workspace_id == workspace_id)
         .values(replied_at=replied_at)
     )
+    if not stops_sequence:
+        return
     await session.execute(
         update(Lead)
         .where(
