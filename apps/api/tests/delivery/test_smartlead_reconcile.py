@@ -16,6 +16,9 @@ import datetime as dt
 import uuid
 
 import pytest
+from sqlalchemy import select
+from titan.db.enums import DraftStatus, MessageState
+from titan.db.models import Lead, Message, MessageDraft
 from sqlalchemy import select, update
 from titan.db.enums import DraftStatus, MessageState, Region
 from titan.db.models import (
