@@ -134,6 +134,21 @@ class ProcessResult:
     detail: str | None = None
 
 
+
+def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
+    """The earliest of several timestamps, ignoring the ones that are absent.
+
+    Used for warm-up position, where the inputs are Titan's first send through
+    a mailbox and the date the provider says it began warming. Neither is
+    authoritative alone: Titan's history is a lower bound on a mailbox's age,
+    and the provider's record says nothing about whether Titan ever used it.
+    Taking the earlier of the two can move a mailbox forward in the ramp and
+    never back, which is the safe direction for a value that decides volume.
+    """
+    known = [m for m in moments if m is not None]
+    return min(known) if known else None
+
+
 class OutboxWorker:
     def __init__(
         self,
@@ -562,7 +577,11 @@ class OutboxWorker:
             )
         ).one()
 
-        first_send_at = stats.first_send_at
+        # Same rule as the pool: whichever is earlier, Titan's first send or
+        # the provider's warm-up start. Reading it differently here than in
+        # selection is how a mailbox gets chosen for a batch it is then refused
+        # at the gate.
+        first_send_at = _earliest(stats.first_send_at, sender.warmup_started_at)
         attempted = int(throughput.attempted or 0)
         retries = int(throughput.retries or 0)
         warmup_limit = deliverability.warmup_limit(

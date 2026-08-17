@@ -168,6 +168,25 @@ class SenderIdentity(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     last_verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
+    #: When this mailbox began building reputation, if that predates Titan.
+    #:
+    #: Warm-up position is otherwise derived from ``min(messages.sent_at)``,
+    #: which is Titan's record of having sent through the mailbox -- a lower
+    #: bound on its age, not its age. ``sales@`` was connected in Smartlead on
+    #: 7 August with its warm-up pool running from that day, had no row here
+    #: until the 17th, and was therefore placed on day zero and allowed five
+    #: messages a day. The mailbox was ten days warm; only Titan's view of it
+    #: was new.
+    #:
+    #: Set from the provider's own account record, never by hand, and consulted
+    #: alongside the send history rather than instead of it -- the earlier of
+    #: the two wins, so this can move a mailbox earlier in the ramp and never
+    #: later. Null means "no evidence beyond what Titan sent", which is the
+    #: previous behaviour exactly.
+    warmup_started_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+
     def authorization_errors(self) -> list[str]:
         """Reasons this identity may not be used for delivery.
 
