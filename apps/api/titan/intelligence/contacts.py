@@ -288,6 +288,14 @@ def extract_contacts_from_pages(
                 else ContactSource.PATTERN_GUESS
             )
             generic = is_role_address(normalized)
+            # Ambiguous rather than wrong: stored so the crawler does not
+            # rediscover it every run, held below the sending bar because it
+            # may be a phone number and a mailbox stuck together. The operator
+            # can release it; nothing automatic will send to it.
+            spliced = (
+                rejection is None
+                and DIGIT_RUN_PREFIX.match(normalized.split("@", 1)[0]) is not None
+            )
             out[normalized] = DiscoveredContact(
                 email=raw,
                 normalized=normalized,
@@ -297,10 +305,34 @@ def extract_contacts_from_pages(
                 is_generic_role=generic,
                 # First-party published, but a role mailbox is slightly less
                 # certain to reach a decision maker.
-                confidence=0.0 if rejection else (0.75 if generic else 0.9),
+                confidence=(
+                    0.0
+                    if rejection
+                    else (0.35 if spliced else (0.75 if generic else 0.9))
+                ),
                 rejection_reason=rejection,
             )
     return sorted(out.values(), key=lambda c: (-c.confidence, c.normalized))
+
+
+#: A local part that is a run of digits immediately followed by letters.
+#:
+#: The shape a phone number makes when it runs into an address in one text
+#: node: "Tel: 0161 234 0606info@207dentalcare.com" tokenises as
+#: ``0606info@207dentalcare.com``, which is syntactically perfect and wrong.
+#: No regex can split it -- the boundary between the number and the mailbox is
+#: exactly where the whitespace is missing -- so it is not a parsing problem
+#: and cannot be fixed by a better pattern.
+#:
+#: It is a *confidence* problem. Real addresses of this shape exist --
+#: ``07handyman@`` is an ordinary trades mailbox -- so this cannot be a
+#: rejection. It is a reason not to claim the address is published and
+#: first-party when it might be two things stuck together.
+#:
+#: Three digits, not two: "01info@" is more likely a concatenation than a
+#: mailbox, but "3dprint@" is a business. Requiring three keeps the common
+#: legitimate shapes and catches the phone-number case, whose runs are longer.
+DIGIT_RUN_PREFIX = re.compile(r"^[0-9]{3,}[a-z]", re.I)
 
 
 def _domains_related(candidate: str, organization: str) -> bool:

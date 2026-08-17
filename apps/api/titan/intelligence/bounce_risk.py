@@ -46,7 +46,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from titan.db.enums import ContactSource, VerificationStatus, verification_permits_sending
-from titan.intelligence.contacts import email_domain, is_valid_email, normalize_email
+from titan.intelligence.contacts import (
+    DIGIT_RUN_PREFIX,
+    email_domain,
+    is_valid_email,
+    normalize_email,
+)
 from titan.intelligence.domain_health import DomainHealth, DomainWindow, classify, explain
 from titan.intelligence.mx import MxCheck
 from titan.intelligence.recipient_domains import (
@@ -163,6 +168,34 @@ def assess(
         )
 
     domain = email_domain(normalized)
+
+    # ---- layer 1b: two things stuck together ----------------------------
+    # A local part that is a run of three or more digits immediately followed by
+    # letters is the shape a phone number makes when it runs into an address
+    # inside one text node: "Tel: 0161 234 0606info@207dentalcare.com" tokenises
+    # as `0606info@207dentalcare.com`, which is syntactically perfect and wrong.
+    #
+    # No pattern can split it -- the boundary is exactly where the whitespace is
+    # missing -- so this is not a parsing problem to be fixed upstream. It is a
+    # reason to stop claiming the address was *published*, which is the claim
+    # that made it sendable. Provenance says a human put this on their website;
+    # what a human actually put there was a phone number and a mailbox.
+    #
+    # DOWNGRADE, not REFUSE: `07handyman@` is an ordinary trades address and
+    # this shape does occur legitimately. Downgrading holds it back from
+    # automatic sending and leaves it for a person or a verification service to
+    # release. Observed: one address of this shape was mailed twice and produced
+    # two of the five bounces behind a 6.2% rate, which halved every mailbox.
+    if DIGIT_RUN_PREFIX.match(normalized.split("@", 1)[0]):
+        signals.append(
+            RiskSignal(
+                "digit_run_prefix",
+                Verdict.DOWNGRADE,
+                "the local part is a digit run followed by letters, the shape a "
+                "phone number makes when it runs into an address; it may be two "
+                "things stuck together rather than a published mailbox",
+            )
+        )
 
     # ---- layer 2: disposable --------------------------------------------
     if is_disposable(domain):

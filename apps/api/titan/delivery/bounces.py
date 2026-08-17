@@ -52,6 +52,21 @@ SOFT_BOUNCE_WINDOW = dt.timedelta(days=30)
 #: from us. By the third the pattern is the mailbox, not the moment.
 SOFT_BOUNCES_TO_SUPPRESS = 3
 
+#: Undiagnosed bounces after which the address is suppressed.
+#:
+#: Two, because the reasoning behind three does not survive the loss of the
+#: diagnosis. Three is right for a bounce a DSN *told us* was temporary: a
+#: mailbox can plausibly be full twice in a month and belong to somebody who
+#: wants to hear from us. When the provider says only "this bounced", the second
+#: identical failure is the strongest evidence available, and the cost of the
+#: third attempt is not symmetric -- being wrong here means one temporarily full
+#: mailbox given up on, while being wrong the other way means a third bounce
+#: against a denominator small enough that it moves the whole account's rate.
+#:
+#: Observed: one malformed address, mailed twice, produced two of the five
+#: bounces behind a 6.2% rate -- which halved every mailbox's daily volume.
+UNDIAGNOSED_BOUNCES_TO_SUPPRESS = 2
+
 #: How long to leave the lead alone after the nth soft bounce, indexed from the
 #: first. Retrying into a full mailbox the next morning produces a second soft
 #: bounce and no information; the point of backing off is to let the condition
@@ -68,6 +83,13 @@ _ATTRIBUTION_WINDOW = dt.timedelta(days=14)
 class BounceKind(StrEnum):
     HARD = "hard"
     SOFT = "soft"
+    #: The provider said a message bounced and nothing about why.
+    #:
+    #: Distinct from SOFT, which is a *finding* -- a DSN carrying a 4.x.x code,
+    #: meaning a real mailbox that was temporarily unable to accept. This is the
+    #: absence of a finding. Smartlead reports ``is_bounced`` and no diagnostic,
+    #: and calling that soft borrows the confidence of a diagnosis nobody made.
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +179,17 @@ async def record_bounce(
         session, workspace_id=workspace_id, to_email=target, now=now
     )
 
-    if count >= SOFT_BOUNCES_TO_SUPPRESS:
+    # Both kinds count toward the same total -- they are all evidence about the
+    # same address -- but how many it takes depends on what the provider was
+    # able to tell us about *this* one. A diagnosis earns the benefit of the
+    # doubt; its absence does not.
+    limit = (
+        UNDIAGNOSED_BOUNCES_TO_SUPPRESS
+        if kind is BounceKind.UNKNOWN
+        else SOFT_BOUNCES_TO_SUPPRESS
+    )
+
+    if count >= limit:
         await _suppress_and_stop(
             session,
             workspace_id=workspace_id,
@@ -192,8 +224,8 @@ async def record_bounce(
             .values(
                 next_action_at=retry_after,
                 status_reason=(
-                    f"soft bounce {count} of {SOFT_BOUNCES_TO_SUPPRESS}; "
-                    f"waiting {delay.days} days"
+                    f"{'undiagnosed' if kind is BounceKind.UNKNOWN else 'soft'} "
+                    f"bounce {count} of {limit}; waiting {delay.days} days"
                 ),
             )
         )
@@ -253,7 +285,7 @@ async def _soft_bounce_count(
                     SELECT count(*) FROM messages
                      WHERE workspace_id = :workspace
                        AND to_email_normalized = :email
-                       AND bounce_kind = 'soft'
+                       AND bounce_kind IN ('soft', 'unknown')
                        AND bounced_at >= :since
                     """
                 ),
@@ -307,6 +339,7 @@ __all__ = [
     "SOFT_BOUNCES_TO_SUPPRESS",
     "SOFT_BOUNCE_BACKOFF",
     "SOFT_BOUNCE_WINDOW",
+    "UNDIAGNOSED_BOUNCES_TO_SUPPRESS",
     "BounceKind",
     "BounceOutcome",
     "record_bounce",
