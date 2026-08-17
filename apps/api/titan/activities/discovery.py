@@ -53,6 +53,7 @@ from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.intelligence import territories
 from titan.intelligence.discovery import admit_all, build_query, targeting_blockers
 from titan.notify.operator import NotificationKind, record_notification
+from titan.policy.subregions import subregion_from_longitude, timezone_for
 from titan.providers.places import (
     DiscoveredBusiness,
     DiscoveryResult,
@@ -266,6 +267,10 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         industry=industry,
         query_text=query.text_query,
         country_code=country_code,
+        # The one thing this activity knows for certain about every business it
+        # is about to write: which city it searched. Passed down so the lead
+        # carries its own clock rather than its market's representative one.
+        timezone=territories.timezone_of(geography),
         result=result,
         idempotency_key=request.idempotency_key,
         max_new_leads=request.max_results,
@@ -310,6 +315,7 @@ async def _record(
     industry: Industry,
     query_text: str,
     country_code: str | None,
+    timezone: str | None,
     result: DiscoveryResult,
     idempotency_key: str,
     max_new_leads: int,
@@ -375,6 +381,7 @@ async def _record(
                 industry=industry,
                 business=business,
                 country_code=country_code,
+                timezone=timezone,
                 now=now,
             )
 
@@ -474,6 +481,7 @@ async def _create_lead(
     industry: Industry,
     business: DiscoveredBusiness,
     country_code: str | None,
+    timezone: str | None,
     now: dt.datetime,
 ) -> None:
     """One organization, its location and domain, and the lead pointing at it.
@@ -520,6 +528,7 @@ async def _create_lead(
             country_code=(business.country_code or country_code or None),
             latitude=business.latitude,
             longitude=business.longitude,
+            timezone=_timezone_for(business, country_code, timezone),
             is_primary=True,
         )
     )
@@ -544,6 +553,37 @@ async def _create_lead(
             status=LeadStatus.DISCOVERED,
         )
     )
+
+
+def _timezone_for(
+    business: DiscoveredBusiness,
+    country_code: str | None,
+    searched_timezone: str | None,
+) -> str | None:
+    """The clock this one business keeps.
+
+    The searched metro answers it exactly and answers it for every market: a
+    business returned by "Bucharest Romania" is in Bucharest. That is used
+    first, because it is a fact about the query rather than an inference from
+    the result.
+
+    Coordinates are the fallback, and only for the USA, where a hand-configured
+    geography outside the catalogue still spans four zones and guessing Eastern
+    for a Californian business would be three hours wrong. Everywhere else an
+    uncatalogued geography returns None, and the send window falls back to the
+    market default exactly as it did before -- which is the honest outcome, not
+    a zone nobody has grounds for.
+
+    None is a real value here. ``resolve_timezone`` reads it as "this lead has
+    no clock of its own, use the campaign's", which is a different statement
+    from naming the wrong one.
+    """
+    if searched_timezone is not None:
+        return searched_timezone
+    band = subregion_from_longitude(
+        business.country_code or country_code, business.longitude
+    )
+    return timezone_for(band)
 
 
 def _describe(refused: dict[str, int]) -> str:
