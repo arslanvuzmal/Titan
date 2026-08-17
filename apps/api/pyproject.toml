@@ -100,6 +100,7 @@ ignore = [
 "titan/cli.py" = ["T20"]
 "titan/seed.py" = ["T20"]  # operator script; printing is the interface
 "titan/provision_markets.py" = ["T20"]  # likewise
+"titan/provision_smartlead.py" = ["T20"]  # likewise
 
 [tool.ruff.format]
 docstring-code-format = true
