@@ -134,7 +134,6 @@ class ProcessResult:
     detail: str | None = None
 
 
-
 def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
     """The earliest of several timestamps, ignoring the ones that are absent.
 

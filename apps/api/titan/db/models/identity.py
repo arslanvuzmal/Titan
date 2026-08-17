@@ -183,9 +183,7 @@ class SenderIdentity(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     #: the two wins, so this can move a mailbox earlier in the ramp and never
     #: later. Null means "no evidence beyond what Titan sent", which is the
     #: previous behaviour exactly.
-    warmup_started_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    warmup_started_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
     def authorization_errors(self) -> list[str]:
         """Reasons this identity may not be used for delivery.
