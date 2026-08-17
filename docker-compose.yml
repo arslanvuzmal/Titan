@@ -267,7 +267,11 @@ services:
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    restart: unless-stopped
+    restart: on-failure
+    # on-failure, not unless-stopped. The worker exits zero when IMAP is
+    # not configured, and `unless-stopped` restarts a container whatever
+    # its exit code -- which turned a clean 'nothing to do' into a
+    # permanent crash loop that made the whole stack look unhealthy.
 
   # Deliberately receives NO database, email, or model credentials. It is the
   # only service that fetches attacker-controlled URLs, so its blast radius is

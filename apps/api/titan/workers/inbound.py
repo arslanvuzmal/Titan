@@ -77,6 +77,34 @@ async def main() -> None:
         environment=settings.environment.value,
     )
 
+    # An unconfigured mailbox is a configuration state, not a fault.
+    #
+    # This used to raise, which under `restart: unless-stopped` is a permanent
+    # crash loop -- 110 restarts and counting on the live stack, one container
+    # flapping every thirty-five seconds and making a healthy system look like
+    # it is falling over. Nothing was protected by it: raising does not collect
+    # a single reply, it only makes the absence loud in the most expensive
+    # possible way.
+    #
+    # Refusing to start was the right call when IMAP was the only intake, since
+    # a quiet poller would have read as "no replies yet" rather than as "nobody
+    # is listening". Replies now also arrive through
+    # `collect_smartlead_replies` on the delivery poll, so the campaign path is
+    # covered and this worker is the *additional* intake -- it sees mail sent
+    # straight to the mailbox, outside any campaign.
+    #
+    # So it exits zero and says why. The log line is the signal; a container
+    # that completed is not a container that failed.
+    blockers = get_settings().reply_collection_errors()
+    if blockers:
+        logger.warning(
+            "reply poller not started: IMAP is not configured. Campaign replies "
+            "are still collected from the carrier on the delivery poll; mail "
+            "sent directly to the mailbox is not.",
+            extra={"blockers": blockers},
+        )
+        return
+
     mailbox, address = build_mailbox()
     default_workspace = _default_workspace()
 
