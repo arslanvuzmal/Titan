@@ -97,10 +97,20 @@ async def collect_smartlead_replies(
             ).scalars()
             if row is not None
         ]
-    # The configured default is included even when no campaign points at it:
-    # it is where every message sent before per-market routing existed went, and
-    # the replies to those are the only history this workspace has.
-    if settings.smartlead_campaign_id is not None:
+    # The configured default is included as well, because it is where every
+    # message sent before per-market routing existed went -- the replies to
+    # those are the only history this workspace has, and no campaign row names
+    # that carrier.
+    #
+    # **Only for a workspace that already routes to a carrier of its own.**
+    # TITAN_SMARTLEAD_CAMPAIGN_ID is process-wide and names no owner, so
+    # applying it unconditionally hands every workspace in the database the same
+    # Smartlead campaign. Observed exactly that: a leftover test workspace runs
+    # its own copy of this schedule, read the real workspace's carrier, and
+    # ingested a stranger's reply as its own. The workspace guard cannot catch
+    # it -- the write is correctly scoped, it is the *source* that belongs to
+    # somebody else.
+    if settings.smartlead_campaign_id is not None and carriers:
         carriers.append(int(settings.smartlead_campaign_id))
     carriers = sorted(set(carriers))
     if not carriers:
