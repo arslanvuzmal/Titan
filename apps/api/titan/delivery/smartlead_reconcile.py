@@ -34,8 +34,6 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from titan.db.enums import DELIVERY_RANK, DraftStatus, MessageState
-from titan.db.models import Lead, Message, MessageDraft, SenderIdentity
 from titan.db.enums import DELIVERY_RANK, DraftStatus, MessageState, Region, SubRegion
 from titan.db.models import (
     Campaign,
