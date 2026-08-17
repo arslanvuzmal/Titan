@@ -466,6 +466,54 @@ def _looks_like_uuid(value: str) -> bool:
     return True
 
 
+def cmd_sweep(args: argparse.Namespace) -> int:
+    """Queue the approved drafts nothing ever queued.
+
+    Queueing lives inside LeadResearchWorkflow, one step after the approval it
+    waits for. When the workflow is no longer running at that moment -- the
+    approval window elapsed, the worker restarted, the run was cancelled -- the
+    draft is approved, valid, and invisible to everything downstream.
+
+    Each one is handed to the same queue_message activity the workflow would
+    have called, so every gate is re-applied by the same code. Idempotent: the
+    activity dedupes on the draft id.
+    """
+    import asyncio
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.activities.stranded import sweep_stranded_drafts
+    from titan.db.models import Workspace
+    from titan.db.session import dispose_engine, get_sessionmaker
+    from titan.workflows.types import SweepStrandedInput
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            workspace_id = (await session.execute(query)).scalar_one_or_none()
+        if workspace_id is None:
+            print(f"no workspace matching {args.workspace!r}")
+            return 1
+        result = await sweep_stranded_drafts(
+            SweepStrandedInput(workspace_id=str(workspace_id), limit=args.limit)
+        )
+        print(f"found   {result.found}")
+        print(f"queued  {result.queued}")
+        print(f"refused {result.refused}")
+        for reason, count in result.refused_reasons:
+            print(f"          {count:>4}  {reason}")
+        await dispose_engine()
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def cmd_schedules(args: argparse.Namespace) -> int:
     """Install the recurring jobs, or show what installing would do.
 
@@ -684,6 +732,14 @@ def main() -> int:
         ),
     )
     passcode_parser.set_defaults(func=cmd_set_passcode)
+
+    sweep_parser = sub.add_parser(
+        "sweep",
+        help="queue approved drafts that nothing ever queued",
+    )
+    sweep_parser.add_argument("--workspace", default="titan")
+    sweep_parser.add_argument("--limit", type=int, default=None)
+    sweep_parser.set_defaults(func=cmd_sweep)
 
     schedules_parser = sub.add_parser(
         "schedules",
