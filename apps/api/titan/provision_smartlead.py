@@ -40,6 +40,7 @@ from titan.db.enums import Region
 from titan.db.models import Campaign
 from titan.db.session import workspace_unit_of_work
 from titan.outreach.smartlead_markets import (
+    CARRIER_SETTINGS,
     SEQUENCE_STEPS,
     MarketSchedule,
     all_schedules,
@@ -172,6 +173,12 @@ async def provision(
                 campaign_id, wanted.body(max_new_leads_per_day=capacity)
             )
             await client.set_sequences(campaign_id, list(SEQUENCE_STEPS))
+            # Smartlead's defaults are not the operator's. A campaign created
+            # here otherwise ships with link and open tracking on, an HTML
+            # body, and no unsubscribe text -- three differences from the
+            # campaign that has actually been sending, all of which cost
+            # deliverability.
+            await client.update_settings(campaign_id, dict(CARRIER_SETTINGS))
             if mailbox_ids:
                 await client.attach_email_accounts(campaign_id, mailbox_ids)
 

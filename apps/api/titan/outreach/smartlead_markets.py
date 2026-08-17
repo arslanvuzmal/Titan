@@ -110,6 +110,38 @@ MARKET_LABELS: dict[Region, str] = {
 }
 
 
+#: Deliverability settings, copied from the campaign the operator has been
+#: running and tuning, not chosen here.
+#:
+#: The six market campaigns were created with Smartlead's defaults and differed
+#: from that one in three ways that all cost deliverability:
+#:
+#: * open and link tracking were **on**. Tracking rewrites every link through a
+#:   redirector and adds a pixel, both of which spam filters weigh, and neither
+#:   of which is worth much on cold mail where the open rate is unmeasurable
+#:   anyway once Apple Mail Privacy Protection is counted.
+#: * the body was sent as HTML. Plain text is what a real person sending one
+#:   message would produce, and it is what the composer writes.
+#: * there was no unsubscribe text at all. The reply-based opt-out is the one
+#:   the message body promises, so a campaign without it makes the message lie.
+#: ``track_settings`` is written as ``DONT_TRACK_*`` and read back as
+#: ``DONT_*``. Sending the vocabulary the GET returns earns
+#: ``Invalid track_settings value - DONT_EMAIL_OPEN`` -- the third read/write
+#: asymmetry this API has produced, after ``max_new_leads_per_day`` and
+#: ``delay_in_days``.
+CARRIER_SETTINGS: dict[str, Any] = {
+    "track_settings": ["DONT_TRACK_EMAIL_OPEN", "DONT_TRACK_LINK_CLICK"],
+    "send_as_plain_text": True,
+    "stop_lead_settings": "REPLY_TO_AN_EMAIL",
+    "unsubscribe_text": "Reply STOP and I will not contact you again.",
+}
+
+
+#: The same setting as the GET reports it, so a read-back compares like with
+#: like instead of always disagreeing.
+TRACK_SETTINGS_AS_READ: tuple[str, ...] = ("DONT_EMAIL_OPEN", "DONT_LINK_CLICK")
+
+
 def campaign_name(region: Region) -> str:
     label = MARKET_LABELS.get(region)
     if label is None:
@@ -237,12 +269,14 @@ def excluded_mailboxes(
 
 
 __all__ = [
+    "CARRIER_SETTINGS",
     "MARKETS",
     "MARKET_LABELS",
     "MIN_MINUTES_BETWEEN_EMAILS",
     "MIN_NEW_LEADS_PER_DAY",
     "NAME_PREFIX",
     "SEQUENCE_STEPS",
+    "TRACK_SETTINGS_AS_READ",
     "MarketSchedule",
     "all_schedules",
     "campaign_name",

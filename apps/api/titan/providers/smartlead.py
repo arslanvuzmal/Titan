@@ -193,8 +193,15 @@ class SmartleadClient:
     async def update_settings(
         self, campaign_id: int, settings: dict[str, Any]
     ) -> dict[str, Any]:
+        """General campaign settings: tracking, plain text, unsubscribe copy.
+
+        POST, not PATCH. The published reference says PATCH and the live API
+        answers 404 to it, while POST works -- verified against the account on
+        2026-08-17. The same page is wrong about two other endpoints this client
+        calls, so the method here follows the server rather than the document.
+        """
         result = await self._request(
-            "PATCH", f"/campaigns/{campaign_id}/settings", json=settings
+            "POST", f"/campaigns/{campaign_id}/settings", json=settings
         )
         return result if isinstance(result, dict) else {}
 
