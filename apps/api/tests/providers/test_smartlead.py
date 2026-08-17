@@ -228,6 +228,91 @@ async def test_an_unreadable_sequence_list_is_refused() -> None:
 
 
 # ==========================================================================
+# Adapter: which carrier the message goes to
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_a_message_goes_to_the_carrier_its_campaign_names() -> None:
+    """One carrier per market, so the recipient is scheduled on their own clock.
+
+    Before this, every lead in every market went to the single id in
+    ``TITAN_SMARTLEAD_CAMPAIGN_ID``, which is how a Dubai recipient came to be
+    scheduled to London hours.
+    """
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return campaign_routes()(request)
+
+    result = await provider_with(handler, campaign_id=42).send(
+        email(carrier_campaign_id=77)
+    )
+
+    assert result.accepted is True
+    assert any("/campaigns/77/leads" in path for path in seen)
+    assert not any("/campaigns/42/leads" in path for path in seen)
+
+
+@pytest.mark.asyncio
+async def test_a_message_naming_no_carrier_uses_the_configured_one() -> None:
+    """The behaviour every message had before markets existed, unchanged."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return campaign_routes()(request)
+
+    result = await provider_with(handler, campaign_id=42).send(email())
+
+    assert result.accepted is True
+    assert any("/campaigns/42/leads" in path for path in seen)
+
+
+@pytest.mark.asyncio
+async def test_each_carrier_is_shape_checked_on_its_own() -> None:
+    """Clearing one market must not vouch for another.
+
+    The single-step guarantee is a property of one campaign. A carrier that had
+    grown a second step in the Smartlead UI would otherwise ride in on a
+    different campaign's verification and send mail Titan never authorized.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/sequences"):
+            # 42 is a proper carrier; 77 has been given a follow-up step.
+            if "/campaigns/77/" in request.url.path:
+                return httpx.Response(200, json=[{"seq_number": 1}, {"seq_number": 2}])
+            return httpx.Response(200, json=ONE_STEP)
+        return campaign_routes()(request)
+
+    provider = provider_with(handler, campaign_id=42)
+
+    assert (await provider.send(email())).accepted is True
+
+    refused = await provider.send(email(carrier_campaign_id=77))
+    assert refused.accepted is False
+    assert refused.is_configuration_failure is True
+    assert "2 sequence steps" in (refused.error_detail or "")
+
+
+@pytest.mark.asyncio
+async def test_a_verified_carrier_is_not_re_checked() -> None:
+    """The check is cached per campaign, not repeated per message."""
+    sequence_reads: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/sequences"):
+            sequence_reads.append(request.url.path)
+        return campaign_routes()(request)
+
+    provider = provider_with(handler, campaign_id=42)
+    await provider.send(email(carrier_campaign_id=77))
+    await provider.send(email(carrier_campaign_id=77))
+
+    assert len(sequence_reads) == 1
+
+
+# ==========================================================================
 # Adapter: the handover
 # ==========================================================================
 @pytest.mark.asyncio

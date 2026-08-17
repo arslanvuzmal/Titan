@@ -29,6 +29,7 @@ from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
 from titan.activities import sender_health as sender_health_activities
+from titan.activities import stranded as stranded_activities
 from titan.activities import verification as verification_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
@@ -94,6 +95,7 @@ async def main() -> None:
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
+            *stranded_activities.ALL_STRANDED_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
             sender_health_activities.capture_sender_health,

@@ -214,3 +214,45 @@ def test_a_mailbox_with_no_id_is_skipped_rather_than_crashing() -> None:
     ]
 
     assert excluded_mailboxes(boxes, forbidden=set()) == [7]
+
+
+# ------------------------------------------------- the settings the operator tuned
+
+
+def test_the_carrier_settings_use_the_write_vocabulary() -> None:
+    """The GET returns DONT_EMAIL_OPEN; the POST rejects it.
+
+    Sending back the shape the API just gave you earns
+    "Invalid track_settings value - DONT_EMAIL_OPEN" -- the third read/write
+    asymmetry in this API, after max_new_leads_per_day and delay_in_days. It is
+    pinned here because nothing about the name suggests which half it is.
+    """
+    from titan.outreach.smartlead_markets import CARRIER_SETTINGS, TRACK_SETTINGS_AS_READ
+
+    assert CARRIER_SETTINGS["track_settings"] == [
+        "DONT_TRACK_EMAIL_OPEN",
+        "DONT_TRACK_LINK_CLICK",
+    ]
+    assert TRACK_SETTINGS_AS_READ == ("DONT_EMAIL_OPEN", "DONT_LINK_CLICK")
+
+
+def test_tracking_is_off_and_the_body_is_plain_text() -> None:
+    """Smartlead's defaults are not the operator's.
+
+    Tracking rewrites every link through a redirector and adds a pixel, both of
+    which filters weigh, for an open rate that Apple Mail Privacy Protection has
+    made unreadable anyway.
+    """
+    from titan.outreach.smartlead_markets import CARRIER_SETTINGS
+
+    assert CARRIER_SETTINGS["send_as_plain_text"] is True
+    assert len(CARRIER_SETTINGS["track_settings"]) == 2
+
+
+def test_the_campaign_offers_the_opt_out_the_message_promises() -> None:
+    """The composed body says to reply STOP. A carrier campaign with no
+    unsubscribe text makes that sentence a lie."""
+    from titan.outreach.smartlead_markets import CARRIER_SETTINGS
+
+    assert "STOP" in CARRIER_SETTINGS["unsubscribe_text"]
+    assert CARRIER_SETTINGS["stop_lead_settings"] == "REPLY_TO_AN_EMAIL"

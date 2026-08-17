@@ -286,6 +286,8 @@ class OutboxWorker:
             campaign_mode=policy.operating_mode,
             campaign_status=campaign.status,
             campaign_sending_authorized=policy.sending_authorized,
+            campaign_auto_approve=policy.auto_approve,
+            carrier_campaign_id=campaign.smartlead_campaign_id,
             min_lead_score=policy.min_lead_score,
             require_verified_email=policy.require_verified_email,
             require_evidence_backed_claims=policy.require_evidence_backed_claims,
@@ -370,7 +372,7 @@ class OutboxWorker:
             await self._block(session, row, decision.reason_text())
             return ProcessResult(row.id, "blocked", decision.reason_text())
 
-        email = self._render(row, decision)
+        email = self._render(row, decision, ctx)
 
         # Deliverability is checked at the send boundary, alongside policy.
         # A message that would be filtered is not "sent with a warning" -- it
@@ -910,7 +912,9 @@ class OutboxWorker:
             window_date=self._now().date(),
         )
 
-    def _render(self, row: OutboxMessage, decision: Decision) -> OutboundEmail:
+    def _render(
+        self, row: OutboxMessage, decision: Decision, ctx: SendContext | None = None
+    ) -> OutboundEmail:
         payload = row.payload or {}
         return OutboundEmail(
             to_email=payload.get("to_email", row.to_email_normalized),
@@ -925,6 +929,7 @@ class OutboxWorker:
             list_unsubscribe_post=payload.get("list_unsubscribe_post"),
             headers=payload.get("headers") or {},
             tags={"campaign": str(row.campaign_id), "lead": str(row.lead_id)},
+            carrier_campaign_id=ctx.carrier_campaign_id if ctx else None,
         )
 
     async def _record(

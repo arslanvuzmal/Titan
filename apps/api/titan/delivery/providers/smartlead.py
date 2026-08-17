@@ -85,57 +85,68 @@ class SmartleadProvider:
         timeout_seconds: float = 30.0,
         client: SmartleadClient | None = None,
     ) -> None:
+        #: The carrier used when a message does not name one of its own.
         self._campaign_id = campaign_id
         self._client = client or SmartleadClient(
             api_key, base_url=base_url, timeout_seconds=timeout_seconds
         )
-        #: Set by verify_campaign_shape(). Sending before that has happened is
-        #: refused, because an unverified campaign may carry follow-up steps.
-        self._shape_verified = False
+        #: Which campaigns verify_campaign_shape() has cleared. A set rather than
+        #: a boolean because the single-step guarantee is a property of one
+        #: campaign, not of the provider: with a carrier per market, clearing
+        #: London would otherwise have vouched for Dubai as well, and a carrier
+        #: that had grown a second step would send mail Titan never authorized.
+        self._shape_verified: set[int] = set()
 
     async def aclose(self) -> None:
         await self._client.aclose()
 
     # ---------------------------------------------------------------- shape
-    async def verify_campaign_shape(self) -> tuple[bool, str]:
+    async def verify_campaign_shape(
+        self, campaign_id: int | None = None
+    ) -> tuple[bool, str]:
         """Check the campaign is a single-step carrier, not a real sequence.
 
         This is the safety check that makes the whole integration honest. A
         Smartlead campaign with three sequence steps would send two messages
         Titan never drafted, never validated against evidence, and never
         authorized -- silently, and outside every gate in this repository.
+
+        Checked per campaign. Each market has its own carrier, and each one can
+        have been edited in the Smartlead UI independently of the others.
         """
+        target = self._campaign_id if campaign_id is None else campaign_id
         # Read the sequences endpoint, not the campaign payload: the campaign
         # object does not carry its steps (verified live, 2026-08-09), so
         # inspecting it would find nothing and refuse every campaign forever.
         try:
-            steps = await self._client.get_sequences(self._campaign_id)
+            steps = await self._client.get_sequences(target)
         except SmartleadError as exc:
-            return False, f"cannot read sequences for {self._campaign_id}: {exc}"
+            return False, f"cannot read sequences for {target}: {exc}"
 
         count = len(steps)
         if count == 0:
             return False, (
-                f"campaign {self._campaign_id} has no sequence steps; there is "
+                f"campaign {target} has no sequence steps; there is "
                 "nothing to render the message into"
             )
 
         if count != 1:
             return False, (
-                f"campaign {self._campaign_id} has {count} sequence steps. Titan "
+                f"campaign {target} has {count} sequence steps. Titan "
                 "authorizes exactly one message at a time, so the carrier campaign "
                 "must have exactly one step; any other step would send unauthorized "
                 "mail."
             )
 
-        self._shape_verified = True
-        return True, f"campaign {self._campaign_id} is a single-step carrier"
+        self._shape_verified.add(target)
+        return True, f"campaign {target} is a single-step carrier"
 
     # ----------------------------------------------------------------- send
     async def send(self, email: OutboundEmail) -> SendResult:
         """Hand the message over. Never called before Titan's gates have passed."""
-        if not self._shape_verified:
-            ok, detail = await self.verify_campaign_shape()
+        campaign_id = email.carrier_campaign_id or self._campaign_id
+        if campaign_id not in self._shape_verified:
+            ok, detail = await self.verify_campaign_shape(campaign_id)
             if not ok:
                 # A configuration fault, not the recipient's: do not suppress.
                 return SendResult(
@@ -154,7 +165,7 @@ class SmartleadProvider:
         }
 
         try:
-            result = await self._client.add_leads(self._campaign_id, [lead])
+            result = await self._client.add_leads(campaign_id, [lead])
         except SmartleadAuthError as exc:
             return SendResult(
                 accepted=False,
@@ -184,7 +195,7 @@ class SmartleadProvider:
             logger.info(
                 "smartlead reported the lead as already present; treating the "
                 "handover as complete",
-                extra={"campaign_id": self._campaign_id},
+                extra={"campaign_id": campaign_id},
             )
             return SendResult(
                 accepted=True,

@@ -130,8 +130,11 @@ async def requires_human_approval(request: ResearchLeadInput) -> bool:
         process_mode = _process_mode(settings)
         mode = resolve_mode(process_mode, workspace.operating_mode, policy.operating_mode)
 
-    # Anything short of full autopilot requires a human before queueing.
-    return not mode.allows(Capability.AUTO_APPROVE)
+    # Anything short of full autopilot requires a human before queueing -- and
+    # so does a campaign that was never opted in, even under autopilot. The mode
+    # says what the system is permitted to do; the flag says whether this
+    # campaign was actually handed that permission.
+    return not (mode.allows(Capability.AUTO_APPROVE) and policy.auto_approve)
 
 
 def _process_mode(settings: Settings) -> OperatingMode:

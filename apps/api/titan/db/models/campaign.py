@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -117,6 +118,14 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         server_default=SubRegion.UNSPECIFIED.value,
         nullable=False,
     )
+
+    #: Which carrier campaign this one's leads are handed to.
+    #:
+    #: Null falls back to ``TITAN_SMARTLEAD_CAMPAIGN_ID``, which is how every
+    #: campaign behaved before this column existed -- one carrier for every
+    #: market, on one clock, which is why a Dubai recipient was scheduled to
+    #: London hours. Set per market by ``titan.provision_smartlead``.
+    smartlead_campaign_id: Mapped[int | None] = mapped_column(Integer, index=True)
 
     #: Targeting
     target_business_type: Mapped[str | None] = mapped_column(String(200))
@@ -260,6 +269,26 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     )
     #: Fourth delivery gate. Independent of workspace.sending_authorized.
     sending_authorized: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    #: Whether this campaign may approve its own drafts.
+    #:
+    #: Fifth gate, and the only one that is about *review* rather than delivery.
+    #: ``controlled_autopilot`` grants the AUTO_APPROVE capability, but the mode
+    #: ladder is resolved from process, workspace and campaign together -- so
+    #: turning on the process kill switch was enough to drop the human gate from
+    #: every campaign at once, without anybody deciding that per campaign.
+    #:
+    #: This ANDs with the capability rather than replacing it: autopilot is still
+    #: required, and on top of it a campaign has to have been opted in. Default
+    #: false, so every campaign that exists today keeps the gate it was created
+    #: with and a deploy changes no behaviour.
+    #:
+    #: The default is declared on the database as well as in Python. For a gate,
+    #: the closed position should not depend on the row having been created
+    #: through the ORM -- an insert from anywhere gets the human gate.
+    auto_approve: Mapped[bool] = mapped_column(
+        default=False, server_default=false(), nullable=False
+    )
 
     min_lead_score: Mapped[int] = mapped_column(default=70, nullable=False)
     require_verified_email: Mapped[bool] = mapped_column(default=True, nullable=False)

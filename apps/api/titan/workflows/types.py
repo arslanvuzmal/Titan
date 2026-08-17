@@ -146,6 +146,27 @@ class DraftActivityResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class SweepStrandedInput:
+    """One pass over the approved drafts nothing ever queued."""
+
+    workspace_id: str
+    #: None takes the module default. Bounded because the sweeper competes with
+    #: live sending for the same mailbox quota.
+    limit: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class SweepStrandedResult:
+    found: int
+    queued: int
+    refused: int
+    #: Why the refused ones were refused, counted. A sweep that finds a hundred
+    #: and queues none is a different problem from one that finds none, and
+    #: without this they report identically.
+    refused_reasons: tuple[tuple[str, int], ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
 class QueueActivityInput:
     workspace_id: str
     draft_id: str
@@ -491,6 +512,8 @@ __all__ = [
     "ResearchStatus",
     "ScoreActivityInput",
     "ScoreActivityResult",
+    "SweepStrandedInput",
+    "SweepStrandedResult",
     "VerifySendersInput",
     "VerifySendersResult",
     "WeeklyReportInput",
