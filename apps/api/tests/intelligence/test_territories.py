@@ -15,6 +15,9 @@ campaigns were `uk`, and every geography was a northern English city.
 
 from __future__ import annotations
 
+import datetime as dt
+import zoneinfo
+
 from titan.db.enums import Region, SubRegion
 from titan.intelligence.territories import (
     TERRITORIES,
@@ -22,7 +25,9 @@ from titan.intelligence.territories import (
     find,
     for_region,
     next_territory,
+    timezone_of,
 )
+from titan.policy.subregions import belongs_to
 
 # ---------------------------------------------------------------- the catalogue
 
@@ -34,6 +39,100 @@ def test_the_markets_the_operator_named_are_all_present() -> None:
     assert "London UK" in names
     assert "New York NY USA" in names
     assert "Dubai UAE" in names
+
+
+def test_eastern_europe_is_in_the_catalogue() -> None:
+    """Asked for by name alongside the USA, UK, Dubai, Australia and Canada.
+
+    It shares ``Region.EUROPE`` with the west because it is one market -- one
+    working week, one holiday shape -- and the zones are what differ, which is
+    what ``timezone`` is for.
+    """
+    names = {t.query_name for t in TERRITORIES}
+
+    assert {"Warsaw Poland", "Prague Czech Republic", "Budapest Hungary"} <= names
+    assert "Bucharest Romania" in names
+
+
+def test_the_two_european_offsets_are_not_collapsed() -> None:
+    """Warsaw and Bucharest are an hour apart, all year.
+
+    Scheduled on the Europe default of Berlin, every Bucharest lead would be
+    written to an hour before its own working day opened -- which is the whole
+    reason a territory stores a zone rather than inheriting one.
+    """
+    warsaw = find("Warsaw Poland")
+    bucharest = find("Bucharest Romania")
+
+    assert warsaw is not None and bucharest is not None
+    instant = dt.datetime(2026, 6, 1, 12, tzinfo=dt.UTC)
+    offset_of = lambda tz: instant.astimezone(zoneinfo.ZoneInfo(tz)).utcoffset()  # noqa: E731
+
+    assert offset_of(bucharest.timezone) - offset_of(warsaw.timezone) == dt.timedelta(
+        hours=1
+    )
+
+
+def test_the_gulf_is_two_offsets_as_well() -> None:
+    """The UAE is +4 and Saudi Arabia is +3; neither observes daylight saving."""
+    dubai = find("Dubai UAE")
+    riyadh = find("Riyadh Saudi Arabia")
+
+    assert dubai is not None and riyadh is not None
+    instant = dt.datetime(2026, 6, 1, 12, tzinfo=dt.UTC)
+
+    assert instant.astimezone(
+        zoneinfo.ZoneInfo(dubai.timezone)
+    ).utcoffset() - instant.astimezone(
+        zoneinfo.ZoneInfo(riyadh.timezone)
+    ).utcoffset() == dt.timedelta(hours=1)
+
+
+def test_every_territory_names_a_real_zone() -> None:
+    """A typo in an IANA string is not a syntax error.
+
+    ``zoneinfo`` raises at the moment of use, deep inside send scheduling and
+    long after the entry was added, so the whole catalogue is resolved here.
+    """
+    for territory in TERRITORIES:
+        zoneinfo.ZoneInfo(territory.timezone)  # raises if the name is not real
+
+
+def test_a_metros_band_and_its_zone_agree_on_the_market() -> None:
+    """The zone may be finer than the band, but it may not contradict it.
+
+    Brisbane is ``Australia/Brisbane`` while its band resolves to Sydney, and
+    they differ by an hour for four months of the year. That is deliberate --
+    the metro is the more precise of the two and the recipient's own timezone
+    wins at send time. What would be a bug is a band from a different continent.
+    """
+    for territory in TERRITORIES:
+        assert belongs_to(territory.sub_region, territory.region), territory.query_name
+
+
+def test_a_market_carries_days_of_runway_not_hours() -> None:
+    """Discovery searches once an hour per campaign.
+
+    A market with eight metros is spent before lunch and the campaign goes
+    quiet, which is the failure this catalogue exists to prevent -- so the size
+    of each market is itself the fix and worth asserting.
+    """
+    for region in (Region.UK, Region.USA, Region.EUROPE):
+        assert len(for_region(region)) >= 15, region.value
+
+
+def test_the_timezone_of_a_stored_geography_is_recoverable() -> None:
+    """Discovery stamps it on every business it writes."""
+    assert timezone_of("Dubai UAE") == "Asia/Dubai"
+    assert timezone_of("  new york ny usa  ") == "America/New_York"
+
+
+def test_an_uncatalogued_geography_has_no_zone_to_offer() -> None:
+    """None means "fall back to the market default", which is what the caller
+    did before. Naming a plausible zone instead would be a guess presented as a
+    fact."""
+    assert timezone_of("Somewhere Nobody Listed") is None
+    assert timezone_of(None) is None
 
 
 def test_every_real_market_has_somewhere_to_search() -> None:
