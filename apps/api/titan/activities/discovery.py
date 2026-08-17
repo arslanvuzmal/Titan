@@ -50,6 +50,7 @@ from titan.db.models import (
 )
 from titan.db.models.compliance import SuppressionEntry
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.intelligence import territories
 from titan.intelligence.discovery import admit_all, build_query, targeting_blockers
 from titan.notify.operator import NotificationKind, record_notification
 from titan.providers.places import (
@@ -69,6 +70,67 @@ SOURCE_KIND = "google_places"
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
+
+
+async def _exhausted_geographies(
+    session: AsyncSession, *, campaign_id: uuid.UUID, business_type: str
+) -> set[str]:
+    """Query names whose most recent search returned nothing new.
+
+    A territory counts as spent when its last run **found results and admitted
+    none of them**. Read from the counters rather than from the refusal reasons:
+    a real run returns forty raw records of which twenty-five are already known
+    and the rest fail the quality bar, so testing `already_known >= returned`
+    never fires. Observed on live data, where every campaign reported healthy
+    while the system logged seventeen exhaustion alerts the same day.
+
+    Either way the conclusion is the same -- the query found nothing worth
+    having, and asking it again returns the same nothing. A run that found *no*
+    results at all is left alone: that is usually a query too narrow rather than
+    ground worked out, and it is worth retrying.
+
+    Computed, never stored. The alternative is a column marking a geography
+    exhausted, which would keep saying so after the ground refilled and would
+    have to be cleared by hand.
+
+    ``label`` holds the whole query -- "dentists in Liverpool UK" -- so the
+    geography is recovered by removing the business type this campaign searches
+    with. Splitting on " in " instead would be one business type containing the
+    word away from silently matching nothing, which is how the first version of
+    this failed against real data: every campaign reported healthy while the
+    system logged seventeen exhaustion alerts.
+    """
+    prefix = f"{business_type.strip()} in ".casefold()
+    rows = (
+        await session.execute(
+            select(
+                LeadSource.label,
+                LeadSource.records_returned,
+                LeadSource.records_deduplicated,
+            )
+            .where(
+                LeadSource.campaign_id == campaign_id,
+                LeadSource.kind == SOURCE_KIND,
+            )
+            .order_by(LeadSource.created_at.desc())
+        )
+    ).all()
+
+    # Most recent run per query text wins: a geography that yielded nothing in
+    # March and everything in August is not exhausted.
+    latest: dict[str, tuple[int, int]] = {}
+    for label, returned, deduped in rows:
+        key = (label or "").strip().casefold()
+        if key and key not in latest:
+            latest[key] = (int(returned or 0), int(deduped or 0))
+
+    spent: set[str] = set()
+    for key, (returned, deduped) in latest.items():
+        admitted = returned - deduped
+        if returned <= 0 or admitted > 0:
+            continue
+        spent.add(key.removeprefix(prefix).strip() if key.startswith(prefix) else key)
+    return spent
 
 
 @activity.defn(name="discover_leads")
@@ -140,6 +202,35 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         geography = (campaign.target_geography or "").strip()
         country_code = campaign.target_country_code
         industry = campaign.industry or Industry.GENERAL
+
+        # Move on when the ground is worked out. A campaign's configured
+        # geography returns about twenty-five businesses and then returns the
+        # same twenty-five for ever, so re-asking costs a billable request and
+        # admits nothing -- which is exactly what every campaign here was doing
+        # each cycle.
+        #
+        # The replacement stays inside the campaign's own market. A UK campaign
+        # that quietly started searching Phoenix would be sending on the wrong
+        # clock, in the wrong working week, with a message written for somewhere
+        # else.
+        spent = await _exhausted_geographies(
+            session, campaign_id=campaign_id, business_type=business_type
+        )
+        if geography.strip().casefold() in spent:
+            moved_on = territories.next_territory(
+                campaign.region, exhausted=spent, current=geography
+            )
+            if moved_on is not None:
+                logger.info(
+                    "geography exhausted; moving to the next territory",
+                    extra={
+                        "campaign_id": str(campaign_id),
+                        "from": geography,
+                        "to": moved_on.query_name,
+                    },
+                )
+                geography = moved_on.query_name
+                country_code = moved_on.country_code
 
     settings = get_settings()
     if settings.google_places_api_key is None:
