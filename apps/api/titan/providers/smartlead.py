@@ -345,8 +345,35 @@ class SmartleadClient:
             raw=body,
         )
 
+    async def lead_message_history(
+        self, campaign_id: int, lead_id: int
+    ) -> list[dict[str, Any]]:
+        """Every message in one lead's thread, sends and replies together.
+
+        The only place the *content* of a reply is available. ``/statistics``
+        reports ``reply_time`` and nothing else, which is enough to know that
+        somebody answered and not enough to know whether the answer was
+        "sounds good" or "I am on annual leave" -- and those two are the same
+        number to anything counting replies.
+
+        Called only for leads whose statistics row shows a reply, so a campaign
+        costs one request plus one per replying lead rather than one per lead.
+        """
+        payload = await self._request(
+            "GET", f"/campaigns/{campaign_id}/leads/{lead_id}/message-history"
+        )
+        if isinstance(payload, dict):
+            rows = payload.get("history") or payload.get("data") or []
+        else:
+            rows = payload or []
+        return [row for row in rows if isinstance(row, dict)]
+
     async def lead_by_email(self, email: str) -> dict[str, Any] | None:
-        payload = await self._request("GET", "/leads/by-email", params={"email": email})
+        # "/leads/" with an email parameter, not "/leads/by-email": the latter
+        # routes to the by-id handler and answers
+        # `"leadId" must be a number`. Verified against the live account on
+        # 2026-08-17; this method had never been called by anything.
+        payload = await self._request("GET", "/leads/", params={"email": email})
         return payload if isinstance(payload, dict) and payload else None
 
     async def campaign_leads(

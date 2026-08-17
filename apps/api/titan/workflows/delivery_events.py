@@ -25,6 +25,8 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from titan.workflows.types import (
+        CollectRepliesInput,
+        CollectRepliesResult,
         PollDeliveryEventsInput,
         PollDeliveryEventsResult,
     )
@@ -54,13 +56,37 @@ class DeliveryEventPollWorkflow:
 
     @workflow.run
     async def run(self, request: PollDeliveryEventsInput) -> PollDeliveryEventsResult:
-        return await workflow.execute_activity(
+        result: PollDeliveryEventsResult = await workflow.execute_activity(
             "poll_delivery_events",
             request,
             start_to_close_timeout=POLL_TIMEOUT,
             retry_policy=POLL_RETRY,
             result_type=PollDeliveryEventsResult,
         )
+
+        # Collecting the replies belongs here rather than on a schedule of its
+        # own. It reads the same statistics rows this pass just read, so a
+        # separate schedule would double the request count for the same answer,
+        # and the two could drift apart -- one seeing a reply the other has not
+        # reached yet, on a system where "a reply arrived" and "what the reply
+        # said" drive different decisions.
+        #
+        # Failure is deliberately not propagated. The delivery poll above has
+        # already succeeded and written suppressions and bounce consequences; a
+        # Smartlead outage while fetching message bodies must not roll that back
+        # or mark the run failed. The replies are still there next hour.
+        try:
+            await workflow.execute_activity(
+                "collect_smartlead_replies",
+                CollectRepliesInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=POLL_TIMEOUT,
+                retry_policy=POLL_RETRY,
+                result_type=CollectRepliesResult,
+            )
+        except Exception:
+            workflow.logger.warning("reply collection failed; delivery poll stands")
+
+        return result
 
 
 def delivery_event_poll_workflow_id(workspace_id: str) -> str:

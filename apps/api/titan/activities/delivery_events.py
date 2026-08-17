@@ -147,13 +147,22 @@ async def _apply(
         return
 
     if event.event_type is SmartleadEventType.REPLIED and lead_id is not None:
-        # Invariant 15. A human answered; nothing further is sent to them by
-        # anything this system schedules.
+        # A response arrived. That is all this event knows: the statistics row
+        # carries `reply_time` and no body, so nothing here can tell an
+        # interested prospect from an out-of-office -- and the only reply this
+        # workspace has ever received is an out-of-office.
+        #
+        # So the timestamp is recorded and the sequence is left running.
+        # `collect_smartlead_replies` fetches the message itself, and
+        # `ingest_inbound` stops the sequence when the class says a person is
+        # actually there. Stopping here would halt outreach to everybody who
+        # sets an autoresponder, and count each one as a success.
         await record_reply(
             session,
             workspace_id=workspace_id,
             lead_id=lead_id,
             replied_at=event.occurred_at,
+            stops_sequence=False,
         )
 
 
