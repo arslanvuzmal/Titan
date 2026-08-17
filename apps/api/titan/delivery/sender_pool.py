@@ -230,10 +230,19 @@ async def load_slots(
                   si.dkim_ok,
                   si.dmarc_ok,
                   si.last_verified_at,
-                  (SELECT min(m.sent_at) FROM messages m
-                    WHERE m.workspace_id = :workspace
-                      AND m.sender_identity_id = si.id
-                      AND m.sent_at IS NOT NULL)              AS first_send_at,
+                  -- The earlier of what Titan sent and when the provider says
+                  -- the mailbox began warming. Titan's own history is a lower
+                  -- bound on a mailbox's age, not its age: a mailbox connected
+                  -- and warming for ten days before Titan held a row for it is
+                  -- ten days warm. LEAST ignores nulls, so a sender with only
+                  -- one of the two behaves exactly as it did before.
+                  LEAST(
+                    (SELECT min(m.sent_at) FROM messages m
+                      WHERE m.workspace_id = :workspace
+                        AND m.sender_identity_id = si.id
+                        AND m.sent_at IS NOT NULL),
+                    si.warmup_started_at
+                  )                                          AS first_send_at,
                   (SELECT count(*) FROM messages m
                     WHERE m.workspace_id = :workspace
                       AND m.sender_identity_id = si.id

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -40,6 +41,7 @@ from sqlalchemy import select
 
 from titan.config import get_settings
 from titan.db.models import Campaign, CampaignSender, SenderIdentity, Workspace
+from titan.db.models.campaign import MailboxRampState
 from titan.db.session import dispose_engine, get_sessionmaker
 from titan.outreach.smartlead_markets import excluded_mailboxes
 from titan.providers.smartlead import SmartleadClient
@@ -51,14 +53,53 @@ from titan.runtime import configure_event_loop
 class Mailbox:
     from_email: str
     daily_limit: int
+    #: When the provider says this mailbox was connected, which is when its
+    #: warm-up pool started running. Titan's ramp reads it as the start of
+    #: reputation building, because that is what it is.
+    connected_at: dt.datetime | None = None
 
 
-def mailboxes_from(accounts: list[dict[str, Any]]) -> list[Mailbox]:
+def _parse_time(value: Any) -> dt.datetime | None:
+    """A timestamp from the provider's account listing, if it gave one."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
+
+
+def true_ceiling(account: dict[str, Any], recorded: dict[str, int]) -> int:
+    """The mailbox's configured ceiling, not today's ramped-down value.
+
+    ``message_per_day`` in the provider is what the ramp last *wrote*, which
+    partway through a warm-up is a fraction of the real limit. Reading it back
+    as the ceiling is the one-way ratchet ``observe_ceiling`` exists to prevent,
+    reached by a different door. Observed: ``sales@`` was created with a ceiling
+    of 18 because the ramp had already written 18, so it would have warmed
+    toward a third of its actual limit and stopped there.
+
+    ``mailbox_ramp_state`` holds the ceiling captured before the ramp first
+    wrote -- the operator's own number. The provider value is the fallback for
+    a mailbox the ramp has never touched.
+    """
+    identifier = str(account.get("id") or "")
+    if identifier in recorded:
+        return recorded[identifier]
+    limit = account.get("message_per_day")
+    return int(limit) if isinstance(limit, int | float) and limit > 0 else 50
+
+
+def mailboxes_from(
+    accounts: list[dict[str, Any]], recorded_ceilings: dict[str, int] | None = None
+) -> list[Mailbox]:
     """The outreach mailboxes Smartlead holds, in a shape Titan can store.
 
     Filtered through the same helper the campaign attachment uses, so a mailbox
     Titan may not send from cannot arrive here by a different route.
     """
+    recorded = recorded_ceilings or {}
     allowed = set(excluded_mailboxes(accounts, forbidden=set(FORBIDDEN_MAILBOXES)))
     found: list[Mailbox] = []
     for account in accounts:
@@ -66,11 +107,11 @@ def mailboxes_from(accounts: list[dict[str, Any]]) -> list[Mailbox]:
         address = str(account.get("from_email") or "").strip().lower()
         if identifier is None or int(identifier) not in allowed or not address:
             continue
-        limit = account.get("message_per_day")
         found.append(
             Mailbox(
                 from_email=address,
-                daily_limit=int(limit) if isinstance(limit, int | float) else 50,
+                daily_limit=true_ceiling(account, recorded),
+                connected_at=_parse_time(account.get("created_at")),
             )
         )
     return found
@@ -100,7 +141,26 @@ async def _ensure_identities(
             )
         ).scalar_one_or_none()
         if existing is not None:
-            notes.append(f"  = {mailbox.from_email:<34} exists")
+            # Backfill only. An identity created before this column existed has
+            # no warm-up start, and the provider knows one; a value already set
+            # is left alone rather than re-derived every run.
+            fixed = []
+            if existing.warmup_started_at is None and mailbox.connected_at is not None:
+                existing.warmup_started_at = mailbox.connected_at
+                fixed.append(f"warm-up start {mailbox.connected_at.date()}")
+            # Only ever upward. A ceiling recorded before the ramp started is the
+            # operator's number; one taken from a ramped-down provider value is
+            # too low, and lowering an existing ceiling here would be this
+            # script overruling a human.
+            if mailbox.daily_limit > existing.daily_send_limit:
+                fixed.append(
+                    f"ceiling {existing.daily_send_limit} -> {mailbox.daily_limit}"
+                )
+                existing.daily_send_limit = mailbox.daily_limit
+            if fixed:
+                notes.append(f"  ~ {mailbox.from_email:<34} {', '.join(fixed)}")
+            else:
+                notes.append(f"  = {mailbox.from_email:<34} exists")
             continue
 
         local, _, domain = mailbox.from_email.partition("@")
@@ -119,6 +179,12 @@ async def _ensure_identities(
                 mailing_address=(template.mailing_address if template else None),
                 unsubscribe_mailto=(template.unsubscribe_mailto if template else None),
                 daily_send_limit=mailbox.daily_limit,
+                # The mailbox has been building reputation since the provider
+                # connected it, whether or not Titan was the one sending. Without
+                # this a mailbox connected a fortnight ago is placed on day zero
+                # the moment Titan first hears about it, and allowed a tenth of
+                # the volume it has already earned.
+                warmup_started_at=mailbox.connected_at,
                 is_active=True,
             )
         )
@@ -196,7 +262,22 @@ async def provision(workspace_slug: str, *, apply: bool) -> int:
         accounts = await client.list_email_accounts()
     finally:
         await client.aclose()
-    mailboxes = mailboxes_from(accounts)
+
+    async with get_sessionmaker()() as session:
+        recorded = {
+            str(row.external_id): int(row.ceiling)
+            for row in (
+                await session.execute(
+                    select(MailboxRampState).where(
+                        MailboxRampState.provider == "smartlead"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+            if row.ceiling
+        }
+    mailboxes = mailboxes_from(accounts, recorded)
 
     async with get_sessionmaker()() as session, session.begin():
         workspace = (

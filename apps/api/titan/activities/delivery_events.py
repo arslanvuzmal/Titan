@@ -110,17 +110,21 @@ async def _apply(
 ) -> None:
     """What this event means for whether the address is contacted again."""
     if event.event_type is SmartleadEventType.BOUNCED:
-        # Recorded as soft, though Smartlead does not say which it was. A soft
-        # bounce that is really hard bounces again on the next send -- a new
-        # statistics row, a new fingerprint -- and the existing escalation rule
-        # suppresses it. Reading every bounce as hard would take the opposite
-        # risk: one temporarily full mailbox, permanently given up on, with
-        # nothing to distinguish it from an address that never existed.
+        # UNKNOWN, not SOFT. Smartlead reports `is_bounced` and no diagnostic,
+        # and SOFT is a finding -- a DSN carrying a 4.x.x code, meaning a real
+        # mailbox temporarily unable to accept. Recording the absence of a
+        # diagnosis as a diagnosis borrowed confidence nobody had earned, and
+        # bought the address a third attempt on the strength of it.
+        #
+        # Reading every bounce as hard would take the opposite risk: one
+        # temporarily full mailbox, permanently given up on, indistinguishable
+        # from an address that never existed. So it stays escalating rather than
+        # immediate -- just two strikes instead of three.
         await record_bounce(
             session,
             workspace_id=workspace_id,
             to_email=event.normalized_email,
-            kind=BounceKind.SOFT,
+            kind=BounceKind.UNKNOWN,
             source=SOURCE,
             source_reference=event.fingerprint,
             lead_id=lead_id,
