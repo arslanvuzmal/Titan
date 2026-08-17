@@ -17,6 +17,10 @@ from typing import Any
 
 from titan.contracts.evidence import CrawlResult, PageEvidence, finding_fingerprint
 from titan.db.enums import FindingCategory, Severity, VerificationMethod
+from titan.intelligence.attribution import (
+    attributable_console_errors,
+    attributable_requests,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,13 +160,23 @@ def _images_missing_alt(page: PageEvidence) -> DetectedFinding | None:
 
 
 def _console_errors(page: PageEvidence) -> DetectedFinding | None:
-    if not page.console_errors:
+    """Scripting errors in the prospect's own code.
+
+    Filtered before counting. The browser prints CSP refusals, cookie
+    deprecation notices and third-party widget failures as errors, and none of
+    them is a defect the recipient wrote or can fix. Claiming otherwise in a
+    cold email is checkably false to the first developer who looks.
+    """
+    errors = attributable_console_errors(
+        list(page.console_errors), site_url=page.final_url
+    )
+    if not errors:
         return None
-    sample = page.console_errors[0][:200]
+    sample = errors[0][:200]
     return _f(
         category=FindingCategory.TECHNICAL,
         issue_type="javascript_console_errors",
-        title=f"{len(page.console_errors)} JavaScript error(s) on load",
+        title=f"{len(errors)} JavaScript error(s) on load",
         severity=Severity.MEDIUM,
         confidence=0.95,
         verification_method=VerificationMethod.BROWSER_NAVIGATION,
@@ -176,27 +190,36 @@ def _console_errors(page: PageEvidence) -> DetectedFinding | None:
         ),
         recommended_solution="Fix the failing scripts and add error monitoring",
         estimated_effort=MEDIUM,
-        evidence=tuple((err[:300], page.final_url) for err in page.console_errors[:3]),
+        evidence=tuple((err[:300], page.final_url) for err in errors[:3]),
     )
 
 
 def _failed_requests(page: PageEvidence) -> DetectedFinding | None:
-    if len(page.failed_requests) < 2:
+    """Resources on the prospect's own site that did not load.
+
+    Analytics beacons are excluded before the threshold is applied, not after.
+    Our crawler blocks them and so does a large share of real visitors'
+    ad-blockers, so a failure is expected rather than diagnostic -- and two
+    blocked Google Analytics calls used to be enough to tell somebody their
+    website was broken.
+    """
+    failures = attributable_requests(list(page.failed_requests), site_url=page.final_url)
+    if len(failures) < 2:
         return None
     return _f(
         category=FindingCategory.TECHNICAL,
         issue_type="failed_network_requests",
-        title=f"{len(page.failed_requests)} resource(s) failed to load",
+        title=f"{len(failures)} resource(s) failed to load",
         severity=Severity.MEDIUM,
         confidence=0.95,
         verification_method=VerificationMethod.BROWSER_NAVIGATION,
         page_url=page.final_url,
-        observed_value=page.failed_requests[0][:200],
+        observed_value=failures[0][:200],
         expected_behavior="All referenced resources load successfully",
         business_impact="Missing images, styles or scripts degrade how the page looks and works",
         recommended_solution="Repair or remove the broken resource references",
         estimated_effort=SMALL,
-        evidence=tuple((r[:300], page.final_url) for r in page.failed_requests[:3]),
+        evidence=tuple((r[:300], page.final_url) for r in failures[:3]),
     )
 
 
