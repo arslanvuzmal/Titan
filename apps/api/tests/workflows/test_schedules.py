@@ -214,19 +214,34 @@ async def test_overlapping_runs_are_skipped_never_buffered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_missed_occurrences_are_dropped_not_caught_up() -> None:
+async def test_at_most_one_missed_occurrence_is_ever_recovered() -> None:
     """A weekend of missed verifications backfilled at once is a burst of DNS
-    traffic that looks like a scanner."""
+    traffic that looks like a scanner.
+
+    This used to assert that every schedule carried the *same* window, which
+    stated the property one size too strongly and hid a real bug: thirty
+    minutes suits an hourly job and silently disables a daily one on a machine
+    that sleeps. ``titan-mailbox-ramp`` recorded four runs against six missed
+    catch-up windows before the window was made proportional.
+
+    The property worth holding is narrower -- no job may reach back past its own
+    previous occurrence -- and it is checked per job.
+    """
     client = FakeClient()
 
     await schedules.install(client, plan_schedules(WS, task_queue=QUEUE))
 
-    for _, schedule in client.created:
-        assert schedule.policy.catchup_window == schedules.CATCHUP_WINDOW
-    assert schedules.CATCHUP_WINDOW < dt.timedelta(hours=1), (
-        "the window must be shorter than the shortest interval, or a missed run "
-        "fires alongside the next one"
-    )
+    for job, schedule in zip(
+        plan_schedules(WS, task_queue=QUEUE), [s for _, s in client.created], strict=True
+    ):
+        window = schedule.policy.catchup_window
+        assert window == schedules.catchup_for(job.cron)
+        daily = job.cron.split()[1] != "*" and "/" not in job.cron.split()[1]
+        limit = dt.timedelta(hours=24) if daily else dt.timedelta(hours=1)
+        assert window < limit, (
+            f"{job.schedule_id} may reach back past its own previous "
+            "occurrence, so a missed run could fire alongside the next one"
+        )
 
 
 # ==========================================================================

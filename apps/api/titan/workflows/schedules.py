@@ -22,12 +22,20 @@ resurrect it. So installing updates the *spec* and never the *state*: a paused
 schedule stays paused, and the outcome says so out loud rather than reporting
 success.
 
-**Missed occurrences are dropped, not caught up.** Temporal will happily backfill
-every occurrence a stopped worker missed. Three missed weekly reports become
-three reports; a weekend of missed verifications becomes a burst of DNS traffic
-that looks like a scanner. The catch-up window is minutes, so a worker that was
-down through an occurrence simply skips it -- a missed report is a nuisance, and
-a thundering herd on restart is an outage.
+**A missed occurrence is caught up at most once, never backfilled.** Temporal
+will happily replay every occurrence a stopped worker missed. Three missed
+weekly reports become three reports; a weekend of missed verifications becomes
+a burst of DNS traffic that looks like a scanner. So the catch-up window is
+always shorter than the interval: at most one occurrence is ever recovered, and
+a thundering herd on restart cannot happen.
+
+How much shorter depends on the job, and the first version got this wrong by
+using one window for everything. Thirty minutes is right for a job that runs
+hourly -- the next one is along shortly and reads the same state anyway. It is
+badly wrong for a job that runs at 06:10 daily on a machine that sleeps, which
+simply never runs at all: ``titan-mailbox-ramp`` recorded ``Total: 4,
+MissedCatchupWindow: 6``, having missed more often than it ran, and every
+mailbox's daily volume stopped growing as a result. See :func:`catchup_for`.
 
 **Overlap is skipped, never buffered.** Two verification runs on one workspace
 write the same timestamps twice, which is harmless, and double the DNS traffic,
@@ -79,10 +87,37 @@ from titan.workflows.verification import sender_verification_workflow_id
 
 logger = logging.getLogger(__name__)
 
-#: How far back Temporal may reach to run an occurrence it missed. Deliberately
-#: shorter than the shortest interval here, so a missed run is skipped rather
-#: than fired late alongside the next one. See the module docstring.
+#: How far back Temporal may reach to run an occurrence it missed, for jobs
+#: that run several times a day. Short on purpose: a delivery poll that missed
+#: 09:25 has nothing useful to say at 09:55, because the 10:25 poll will read
+#: the same provider state anyway.
 CATCHUP_WINDOW = dt.timedelta(minutes=30)
+
+#: The same, for jobs that run once a day.
+#:
+#: The single 30-minute window used to apply to these too, and it was wrong in
+#: a way that only showed up in the counters: ``titan-mailbox-ramp`` reported
+#: ``Total: 4, MissedCatchupWindow: 6`` -- it had missed more often than it had
+#: run. This machine is not a server; it sleeps. A daily job scheduled for
+#: 06:10 is simply skipped whenever the laptop is closed at 06:10, and the ramp
+#: not running means every mailbox's daily volume stops growing.
+#:
+#: Twenty-three hours, so a missed occurrence still runs whenever the machine
+#: comes back that day, and never overlaps the next one.
+DAILY_CATCHUP_WINDOW = dt.timedelta(hours=23)
+
+
+def catchup_for(cron: str) -> dt.timedelta:
+    """How long a missed occurrence of this job stays worth running.
+
+    Read from the cron rather than restated per job, so a schedule that changes
+    frequency cannot keep a window that no longer suits it. A fixed hour field
+    means the job runs at most once a day; anything else runs often enough that
+    the next occurrence is along shortly.
+    """
+    fields = cron.split()
+    hour = fields[1] if len(fields) > 1 else "*"
+    return DAILY_CATCHUP_WINDOW if hour != "*" and "/" not in hour else CATCHUP_WINDOW
 
 
 class Outcome(StrEnum):
@@ -391,7 +426,7 @@ def _schedule(job: ScheduledJob) -> Any:
         spec=ScheduleSpec(cron_expressions=[job.cron]),
         policy=SchedulePolicy(
             overlap=ScheduleOverlapPolicy.SKIP,
-            catchup_window=CATCHUP_WINDOW,
+            catchup_window=catchup_for(job.cron),
         ),
         state=ScheduleState(
             note=job.note,
