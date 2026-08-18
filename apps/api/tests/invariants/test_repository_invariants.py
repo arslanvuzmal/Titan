@@ -365,6 +365,11 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         # startup and neither logs the value.
         "titan/workers/inbound.py",
         "titan/cli.py",
+        # Signs opt-out links and builds the bearer header for the opt-out list.
+        # Every caller passes the SecretStr itself, so this is the only place
+        # the value is unwrapped -- the same concentration the provider clients
+        # above rely on.
+        "titan/outreach/unsubscribe.py",
     }
     for path in python_sources():
         rel = path.relative_to(API).as_posix()

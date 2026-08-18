@@ -110,6 +110,9 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         "MailboxRampWorkflow",
         "DeliveryEventPollWorkflow",
         "SenderHealthSnapshotWorkflow",
+        # Honouring an unsubscribe is not something to do only when a delivery
+        # poll happens to succeed, so it has a schedule of its own.
+        "PullOptOutsWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

@@ -24,6 +24,7 @@ from temporalio.worker import Worker
 from titan.activities import delivery_events as delivery_event_activities
 from titan.activities import discovery as discovery_activities
 from titan.activities import mailbox_ramp as mailbox_ramp_activities
+from titan.activities import optouts as optout_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
@@ -38,6 +39,7 @@ from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
 from titan.workflows.delivery_events import DeliveryEventPollWorkflow
 from titan.workflows.mailbox_ramp import MailboxRampWorkflow
+from titan.workflows.optouts import PullOptOutsWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
@@ -85,6 +87,7 @@ async def main() -> None:
             WeeklyReportWorkflow,
             SenderVerificationWorkflow,
             DeliveryEventPollWorkflow,
+            PullOptOutsWorkflow,
             MailboxRampWorkflow,
         ],
         activities=[
@@ -98,6 +101,7 @@ async def main() -> None:
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
+            *optout_activities.ALL_OPTOUT_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
             sender_health_activities.capture_sender_health,

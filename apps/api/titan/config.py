@@ -335,6 +335,15 @@ class Settings(BaseSettings):
     #: stale without anyone noticing.
     owner_years_experience: int = Field(default=2, ge=0, le=80)
     owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.com")
+
+    #: Shared with the unsubscribe endpoint on the portfolio, which verifies it.
+    #:
+    #: Without it Titan cannot sign an opt-out link, and an unsigned link would
+    #: let anybody unsubscribe anybody by editing the address in the URL. Absent
+    #: rather than defaulted: a placeholder secret produces links that every
+    #: recipient finds broken at the moment they have decided to leave, and the
+    #: only symptom is a 403 nobody sees.
+    unsubscribe_secret: SecretStr | None = None
     owner_portfolio_fallback_url: AnyHttpUrl = AnyHttpUrl(
         "https://arslanvuzmallone.vercel.app"
     )

@@ -55,6 +55,8 @@ from titan.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from titan.workflows.delivery_events import delivery_event_poll_workflow_id
 from titan.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
 from titan.workflows.mailbox_ramp import mailbox_ramp_workflow_id
+from titan.workflows.optouts import DEFAULT_CRON as OPTOUT_CRON
+from titan.workflows.optouts import pull_opt_outs_workflow_id
 from titan.workflows.orchestrator import orchestrator_workflow_id
 from titan.workflows.reporting import DEFAULT_CRON as REPORT_CRON
 from titan.workflows.reporting import weekly_report_workflow_id
@@ -64,6 +66,7 @@ from titan.workflows.types import (
     CampaignOrchestratorInput,
     CaptureSenderHealthInput,
     PollDeliveryEventsInput,
+    PullOptOutsInput,
     RampMailboxesInput,
     VerifySendersInput,
     WeeklyReportInput,
@@ -167,6 +170,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=RampMailboxesInput(workspace_id=ws),
             task_queue=task_queue,
             note="grows each mailbox's daily volume as it earns it",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-opt-outs::{ws}",
+            workflow="PullOptOutsWorkflow",
+            workflow_id=pull_opt_outs_workflow_id(ws),
+            cron=OPTOUT_CRON,
+            arg=PullOptOutsInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="honours unsubscribes the website collected",
         ),
         ScheduledJob(
             schedule_id=f"titan-delivery-events::{ws}",

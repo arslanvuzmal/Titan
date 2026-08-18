@@ -51,6 +51,9 @@ x-titan-env: &titan-env
   # complaints and bounces are honoured, so the safe default is *on* wherever
   # credentials exist -- the dangerous state is a system that mails people and
   # cannot hear them answer.
+  # Shared with the unsubscribe endpoint on the portfolio, which verifies
+  # the signature on every opt-out link and guards the list it exposes.
+  TITAN_UNSUBSCRIBE_SECRET: ${TITAN_UNSUBSCRIBE_SECRET:-}
   TITAN_IMAP_HOST: ${TITAN_IMAP_HOST:-}
   TITAN_IMAP_PORT: ${TITAN_IMAP_PORT:-993}
   TITAN_IMAP_USERNAME: ${TITAN_IMAP_USERNAME:-}

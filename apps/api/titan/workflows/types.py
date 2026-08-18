@@ -146,6 +146,22 @@ class DraftActivityResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class PullOptOutsInput:
+    """One pass over the opt-outs the website has collected."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class PullOptOutsResult:
+    #: Addresses the endpoint holds, whether or not Titan already knew.
+    found: int = 0
+    #: Of those, the ones this pass suppressed for the first time.
+    suppressed: int = 0
+    refused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class CollectRepliesInput:
     """One pass over the carrier campaigns, looking for replies Titan has not
     seen."""
@@ -527,6 +543,8 @@ __all__ = [
     "OrchestratorStatus",
     "PauseSignal",
     "PlannedLead",
+    "PullOptOutsInput",
+    "PullOptOutsResult",
     "QueueActivityInput",
     "QueueActivityResult",
     "RecordEventInput",
