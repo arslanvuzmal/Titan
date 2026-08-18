@@ -24,12 +24,14 @@ from temporalio.worker import Worker
 from titan.activities import delivery_events as delivery_event_activities
 from titan.activities import discovery as discovery_activities
 from titan.activities import mailbox_ramp as mailbox_ramp_activities
+from titan.activities import optouts as optout_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
 from titan.activities import sender_health as sender_health_activities
 from titan.activities import smartlead_replies as smartlead_reply_activities
+from titan.activities import stale_runs as stale_run_activities
 from titan.activities import stranded as stranded_activities
 from titan.activities import verification as verification_activities
 from titan.config import get_settings
@@ -37,7 +39,9 @@ from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
 from titan.workflows.delivery_events import DeliveryEventPollWorkflow
+from titan.workflows.housekeeping import HousekeepingWorkflow
 from titan.workflows.mailbox_ramp import MailboxRampWorkflow
+from titan.workflows.optouts import PullOptOutsWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
@@ -85,6 +89,8 @@ async def main() -> None:
             WeeklyReportWorkflow,
             SenderVerificationWorkflow,
             DeliveryEventPollWorkflow,
+            PullOptOutsWorkflow,
+            HousekeepingWorkflow,
             MailboxRampWorkflow,
         ],
         activities=[
@@ -97,7 +103,9 @@ async def main() -> None:
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
+            stale_run_activities.reopen_stale_research_runs,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
+            *optout_activities.ALL_OPTOUT_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
             sender_health_activities.capture_sender_health,

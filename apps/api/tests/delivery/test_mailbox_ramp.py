@@ -342,3 +342,44 @@ def test_a_human_lowering_the_limit_lowers_the_ceiling() -> None:
 
 def test_a_ceiling_is_never_negative() -> None:
     assert observe_ceiling(observed=-5, stored_ceiling=None, last_written=None) == 0
+
+
+# ==========================================================================
+# A setback is proportional to the problem, not to how often it was seen
+# ==========================================================================
+def test_a_persistent_problem_does_not_walk_a_mailbox_to_nothing() -> None:
+    """The compounding bug, planted.
+
+    Halving the *current* value means the same unresolved signal seen on four
+    consecutive days walks a mailbox 25, 12, 6, 3, 1 -- the severity of the cut
+    then depends on how many times it has been observed rather than on how bad
+    it is. Anchoring to the week's schedule instead holds it at a floor while
+    the problem lasts.
+
+    Observed live: both mailboxes were cut 25 -> 12 on a 5% bounce rate. Under
+    the old arithmetic another three days of the same rate would have closed
+    them.
+    """
+    current = 25
+    seen = []
+    for _ in range(5):
+        current = ramp(current=current, evidence=bouncing()).target
+        seen.append(current)
+
+    assert len(set(seen)) == 1, (
+        f"a persistent signal compounded instead of holding: {seen}"
+    )
+    assert seen[-1] > 0, "a mailbox with one lasting problem must not close itself"
+
+
+def test_a_setback_is_still_a_cut() -> None:
+    """min() keeps it a reduction: a mailbox already below half its schedule is
+    never raised by a *blocking* signal."""
+    low = ramp(current=2, evidence=bouncing()).target
+
+    assert low <= 2
+
+
+def test_a_clean_mailbox_is_unaffected_by_the_change() -> None:
+    """The setback path is the only one touched; ordinary growth still runs."""
+    assert ramp(current=10, evidence=clean()).target >= 10

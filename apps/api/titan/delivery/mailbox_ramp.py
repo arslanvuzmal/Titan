@@ -196,8 +196,21 @@ def decide(
     # Negative evidence first, and it outranks everything below it.
     blocking = [s for s in signals if s.severity is Severity.BLOCK]
     if blocking:
+        # Half of what this week would otherwise allow -- not half of what the
+        # mailbox currently has.
+        #
+        # Halving the current value compounds: the same unresolved problem seen
+        # on four consecutive days walks a mailbox 25, 12, 6, 3, 1, and the
+        # severity of the cut then depends on how many times it has been
+        # observed rather than on how bad it is. A mailbox with one persistent
+        # signal ends up closed as surely as one that is genuinely burnt.
+        #
+        # Anchoring to the week's schedule makes the cut proportional to what
+        # the mailbox has earned, and it holds there while the problem lasts.
+        # min() keeps it a cut: a mailbox already below half its schedule is
+        # never raised by a blocking signal.
         return decision(
-            math.floor(current * SETBACK_SHARE),
+            min(current, math.floor(scheduled * SETBACK_SHARE)),
             f"cut on delivery evidence: {'; '.join(s.detail for s in blocking)}",
         )
 

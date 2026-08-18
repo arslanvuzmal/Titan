@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
-from titan.config import get_settings
+from titan.config import Settings, get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
     ContactSource,
@@ -78,6 +78,7 @@ from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
 from titan.intelligence.verifier import VerificationResult, build_verifier
 from titan.models.recording import record_calls
+from titan.outreach import unsubscribe
 from titan.providers.browser_client import BrowserWorkerClient
 from titan.workflows.types import (
     AnalyseActivityInput,
@@ -386,10 +387,24 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
             if finding.is_pitchable():
                 pitchable += 1
 
+        # Close the run, not just its counters. Without the status write every
+        # research run stayed 'running' for ever -- 1,071 of them, 873 older
+        # than six hours, none ever marked completed. A run row that never
+        # closes cannot be retried, cannot be swept, and cannot be counted, so
+        # every rate derived from research was measuring an empty set.
+        #
+        # This sits inside the unit of work with _persist_opportunities below,
+        # so a failure there rolls the completion back and the run correctly
+        # stays open.
         await session.execute(
             ResearchRun.__table__.update()  # type: ignore[attr-defined]
             .where(ResearchRun.id == uuid.UUID(request.research_run_id))
-            .values(findings_count=created, pages_crawled=len(evidence))
+            .values(
+                findings_count=created,
+                pages_crawled=len(evidence),
+                status="completed",
+                finished_at=_now(),
+            )
         )
 
         opportunities = await _persist_opportunities(
@@ -1130,6 +1145,9 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         org_domain = org.canonical_domain or org.display_name
         org_industry = org.industry
         channel_id = channel_row.id
+        # Snapshotted with the id, because the footer's opt-out link is signed
+        # over this address and the session is closed before the composer runs.
+        recipient_email = channel_row.value
         # Read here rather than passed in: invariant 18 says a workflow may
         # reference a campaign but never carry its policy, so the promoted
         # register is looked up at execution time like every other bound.
@@ -1247,7 +1265,19 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             owner_name=settings.owner_name,
             portfolio_url=portfolio,
             mailing_address=mailing_address or "",
-            unsubscribe_url=f"{portfolio}/unsubscribe",
+            # Signed, so the endpoint can tell a link we issued from an
+            # address somebody typed into the query string. Falls back to the
+            # bare path only when no secret is configured, which the send gate
+            # then refuses -- better than quietly mailing an unverifiable link.
+            unsubscribe_url=(
+                unsubscribe.link(
+                    recipient_email,
+                    base_url=portfolio,
+                    secret=settings.unsubscribe_secret,
+                )
+                if settings.unsubscribe_secret
+                else f"{portfolio}/unsubscribe"
+            ),
             solution=offer.delivers,
             # The lead, so the same lead always composes to the same message.
             # Seeding on anything that varies between runs would produce a
@@ -1346,6 +1376,37 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
 # ==========================================================================
 # 6. Queue
 # ==========================================================================
+
+
+def _unsubscribe_headers(
+    sender: SenderIdentity, recipient: str, settings: Settings
+) -> dict[str, str | None]:
+    """The List-Unsubscribe pair for one message.
+
+    Kept together because they are only correct together: the POST declaration
+    without an https target renders no button, and an https target without the
+    declaration is what Gmail treats as a non-compliant bulk sender.
+    """
+    targets: list[str] = []
+    one_click: str | None = None
+
+    if sender.unsubscribe_url_template and settings.unsubscribe_secret:
+        url = unsubscribe.one_click_url(
+            recipient,
+            base_url=str(settings.owner_portfolio_url),
+            secret=settings.unsubscribe_secret,
+        )
+        targets.append(url)
+        one_click = "List-Unsubscribe=One-Click"
+    if sender.unsubscribe_mailto:
+        targets.append(sender.unsubscribe_mailto)
+
+    return {
+        "list_unsubscribe": ", ".join(f"<{t}>" for t in targets) if targets else None,
+        "list_unsubscribe_post": one_click,
+    }
+
+
 @activity.defn(name="queue_message")
 async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
     """Write the outbox row. Does NOT send.
@@ -1500,9 +1561,12 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
                 "reply_to": sender.reply_to_email,
                 "subject": draft.subject,
                 "text_body": draft.body_text,
-                "list_unsubscribe": f"<{sender.unsubscribe_mailto}>"
-                if sender.unsubscribe_mailto
-                else None,
+                # Both targets. Gmail renders the one-click button from the
+                # https URL; the mailto is the fallback for clients that do not
+                # implement RFC 8058. `list_unsubscribe_post` is what makes the
+                # button appear at all -- without it the header is present and
+                # not one-click, which is exactly what the send gate refuses.
+                **_unsubscribe_headers(sender, channel.value, get_settings()),
             },
         )
         session.add(outbox)

@@ -146,6 +146,22 @@ class DraftActivityResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class PullOptOutsInput:
+    """One pass over the opt-outs the website has collected."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class PullOptOutsResult:
+    #: Addresses the endpoint holds, whether or not Titan already knew.
+    found: int = 0
+    #: Of those, the ones this pass suppressed for the first time.
+    suppressed: int = 0
+    refused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class CollectRepliesInput:
     """One pass over the carrier campaigns, looking for replies Titan has not
     seen."""
@@ -165,6 +181,26 @@ class CollectRepliesResult:
     #: systems have drifted apart.
     unmatched: int = 0
     refused_reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReopenStaleRunsInput:
+    """One pass over the research runs that never closed."""
+
+    workspace_id: str
+    #: None takes the module default. Bounded because every lead returned to
+    #: DISCOVERED buys another crawl and another analysis.
+    limit: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReopenStaleRunsResult:
+    found: int
+    reopened: int
+    #: The age of the oldest run reopened, in hours. A sweep that frees leads
+    #: stranded for twelve days is reporting a different problem from one
+    #: clearing this morning's restart, and without this they read identically.
+    oldest_age_hours: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -527,9 +563,13 @@ __all__ = [
     "OrchestratorStatus",
     "PauseSignal",
     "PlannedLead",
+    "PullOptOutsInput",
+    "PullOptOutsResult",
     "QueueActivityInput",
     "QueueActivityResult",
     "RecordEventInput",
+    "ReopenStaleRunsInput",
+    "ReopenStaleRunsResult",
     "ResearchLeadInput",
     "ResearchLeadResult",
     "ResearchOutcome",
