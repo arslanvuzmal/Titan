@@ -196,8 +196,28 @@ def decide(
     # Negative evidence first, and it outranks everything below it.
     blocking = [s for s in signals if s.severity is Severity.BLOCK]
     if blocking:
+        # Half of what this week would otherwise allow -- not half of what the
+        # mailbox currently has.
+        #
+        # Anchoring the cut to `current` compounds it. The same evidence on
+        # consecutive runs halves an already-halved number, so a problem that
+        # persists walks a mailbox down 18, 9, 4, 2, 1 regardless of how severe
+        # it actually is. Observed exactly that: two runs against one 6.2%
+        # bounce rate took both mailboxes from 18 to 4.
+        #
+        # That defeats the reason SETBACK_SHARE is not zero. A mailbox sending
+        # one message a day produces no evidence either, so it can never
+        # demonstrate recovery -- the collapse is slower than switching it off
+        # and ends in the same place.
+        #
+        # `scheduled` does not move while the evidence is bad, so the cut is a
+        # position rather than a slide: it reflects severity, holds while the
+        # problem holds, and lifts in one step when the evidence clears.
+        #
+        # Still bounded by `current`, so a setback can never *raise* volume on
+        # a mailbox the evidence says is in trouble.
         return decision(
-            math.floor(current * SETBACK_SHARE),
+            min(current, math.floor(scheduled * SETBACK_SHARE)),
             f"cut on delivery evidence: {'; '.join(s.detail for s in blocking)}",
         )
 
