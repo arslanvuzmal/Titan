@@ -113,6 +113,11 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # Honouring an unsubscribe is not something to do only when a delivery
         # poll happens to succeed, so it has a schedule of its own.
         "PullOptOutsWorkflow",
+        # The repair sweeps. Both existed before they were scheduled: the
+        # stranded-draft sweep was reachable only from the CLI, and 225 drafts
+        # accumulated while the code that fixes them sat unrun. A sweeper that
+        # waits for somebody to remember it is a diagnostic, not a repair.
+        "HousekeepingWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

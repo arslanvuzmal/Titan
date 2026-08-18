@@ -184,6 +184,26 @@ class CollectRepliesResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReopenStaleRunsInput:
+    """One pass over the research runs that never closed."""
+
+    workspace_id: str
+    #: None takes the module default. Bounded because every lead returned to
+    #: DISCOVERED buys another crawl and another analysis.
+    limit: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReopenStaleRunsResult:
+    found: int
+    reopened: int
+    #: The age of the oldest run reopened, in hours. A sweep that frees leads
+    #: stranded for twelve days is reporting a different problem from one
+    #: clearing this morning's restart, and without this they read identically.
+    oldest_age_hours: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class SweepStrandedInput:
     """One pass over the approved drafts nothing ever queued."""
 
@@ -548,6 +568,8 @@ __all__ = [
     "QueueActivityInput",
     "QueueActivityResult",
     "RecordEventInput",
+    "ReopenStaleRunsInput",
+    "ReopenStaleRunsResult",
     "ResearchLeadInput",
     "ResearchLeadResult",
     "ResearchOutcome",

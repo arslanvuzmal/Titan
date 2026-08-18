@@ -387,10 +387,24 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
             if finding.is_pitchable():
                 pitchable += 1
 
+        # Close the run, not just its counters. Without the status write every
+        # research run stayed 'running' for ever -- 1,071 of them, 873 older
+        # than six hours, none ever marked completed. A run row that never
+        # closes cannot be retried, cannot be swept, and cannot be counted, so
+        # every rate derived from research was measuring an empty set.
+        #
+        # This sits inside the unit of work with _persist_opportunities below,
+        # so a failure there rolls the completion back and the run correctly
+        # stays open.
         await session.execute(
             ResearchRun.__table__.update()  # type: ignore[attr-defined]
             .where(ResearchRun.id == uuid.UUID(request.research_run_id))
-            .values(findings_count=created, pages_crawled=len(evidence))
+            .values(
+                findings_count=created,
+                pages_crawled=len(evidence),
+                status="completed",
+                finished_at=_now(),
+            )
         )
 
         opportunities = await _persist_opportunities(

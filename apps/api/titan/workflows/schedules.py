@@ -53,6 +53,8 @@ from typing import Any
 from titan.db.enums import CampaignStatus
 from titan.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from titan.workflows.delivery_events import delivery_event_poll_workflow_id
+from titan.workflows.housekeeping import DEFAULT_CRON as HOUSEKEEPING_CRON
+from titan.workflows.housekeeping import housekeeping_workflow_id
 from titan.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
 from titan.workflows.mailbox_ramp import mailbox_ramp_workflow_id
 from titan.workflows.optouts import DEFAULT_CRON as OPTOUT_CRON
@@ -68,6 +70,7 @@ from titan.workflows.types import (
     PollDeliveryEventsInput,
     PullOptOutsInput,
     RampMailboxesInput,
+    SweepStrandedInput,
     VerifySendersInput,
     WeeklyReportInput,
 )
@@ -170,6 +173,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=RampMailboxesInput(workspace_id=ws),
             task_queue=task_queue,
             note="grows each mailbox's daily volume as it earns it",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-housekeeping::{ws}",
+            workflow="HousekeepingWorkflow",
+            workflow_id=housekeeping_workflow_id(ws),
+            cron=HOUSEKEEPING_CRON,
+            arg=SweepStrandedInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="puts stranded drafts and abandoned research runs back on the rails",
         ),
         ScheduledJob(
             schedule_id=f"titan-opt-outs::{ws}",
