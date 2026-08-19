@@ -74,7 +74,7 @@ def test_a_full_reserve_orders_nothing() -> None:
     budget = research_budget(state(reachable_untouched=10_000), per_cycle_ceiling=25)
 
     assert budget.leads == 0
-    assert "reserve is full" in budget.reason
+    assert "reserve is covered" in budget.reason
 
 
 def test_the_budget_is_bounded_per_cycle() -> None:
@@ -164,3 +164,39 @@ def test_the_budget_explains_itself() -> None:
 
     assert "days of fuel" in reason
     assert "measured" in reason
+
+
+# ----------------------------------------------------- fuel already on its way
+
+
+def test_research_in_flight_counts_toward_the_reserve() -> None:
+    """Planted violation: drop ``expected_from_in_flight`` from the deficit and
+    this fails.
+
+    Every campaign in the workspace plans in the same minute and sees the same
+    shortfall. Without counting what is already being researched, twenty-three
+    campaigns at a ceiling of twenty-five would have ordered 575 crawls to close
+    a gap of 47 -- and the leads closing it were already in flight.
+    """
+    empty = research_budget(state(in_flight=0), per_cycle_ceiling=25).leads
+    busy = research_budget(state(in_flight=423), per_cycle_ceiling=25).leads
+
+    assert empty > 0
+    assert busy == 0
+
+
+def test_in_flight_is_discounted_by_the_yield_not_counted_whole() -> None:
+    """400 leads being crawled are not 400 addresses. At a third, they are
+    about 133, and treating them as 400 would stop research far too early."""
+    s = state(extraction_rate=0.33, in_flight=400)
+
+    assert s.expected_from_in_flight == 132
+
+
+def test_a_lead_in_flight_is_worth_less_than_one_in_hand() -> None:
+    """The tank still reports what it actually holds; only the *ordering*
+    decision counts what is coming."""
+    s = state(reachable_untouched=71, daily_send_capacity=24, in_flight=400)
+
+    assert s.days_of_fuel < 3.0, "days of fuel must not be inflated by hopes"
+    assert s.effective_supply > s.reachable_untouched

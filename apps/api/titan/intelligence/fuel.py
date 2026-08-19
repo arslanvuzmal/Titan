@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from titan.db.enums import LeadStatus
 from titan.db.models import (
     Contact,
     ContactChannel,
@@ -96,6 +97,25 @@ class FuelState:
     #: crawls have been measured to say. None is *not* zero: "not measured" and
     #: "measured and found nothing" call for opposite responses.
     extraction_rate: float | None
+    #: Leads already being researched. Fuel that is on its way but has not
+    #: arrived, and the reason ordering more would be waste.
+    in_flight: int = 0
+
+    @property
+    def expected_from_in_flight(self) -> int:
+        """How many addresses the research already running should produce.
+
+        Without this every campaign in the workspace sees the same shortfall in
+        the same minute and orders the whole of it. Twenty-three campaigns at a
+        ceiling of twenty-five would have bought 575 crawls to close a gap of
+        47 -- and the leads doing the closing were already in flight.
+        """
+        return math.floor(self.in_flight * usable_rate(self.extraction_rate))
+
+    @property
+    def effective_supply(self) -> int:
+        """Fuel in the tank, plus fuel on its way to it."""
+        return self.reachable_untouched + self.expected_from_in_flight
 
     @property
     def days_of_fuel(self) -> float:
@@ -152,12 +172,13 @@ def research_budget(
             "no send capacity; keeping the pipeline warm at a trickle",
         )
 
-    deficit = target - state.reachable_untouched
+    deficit = target - state.effective_supply
     if deficit <= 0:
         return FuelBudget(
             0,
-            f"reserve is full: {state.reachable_untouched} reachable covers "
-            f"{state.days_of_fuel:.1f} days against a {days}-day target",
+            f"reserve is covered: {state.reachable_untouched} reachable plus "
+            f"{state.expected_from_in_flight} expected from {state.in_flight} "
+            f"in flight, against a target of {target}",
         )
 
     rate = usable_rate(state.extraction_rate)
@@ -170,7 +191,8 @@ def research_budget(
     return FuelBudget(
         min(needed, per_cycle_ceiling),
         f"{state.days_of_fuel:.1f} days of fuel against a {days}-day target; "
-        f"{deficit} short, {needed} to research at {measured}",
+        f"{deficit} short after counting {state.in_flight} in flight, "
+        f"{needed} to research at {measured}",
     )
 
 
@@ -268,10 +290,21 @@ async def read_fuel_state(
     reachable = (
         await session.execute(_reachable_untouched_query(workspace_id))
     ).scalar_one()
+    in_flight = (
+        await session.execute(
+            select(func.count())
+            .select_from(Lead)
+            .where(
+                Lead.workspace_id == workspace_id,
+                Lead.status == LeadStatus.RESEARCHING,
+            )
+        )
+    ).scalar_one()
     return FuelState(
         reachable_untouched=int(reachable),
         daily_send_capacity=daily_send_capacity,
         extraction_rate=extraction_rate,
+        in_flight=int(in_flight),
     )
 
 
