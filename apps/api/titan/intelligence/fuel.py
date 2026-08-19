@@ -39,6 +39,7 @@ find less to do.
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import uuid
 from dataclasses import dataclass
@@ -56,6 +57,7 @@ from titan.db.models import (
     SuppressionEntry,
 )
 from titan.db.models.research import ResearchRun
+from titan.intelligence.stale_runs import STALE_AFTER
 
 #: Days of sending to keep in reserve.
 #:
@@ -290,13 +292,23 @@ async def read_fuel_state(
     reachable = (
         await session.execute(_reachable_untouched_query(workspace_id))
     ).scalar_one()
+    # Only research that is actually still moving. A lead sits in RESEARCHING
+    # whether its run is progressing or was abandoned hours ago, and 423 of
+    # them were abandoned -- counting those as incoming fuel would report a
+    # busy pipeline precisely when it had stopped, and suppress the ordering
+    # that would refill it. Anything past the sweeper's deadline is stuck, not
+    # in flight, and titan.intelligence.stale_runs returns it to the queue.
+    fresh_since = dt.datetime.now(dt.UTC) - STALE_AFTER
     in_flight = (
         await session.execute(
             select(func.count())
             .select_from(Lead)
+            .join(ResearchRun, ResearchRun.lead_id == Lead.id)
             .where(
                 Lead.workspace_id == workspace_id,
                 Lead.status == LeadStatus.RESEARCHING,
+                ResearchRun.status == "running",
+                ResearchRun.started_at >= fresh_since,
             )
         )
     ).scalar_one()

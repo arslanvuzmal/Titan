@@ -200,3 +200,32 @@ def test_a_lead_in_flight_is_worth_less_than_one_in_hand() -> None:
 
     assert s.days_of_fuel < 3.0, "days of fuel must not be inflated by hopes"
     assert s.effective_supply > s.reachable_untouched
+
+
+def test_stalled_research_is_not_counted_as_fuel_on_its_way() -> None:
+    """Planted violation: drop the freshness bound and this fails.
+
+    A lead sits in RESEARCHING whether its run is progressing or was abandoned
+    hours ago. 423 leads were in that state on the live workspace and nearly all
+    of them were stuck -- counting those as incoming fuel reports a busy
+    pipeline at exactly the moment it has stopped, and suppresses the ordering
+    that would refill it. The worst possible time to stop buying.
+    """
+    import inspect
+
+    from titan.intelligence import fuel
+
+    source = inspect.getsource(fuel.read_fuel_state)
+
+    assert "STALE_AFTER" in source
+    assert 'ResearchRun.status == "running"' in source
+
+
+def test_the_freshness_bound_matches_the_sweeper_that_frees_them() -> None:
+    """One deadline, not two. A lead the sweeper still considers in progress
+    must not already have been written off here, or the two would disagree
+    about the same lead."""
+    from titan.intelligence.fuel import STALE_AFTER as fuel_deadline
+    from titan.intelligence.stale_runs import STALE_AFTER as sweeper_deadline
+
+    assert fuel_deadline is sweeper_deadline
