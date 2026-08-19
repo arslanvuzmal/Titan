@@ -319,7 +319,14 @@ async def rewrite_message(
                 bundle,
                 campaign_id=campaign_id,
                 lead_id=lead_id,
-                max_tokens=200,
+                # Enough for one sentence *plus* whatever the model spends
+                # thinking first. Gemini 3 reasons before it emits, and 200
+                # left so little that a rewrite came back cut off mid-word --
+                # "The booking form on example." The truncation is caught
+                # downstream, because the sentence has lost the evidenced
+                # domain, so the effect was not a bad message but a rewrite
+                # that was silently discarded every single time.
+                max_tokens=600,
                 temperature=0.4,
             )
         except Exception as exc:

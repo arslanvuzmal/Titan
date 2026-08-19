@@ -29,6 +29,7 @@ from titan.workflows.types import (
     AnalyseActivityInput,
     AnalyseActivityResult,
     ApprovalDecisionSignal,
+    CloseResearchRunInput,
     ContactActivityInput,
     ContactActivityResult,
     CrawlActivityInput,
@@ -85,6 +86,8 @@ class Recorder:
 
     #: Every event key the workflow emitted, including duplicates.
     events: list[str] = field(default_factory=list)
+    #: (research_run_id, outcome) for every terminal close the workflow wrote.
+    closures: list[tuple[str, str]] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     #: Fail the crawl activity this many times before succeeding.
     crawl_failures: int = 0
@@ -96,6 +99,11 @@ class Recorder:
         async def open_research_run(request: ResearchLeadInput) -> str:
             recorder.calls.append("open_research_run")
             return "run-1"
+
+        @activity.defn(name="close_research_run")
+        async def close_research_run(request: CloseResearchRunInput) -> None:
+            recorder.calls.append("close_research_run")
+            recorder.closures.append((request.research_run_id, request.outcome))
 
         @activity.defn(name="crawl_lead_website")
         async def crawl_lead_website(request: CrawlActivityInput) -> CrawlActivityResult:
@@ -145,6 +153,7 @@ class Recorder:
 
         return [
             open_research_run,
+            close_research_run,
             crawl_lead_website,
             analyse_evidence,
             score_lead,
@@ -552,3 +561,88 @@ def test_workflow_body_performs_no_io() -> None:
     assert not (imported & banned), (
         f"workflow module imports non-deterministic dependencies: {imported & banned}"
     )
+
+
+# ==========================================================================
+# Every exit closes its run
+# ==========================================================================
+#
+# ``analyse_evidence`` wrote ``status='completed'`` and was the only thing that
+# ever wrote the column. Every other way out of this workflow returned a result
+# object and touched nothing, so the run stayed 'running' and its lead stayed
+# RESEARCHING with no work happening against either. Measured on the live
+# workspace: 1,964 runs 'running', 1,597 of them with no crawl ever started,
+# against 151 'completed'.
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_crawl_closes_the_run(env) -> None:
+    """Planted violation: restore the direct ``return ResearchLeadResult(...)``
+    on the blocked branch and this fails."""
+    recorder = Recorder(
+        crawl=CrawlActivityResult(
+            crawl_run_id="crawl-1",
+            status="blocked",
+            pages_captured=0,
+            blocked_reason="robots.txt disallows /",
+        )
+    )
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.BLOCKED.value
+    assert recorder.closures == [("run-1", ResearchOutcome.BLOCKED.value)]
+
+
+@pytest.mark.asyncio
+async def test_a_lead_below_threshold_closes_the_run(env) -> None:
+    recorder = Recorder(
+        score=ScoreActivityResult(
+            total=41, band="low", passed_threshold=False, threshold=70
+        )
+    )
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.BELOW_THRESHOLD.value
+    assert recorder.closures == [("run-1", ResearchOutcome.BELOW_THRESHOLD.value)]
+
+
+@pytest.mark.asyncio
+async def test_a_crawl_that_never_succeeds_closes_the_run(env) -> None:
+    """The path that produced almost all of them.
+
+    The browser worker was configured for two concurrent crawls while the
+    Temporal worker held eight activity slots, so most attempts got an
+    immediate 503, exhausted their retries, and ended here -- 1,819 failures
+    against 2,005 starts in a single day, every one of them leaking a run.
+    """
+    recorder = Recorder(crawl_failures=99)
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.FAILED.value
+    assert recorder.closures == [("run-1", ResearchOutcome.FAILED.value)]
+
+
+@pytest.mark.asyncio
+async def test_the_happy_path_does_not_double_close(env) -> None:
+    """``analyse_evidence`` already wrote 'completed'. A second terminal write
+    here would overwrite the outcome that actually reached the end."""
+    recorder = Recorder()
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.COMPLETED.value
+    assert recorder.closures == []
+
+
+@pytest.mark.asyncio
+async def test_a_saturated_browser_worker_is_waited_out_not_given_up_on(env) -> None:
+    """Planted violation: drop ``maximum_attempts`` back to 4 and this fails.
+
+    Saturation is the worker truthfully reporting that it is busy. Four
+    attempts spans about seventy seconds, which expires while a real backlog is
+    still draining and discards a lead that nothing was wrong with.
+    """
+    recorder = Recorder(crawl_failures=6)
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.COMPLETED.value
+    assert recorder.calls.count("crawl_lead_website") == 7

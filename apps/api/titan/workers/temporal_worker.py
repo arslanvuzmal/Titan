@@ -94,6 +94,7 @@ async def main() -> None:
             MailboxRampWorkflow,
         ],
         activities=[
+            research_activities.close_research_run,
             research_activities.open_research_run,
             research_activities.requires_human_approval,
             research_activities.record_workflow_event,

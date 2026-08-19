@@ -33,8 +33,10 @@ from titan.db.models import (
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.policy.modes import Capability, resolve_mode
 from titan.workflows.types import (
+    CloseResearchRunInput,
     RecordEventInput,
     ResearchLeadInput,
+    ResearchOutcome,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,58 @@ async def open_research_run(request: ResearchLeadInput) -> str:
         lead.status = LeadStatus.RESEARCHING
         await session.flush()
         return str(run.id)
+
+
+#: Outcomes after which the lead is worth another pass later, so it returns to
+#: the queue rather than being parked. Both mean "nobody reached a judgement
+#: about this business" -- an operator stopped the work, or it broke. The
+#: stale-run sweeper uses the same destination for the same reason.
+_RETRYABLE_OUTCOMES = frozenset(
+    {ResearchOutcome.CANCELLED.value, ResearchOutcome.FAILED.value}
+)
+
+
+@activity.defn(name="close_research_run")
+async def close_research_run(request: CloseResearchRunInput) -> None:
+    """Write the terminal status for a run that stopped short of analysis.
+
+    Idempotent, and deliberately narrow in what it touches.
+
+    **The run is always closed.** A second call finds a run that has already
+    left ``running`` and returns without writing, so a workflow replay or an
+    activity retry cannot overwrite the first verdict.
+
+    **The lead is moved only if nothing else moved it.** Several activities
+    downstream of the crawl park the lead themselves -- scoring rejects it,
+    contact resolution sends it to manual review -- and those are better
+    informed than this is. Writing over them here would make two writers of one
+    field and lose the more specific reason. So the lead is touched only when it
+    is still ``RESEARCHING``, which is exactly the case nobody else handled.
+    """
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_unit_of_work(workspace_id) as session:
+        run = await session.get(ResearchRun, uuid.UUID(request.research_run_id))
+        if run is None or run.status != "running":
+            return
+
+        run.status = request.outcome
+        run.finished_at = _now()
+        if request.detail:
+            run.failure_reason = request.detail[:500]
+
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is not None and lead.status is LeadStatus.RESEARCHING:
+            if request.outcome in _RETRYABLE_OUTCOMES:
+                lead.status = LeadStatus.DISCOVERED
+            else:
+                lead.status = LeadStatus.RESEARCHED
+            lead.status_reason = (request.detail or request.outcome)[:200]
+
+    logger.info(
+        "research run closed",
+        extra={"research_run_id": request.research_run_id, "outcome": request.outcome},
+    )
 
 
 @activity.defn(name="requires_human_approval")
@@ -200,6 +254,7 @@ class ApplicationErrorCompat(Exception):
 
 __all__ = [
     "ApplicationErrorCompat",
+    "close_research_run",
     "open_research_run",
     "record_workflow_event",
     "requires_human_approval",

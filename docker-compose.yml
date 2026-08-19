@@ -77,6 +77,19 @@ x-titan-env: &titan-env
   TITAN_CLOUDFLARE_ACCOUNT_ID: ${TITAN_CLOUDFLARE_ACCOUNT_ID:-}
   TITAN_CLOUDFLARE_GATEWAY_ID: ${TITAN_CLOUDFLARE_GATEWAY_ID:-}
   TITAN_CLOUDFLARE_API_TOKEN: ${TITAN_CLOUDFLARE_API_TOKEN:-}
+  # Whether Gemini phrases the message. The keys above were passed and this was
+  # not, so `TITAN_MODEL_REWRITES_ENABLED=true` sat in .env while every
+  # container read the code default of false -- and every email Titan has ever
+  # sent was the deterministic template text. The rewriter never ran once.
+  TITAN_MODEL_REWRITES_ENABLED: ${TITAN_MODEL_REWRITES_ENABLED:-false}
+  # Model IDs are configuration. Pinned routes that leave a provider's
+  # catalogue must be changeable without a rebuild; `titan validate-models`
+  # checks them against the live catalogue.
+  TITAN_MODEL_ROUTE_EXTRACTION: ${TITAN_MODEL_ROUTE_EXTRACTION:-nvidia:meta/llama-3.1-8b-instruct}
+  TITAN_MODEL_ROUTE_RESEARCH: ${TITAN_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/llama-3.3-nemotron-super-49b-v1}
+  TITAN_MODEL_ROUTE_VERIFICATION: ${TITAN_MODEL_ROUTE_VERIFICATION:-gemini:gemini-3.7-flash}
+  TITAN_MODEL_ROUTE_MESSAGE: ${TITAN_MODEL_ROUTE_MESSAGE:-gemini:gemini-3.7-flash}
+  TITAN_MODEL_ROUTE_PREMIUM: ${TITAN_MODEL_ROUTE_PREMIUM:-openrouter:anthropic/claude-sonnet-4}
   # --- identity ---
   TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}
   TITAN_LOCAL_JWT_SECRET: ${TITAN_LOCAL_JWT_SECRET:-dev-only-not-for-production}
@@ -284,7 +297,10 @@ services:
     environment:
       BROWSER_WORKER_PORT: "8800"
       BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
-      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-2}
+      # Sized to the Temporal worker's activity slots. At 2 against 8 slots,
+      # six of every eight crawl attempts got an immediate 503, burned their
+      # four retries and failed -- 1,819 of 2,005 research runs in one day.
+      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-6}
     ports: ["${BROWSER_WORKER_HOST_PORT:-8800}:8800"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

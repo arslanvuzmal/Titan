@@ -49,6 +49,27 @@ class ResearchLeadInput:
 
 
 @dataclasses.dataclass(frozen=True)
+class CloseResearchRunInput:
+    """Terminal write for a research run that is not going to finish normally.
+
+    ``analyse_evidence`` closes the runs that reach it. Every other exit -- a
+    blocked crawl, no pages captured, a score below threshold, no eligible
+    contact, a rejected or expired draft, an operator cancellation, an
+    unhandled error -- returned a result object and wrote nothing, so the run
+    stayed ``running`` for ever and its lead stayed ``RESEARCHING``. 1,597 runs
+    were in that state with no crawl ever started against them.
+    """
+
+    workspace_id: str
+    research_run_id: str
+    lead_id: str
+    #: A :class:`ResearchOutcome` value. Stored as the run's terminal status
+    #: so the reason a run stopped survives the workflow that knew it.
+    outcome: str
+    detail: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class CrawlActivityInput:
     workspace_id: str
     lead_id: str

@@ -32,6 +32,7 @@ with workflow.unsafe.imports_passed_through():
         AnalyseActivityInput,
         AnalyseActivityResult,
         ApprovalDecisionSignal,
+        CloseResearchRunInput,
         ContactActivityInput,
         ContactActivityResult,
         CrawlActivityInput,
@@ -57,7 +58,11 @@ CRAWL_RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=10),
     backoff_coefficient=2.0,
     maximum_interval=timedelta(minutes=5),
-    maximum_attempts=4,
+    # Saturation is the commonest failure and it is not an error -- the browser
+    # worker is telling the truth about being busy, and the answer is to wait.
+    # Four attempts spans about seventy seconds, which under any real backlog
+    # expires while the queue is still draining and throws the lead away.
+    maximum_attempts=8,
     # A URL the guard refused will be refused identically on every retry.
     non_retryable_error_types=["UrlBlockedError", "ValueError"],
 )
@@ -112,6 +117,11 @@ class LeadResearchWorkflow:
         self._blocked: list[str] = []
         self._approval: ApprovalDecisionSignal | None = None
         self._cancelled_reason: str | None = None
+        #: Set as soon as the run row exists, so every exit -- including the
+        #: unhandled-error path, which has no local reference to it -- can
+        #: close it. A run whose workflow ended without this write stayed
+        #: ``running`` for ever.
+        self._research_run_id: str | None = None
         self._sequence: int = 0
 
     # --------------------------------------------------------------- signals
@@ -160,6 +170,12 @@ class LeadResearchWorkflow:
             await self._record(
                 request, info.workflow_id, "research.failed", {"error": str(exc)[:400]}
             )
+            # The crawl failing four times is the commonest way to get here, and
+            # it used to leave the run 'running' and the lead RESEARCHING with
+            # nothing working on either -- 1,819 of 2,005 runs in one day.
+            await self._close_run(
+                request, self._research_run_id, ResearchOutcome.FAILED, str(exc)[:400]
+            )
             return ResearchLeadResult(
                 outcome=ResearchOutcome.FAILED.value,
                 lead_id=request.lead_id,
@@ -179,10 +195,11 @@ class LeadResearchWorkflow:
             retry_policy=DB_RETRY,
             result_type=str,
         )
+        self._research_run_id = research_run_id
         await self._record(request, workflow_id, "research.started", {})
 
         if self._should_stop():
-            return self._cancelled(request, research_run_id)
+            return await self._cancelled(request, research_run_id)
 
         # ---- 2. crawl -------------------------------------------------
         self._stage = "crawling"
@@ -216,17 +233,16 @@ class LeadResearchWorkflow:
                 "crawl.blocked",
                 {"reason": (crawl.blocked_reason or "")[:200]},
             )
-            return ResearchLeadResult(
-                outcome=ResearchOutcome.BLOCKED.value,
-                lead_id=request.lead_id,
-                research_run_id=research_run_id,
-                detail=crawl.blocked_reason,
-                finished_at=self._now_iso(),
+            return await self._finish(
+                request,
+                research_run_id,
+                ResearchOutcome.BLOCKED,
+                crawl.blocked_reason or "crawl blocked",
             )
 
         if crawl.pages_captured == 0:
             self._outcome = ResearchOutcome.NO_EVIDENCE.value
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.NO_EVIDENCE,
@@ -234,7 +250,7 @@ class LeadResearchWorkflow:
             )
 
         if self._should_stop():
-            return self._cancelled(request, research_run_id)
+            return await self._cancelled(request, research_run_id)
 
         # ---- 3. analyse ------------------------------------------------
         self._stage = "analysing"
@@ -257,7 +273,7 @@ class LeadResearchWorkflow:
         # truthful to open a message with, so the workflow stops here rather
         # than generating a draft the validator would reject anyway.
         if analysis.pitchable_findings == 0:
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.NO_EVIDENCE,
@@ -285,7 +301,7 @@ class LeadResearchWorkflow:
         )
 
         if not score.passed_threshold:
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.BELOW_THRESHOLD,
@@ -294,7 +310,7 @@ class LeadResearchWorkflow:
             )
 
         if self._should_stop():
-            return self._cancelled(request, research_run_id)
+            return await self._cancelled(request, research_run_id)
 
         # ---- 5. contact eligibility -------------------------------------
         self._stage = "resolving_contact"
@@ -313,7 +329,7 @@ class LeadResearchWorkflow:
         )
         if contact.eligible_channel_id is None:
             self._blocked.extend(contact.rejected_reasons)
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.NO_ELIGIBLE_CONTACT,
@@ -341,7 +357,7 @@ class LeadResearchWorkflow:
 
         if not draft.validation_passed:
             self._blocked.extend(draft.violation_codes)
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.DRAFT_REJECTED,
@@ -381,10 +397,10 @@ class LeadResearchWorkflow:
             decided = await self._wait_for_decision()
 
             if self._cancelled_reason is not None:
-                return self._cancelled(request, research_run_id)
+                return await self._cancelled(request, research_run_id)
 
             if not decided:
-                return self._finish(
+                return await self._finish(
                     request,
                     research_run_id,
                     ResearchOutcome.APPROVAL_EXPIRED,
@@ -395,7 +411,7 @@ class LeadResearchWorkflow:
 
             assert self._approval is not None
             if self._approval.decision != "approved":
-                return self._finish(
+                return await self._finish(
                     request,
                     research_run_id,
                     ResearchOutcome.DRAFT_REJECTED,
@@ -424,7 +440,7 @@ class LeadResearchWorkflow:
 
         if not queued.queued:
             self._blocked.extend(queued.refused_reasons)
-            return self._finish(
+            return await self._finish(
                 request,
                 research_run_id,
                 ResearchOutcome.BLOCKED,
@@ -466,11 +482,14 @@ class LeadResearchWorkflow:
     def _should_stop(self) -> bool:
         return self._cancelled_reason is not None
 
-    def _cancelled(
+    async def _cancelled(
         self, request: ResearchLeadInput, research_run_id: str | None
     ) -> ResearchLeadResult:
         self._stage = "cancelled"
         self._outcome = ResearchOutcome.CANCELLED.value
+        await self._close_run(
+            request, research_run_id, ResearchOutcome.CANCELLED, self._cancelled_reason
+        )
         return ResearchLeadResult(
             outcome=ResearchOutcome.CANCELLED.value,
             lead_id=request.lead_id,
@@ -479,7 +498,7 @@ class LeadResearchWorkflow:
             finished_at=self._now_iso(),
         )
 
-    def _finish(
+    async def _finish(
         self,
         request: ResearchLeadInput,
         research_run_id: str,
@@ -491,6 +510,7 @@ class LeadResearchWorkflow:
     ) -> ResearchLeadResult:
         self._stage = outcome.value
         self._outcome = outcome.value
+        await self._close_run(request, research_run_id, outcome, detail)
         return ResearchLeadResult(
             outcome=outcome.value,
             lead_id=request.lead_id,
@@ -500,6 +520,39 @@ class LeadResearchWorkflow:
             detail=detail[:500],
             finished_at=self._now_iso(),
         )
+
+    async def _close_run(
+        self,
+        request: ResearchLeadInput,
+        research_run_id: str | None,
+        outcome: ResearchOutcome,
+        detail: str | None,
+    ) -> None:
+        """Record why this run stopped, and never fail the workflow doing it.
+
+        Best-effort on purpose. The workflow has already reached its verdict;
+        losing the bookkeeping write is bad, but raising here would turn a lead
+        that merely scored badly into a failed workflow, and the retry would
+        crawl the site again. The stale-run sweeper is the backstop for a write
+        that does not land.
+        """
+        if research_run_id is None:
+            return
+        try:
+            await workflow.execute_activity(
+                "close_research_run",
+                CloseResearchRunInput(
+                    workspace_id=request.workspace_id,
+                    research_run_id=research_run_id,
+                    lead_id=request.lead_id,
+                    outcome=outcome.value,
+                    detail=(detail or "")[:500],
+                ),
+                start_to_close_timeout=DB_TIMEOUT,
+                retry_policy=DB_RETRY,
+            )
+        except Exception as exc:
+            workflow.logger.warning("could not close research run: %s", str(exc)[:200])
 
     async def _record(
         self,
