@@ -58,13 +58,28 @@ MARKETS: tuple[Region, ...] = (
 #: has already tuned, and this module is about clocks.
 MIN_MINUTES_BETWEEN_EMAILS = 10
 
-#: Titan's four-step sequence as Smartlead holds it. The bodies are merge
-#: variables, not content: Titan composes and a human approves each message, and
-#: Smartlead is handed the approved text per lead. Delays match
-#: ``STEP_DELAYS_IN_DAYS``.
+#: One step, and exactly one. The body is a merge variable, not content: Titan
+#: composes each message, it passes validation, and Smartlead is handed the
+#: approved text for that one send.
 #:
-#: Steps two onward carry an empty subject, which is how Smartlead threads a
-#: follow-up onto the original message rather than starting a new conversation.
+#: **Why not four.** A carrier holding four steps sends steps two, three and
+#: four itself, on its own timer, from whatever merge fields happen to be set
+#: on the lead -- with no draft, no validation and no approval behind any of
+#: them. Titan's own carrier check refuses to hand leads to such a campaign::
+#:
+#:     campaign 3809755 has 4 sequence steps. Titan authorizes exactly one
+#:     message at a time, so the carrier campaign must have exactly one step;
+#:     any other step would send unauthorized mail.
+#:
+#: That refusal is what stopped ``sales@`` sending anything at all: 46 failed,
+#: 43 queued, zero delivered, from the day it was added. The check was right
+#: and the shape was wrong.
+#:
+#: Follow-ups have not gone away; they moved to where they can be checked.
+#: ``FollowUpScheduler`` runs in every orchestrator planning cycle, writes
+#: ``next_action_at``, and each follow-up is then composed against evidence the
+#: earlier steps did not already cite -- a rule a static template cannot
+#: express, because a template does not know what it said last time.
 #:
 #: The delay key is ``delay_in_days`` on write and comes back as
 #: ``delayInDays`` on read. Sending the shape the API returns earns a 400,
@@ -74,24 +89,6 @@ SEQUENCE_STEPS: tuple[dict[str, Any], ...] = (
         "seq_number": 1,
         "seq_delay_details": {"delay_in_days": 0},
         "subject": "{{approved_subject}}",
-        "email_body": "{{approved_body}}",
-    },
-    {
-        "seq_number": 2,
-        "seq_delay_details": {"delay_in_days": 3},
-        "subject": "",
-        "email_body": "{{approved_body}}",
-    },
-    {
-        "seq_number": 3,
-        "seq_delay_details": {"delay_in_days": 4},
-        "subject": "",
-        "email_body": "{{approved_body}}",
-    },
-    {
-        "seq_number": 4,
-        "seq_delay_details": {"delay_in_days": 5},
-        "subject": "",
         "email_body": "{{approved_body}}",
     },
 )

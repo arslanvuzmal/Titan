@@ -256,3 +256,61 @@ def test_the_campaign_offers_the_opt_out_the_message_promises() -> None:
 
     assert "STOP" in CARRIER_SETTINGS["unsubscribe_text"]
     assert CARRIER_SETTINGS["stop_lead_settings"] == "REPLY_TO_AN_EMAIL"
+
+
+# ==========================================================================
+# The carrier holds one step, because it may only ever send one authorized
+# message. Titan's own cadence is a separate thing and still has four.
+# ==========================================================================
+def test_the_carrier_sequence_is_exactly_one_step() -> None:
+    """Planted violation: add a second step and this fails.
+
+    A carrier holding four steps sends steps two, three and four itself, on its
+    own timer, from whatever merge fields happen to be set -- with no draft, no
+    validation and no approval behind any of them. Titan's carrier check
+    refuses such a campaign, and that refusal is what stopped ``sales@``
+    sending anything at all: 46 failed, 43 queued, zero delivered.
+    """
+    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+
+    assert len(SEQUENCE_STEPS) == 1
+
+
+def test_the_one_step_carries_titan_composed_text() -> None:
+    """Merge variables, not content. Anything literal here would be a message
+    Smartlead wrote and nobody approved."""
+    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+
+    step = SEQUENCE_STEPS[0]
+
+    assert step["subject"] == "{{approved_subject}}"
+    assert step["email_body"] == "{{approved_body}}"
+    assert step["seq_delay_details"] == {"delay_in_days": 0}
+
+
+def test_the_shape_matches_what_the_carrier_check_demands() -> None:
+    """The provisioning shape and the send-time check must not drift: one
+    writes the campaign, the other refuses to use it, and a disagreement
+    between them is a campaign that can be created and never sent through."""
+    import inspect
+
+    from titan.delivery.providers import smartlead as provider
+    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+
+    check = inspect.getsource(provider.SmartleadProvider.verify_campaign_shape)
+
+    assert "count != 1" in check
+    assert len(SEQUENCE_STEPS) == 1
+
+
+def test_titan_keeps_its_own_follow_up_cadence() -> None:
+    """Follow-ups did not go away; they moved to where they can be checked.
+
+    Reducing the carrier to one step would be a real loss if nothing else
+    followed up, so this pins the fact that Titan still has a four-step cadence
+    of its own for FollowUpScheduler to drive.
+    """
+    from titan.outreach.sequence import STEP_DELAYS_IN_DAYS
+
+    assert len(STEP_DELAYS_IN_DAYS) == 4
+    assert STEP_DELAYS_IN_DAYS[0] == 0
