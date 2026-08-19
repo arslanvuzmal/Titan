@@ -300,7 +300,14 @@ services:
       # Sized to the Temporal worker's activity slots. At 2 against 8 slots,
       # six of every eight crawl attempts got an immediate 503, burned their
       # four retries and failed -- 1,819 of 2,005 research runs in one day.
-      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-6}
+      #
+      # 8 is this machine's ceiling, not a preference. Measured: 6 lanes gave
+      # ~280 crawls/hour at 90% of one core; 10 gave ~380/hour at 850% -- every
+      # core on the box, starving postgres and the workers. 8 keeps headroom.
+      # ~300/hour is ~7,000 a day against the ~150 a day that 50 sends needs,
+      # so the constraint here stopped being crawl capacity and became how much
+      # research the orchestrator orders against it.
+      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-8}
     ports: ["${BROWSER_WORKER_HOST_PORT:-8800}:8800"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
