@@ -233,9 +233,18 @@ class CampaignOrchestratorWorkflow:
             return UNAUTHORIZED_BACKOFF
 
         # Top the pool up before it empties, and refill it when it already has.
-        # Not attempted when the day's sends are spent: discovery costs money to
-        # find leads that cannot be written to until tomorrow, by which point the
-        # evidence is a day staler than it needed to be.
+        #
+        # This used to be skipped whenever the day's sends were spent, on the
+        # grounds that discovery buys leads which cannot be written to until
+        # tomorrow, a day staler than they needed to be. That reasoning holds
+        # for one lead and fails for the pipeline: it makes the intake rate a
+        # function of the send rate, so a reserve can never build and a bad
+        # bounce day cuts discovery along with sending.
+        #
+        # The planner now decides that question properly -- it returns
+        # BUDGET_SPENT only when the sends are spent *and* the reserve is full,
+        # which is the one case where more leads genuinely buy nothing. See
+        # titan.intelligence.fuel.
         if (
             plan.verdict != CycleVerdict.BUDGET_SPENT.value
             and plan.pool_remaining < POOL_LOW_WATER_MARK

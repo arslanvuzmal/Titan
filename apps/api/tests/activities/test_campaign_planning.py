@@ -77,11 +77,14 @@ async def test_a_missing_campaign_is_refused_rather_than_crashing(db_session, wo
     assert "not found" in (plan.detail or "")
 
 
-async def test_todays_sends_are_subtracted_from_the_budget(db_session, workspace):
-    """Research is planned against what can still be sent, not the raw limit.
+async def test_todays_sends_are_subtracted_from_the_send_budget(db_session, workspace):
+    """The *send* budget still counts today's sends against the daily limit.
 
-    Planning two hundred when forty can be sent manufactures a hundred and sixty
-    drafts that expire unapproved: model spend with nothing at the end of it.
+    What changed is what that budget governs. It used to gate research too, so
+    intake was capped at the send rate and a reserve could never form -- see
+    ``titan.intelligence.fuel``. ``remaining_budget`` reaching zero is still
+    correct and still reported; it simply no longer stops the pipeline from
+    filling the tank for tomorrow.
     """
     fixture = await build_sendable(db_session, workspace)
 
@@ -101,9 +104,42 @@ async def test_todays_sends_are_subtracted_from_the_budget(db_session, workspace
 
     plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
 
-    assert plan.verdict == CycleVerdict.BUDGET_SPENT.value
     assert plan.remaining_budget == 0
-    assert plan.leads == ()
+
+
+async def test_a_spent_send_budget_does_not_stop_the_pipeline(db_session, workspace):
+    """Planted violation: restore ``min(remaining, max_new_research)`` in the
+    planner and this fails.
+
+    Capping research at the sends left today means the intake rate can never
+    exceed the send rate, so no reserve can build -- and because only about a
+    third of crawled sites yield an address, it drains the pipeline rather than
+    holding it level. It also made a bad bounce day cut discovery, since the
+    ramp lowers the send limit and the research budget followed it down.
+    """
+    fixture = await build_sendable(db_session, workspace)
+
+    async with workspace_unit_of_work(workspace) as session:
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == fixture.campaign_id
+                )
+            )
+        ).scalar_one()
+        policy.daily_send_limit = 1
+
+        message = await session.get(Message, fixture.message_id)
+        message.state = MessageState.SENT
+        message.sent_at = dt.datetime.now(dt.UTC)
+
+    plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
+
+    assert plan.remaining_budget == 0, "the send budget is genuinely spent"
+    assert plan.verdict != CycleVerdict.BUDGET_SPENT.value, (
+        "research must continue while the reserve is short, so there is "
+        "something to send tomorrow"
+    )
 
 
 async def test_a_send_from_yesterday_does_not_count_against_today(db_session, workspace):
@@ -159,7 +195,9 @@ async def test_a_bounced_send_still_counts_against_the_budget(db_session, worksp
 
     plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
 
-    assert plan.verdict == CycleVerdict.BUDGET_SPENT.value
+    # The send budget, not the verdict: a spent budget no longer ends the cycle,
+    # because research keeps running to fill the reserve.
+    assert plan.remaining_budget == 0
 
 
 async def test_a_replied_lead_is_never_planned(db_session, workspace):

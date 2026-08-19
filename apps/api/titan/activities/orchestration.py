@@ -5,12 +5,26 @@ the plan is. Everything that requires reading the database lives here, because a
 workflow body that queried Postgres directly would be non-deterministic on
 replay -- the defect that got the pre-0.2 workflows deleted.
 
-The planner is deliberately conservative in one direction: it never plans more
-research than the campaign can actually send today. Researching a lead costs a
-crawl, a model call and an operator's attention, and produces a draft with an
-expiry. Planning two hundred when forty can be sent manufactures a hundred and
-sixty drafts that quietly expire unapproved -- spend with nothing at the end of
-it, and an approval queue nobody can face.
+The planner used to be conservative in one specific way: it never planned more
+research than the campaign could send *that day*. The reasoning was sound as far
+as it went -- research costs a crawl and a model call and produces a draft with
+an expiry, so planning two hundred when forty can be sent manufactures drafts
+that quietly expire.
+
+It was still the wrong rule, and it is what emptied the pipeline. Only about a
+third of crawled sites yield a usable address, so sustaining S sends a day needs
+roughly 3S leads researched a day. Capping research at S does not hold the
+pipeline level, it drains it -- down to 71 usable leads against a 40-a-day
+target. Worse, the cap moves with the send limit, so when the ramp halved both
+mailboxes on a bounce rate, the supply of new leads halved with them: a delivery
+problem silently became a discovery problem.
+
+Research volume is now sized by the *reserve* -- keep a few days of reachable
+leads in stock, stop when the tank is full -- in :mod:`titan.intelligence.fuel`.
+The original concern is answered by the size of the reserve rather than by
+starving it: ``RESERVE_DAYS`` is shorter than ``DEFAULT_APPROVAL_TTL``, so a
+draft made to fill the tank is sent before it can expire. An invariant test
+holds those two numbers in that order.
 
 This is also where :class:`titan.delivery.followup_scheduler.FollowUpScheduler`
 finally gets a caller. It was written, tested and never invoked, so
@@ -55,6 +69,7 @@ from titan.db.models import (
     Lead,
     Message,
     Organization,
+    SenderIdentity,
     Workspace,
 )
 from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
@@ -62,6 +77,12 @@ from titan.delivery import sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
 from titan.intelligence.composer import VARIANT_REGISTERS
+from titan.intelligence.fuel import (
+    FuelState,
+    measure_extraction_rate,
+    read_fuel_state,
+    research_budget,
+)
 from titan.intelligence.insights import portfolio_view, variant_comparison
 from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import (
@@ -188,13 +209,23 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
     async with workspace_session(workspace_id) as session:
         remaining = max(0, effective_limit - int(spent))
         min_score = effective_score
+        fuel = await _read_fuel(session, workspace_id=workspace_id)
 
-    if remaining == 0:
+    # How much research to run is a question about the *reserve*, not about how
+    # many sends are left today. Tying the two together -- which is what
+    # min(remaining, ...) did here -- caps intake at the send rate, so a buffer
+    # can never form; and because only about a third of crawled sites yield an
+    # address, sustaining S sends a day needs roughly 3S researched. Capping at
+    # S drained the pipeline to 71 usable leads. See titan.intelligence.fuel.
+    fuel_budget = research_budget(fuel, per_cycle_ceiling=request.max_new_research)
+
+    if remaining == 0 and fuel_budget.leads == 0:
         return CampaignCyclePlan(
             verdict=CycleVerdict.BUDGET_SPENT.value,
             remaining_budget=0,
             detail=(
-                f"{spent} of {policy.daily_send_limit} sends used today; "
+                f"{spent} of {policy.daily_send_limit} sends used today and the "
+                f"reserve is full ({fuel_budget.reason}); "
                 "the next cycle after midnight UTC will resume"
             ),
         )
@@ -205,7 +236,12 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
         scan = await FollowUpScheduler().scan_workspace(session, workspace_id)
     followups_due = sum(1 for result in scan if result.due)
 
-    budget = min(remaining, request.max_new_research)
+    # Deliberately not bounded by `remaining`. When the day's sends are spent
+    # but the tank is low, this cycle still researches -- the messages it
+    # produces wait in the outbox for tomorrow's budget, which is what having a
+    # reserve means. The authorization gate already says as much: a campaign
+    # whose sending is paused may still want its pipeline warm.
+    budget = fuel_budget.leads
     async with workspace_session(workspace_id) as session:
         planned = await _select_leads(
             session,
@@ -266,6 +302,31 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
         # "will there be work next cycle", and counting the leads being
         # dispatched right now would answer a different question.
         pool_remaining=max(0, pool - len(planned)),
+    )
+
+
+async def _read_fuel(session: AsyncSession, *, workspace_id: uuid.UUID) -> FuelState:
+    """The workspace's reserve, its burn rate and its extraction rate.
+
+    A workspace question, asked from inside a campaign's cycle for the same
+    reason capacity reallocation is: there is one reserve and many campaigns,
+    and no division of it is possible from inside any single one.
+    """
+    capacity = (
+        await session.execute(
+            select(func.coalesce(func.sum(SenderIdentity.daily_send_limit), 0)).where(
+                SenderIdentity.workspace_id == workspace_id,
+                SenderIdentity.is_active.is_(True),
+                SenderIdentity.domain_verified.is_(True),
+            )
+        )
+    ).scalar_one()
+    rate = await measure_extraction_rate(session, workspace_id=workspace_id)
+    return await read_fuel_state(
+        session,
+        workspace_id=workspace_id,
+        daily_send_capacity=int(capacity),
+        extraction_rate=rate,
     )
 
 
