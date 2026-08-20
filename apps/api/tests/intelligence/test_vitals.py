@@ -244,3 +244,42 @@ def test_thresholds_are_stated_not_scattered() -> None:
     assert 0 < RESEARCH_FAILURE_ALARM < 1
     assert RUNWAY_ALARM_DAYS > 1
     assert 0 <= IDLE_ALARM_HOUR_UTC <= 23
+
+
+# ------------------------------------------- the provider refusing us entirely
+
+
+def test_a_refusing_provider_is_the_first_thing_reported() -> None:
+    """Planted violation: drop the provider alarm and this fails.
+
+    Smartlead returned ``401 {"message": "Plan expired!"}`` for hours while
+    every other number on the dashboard looked healthy -- the day's allowance
+    had already been spent before the plan lapsed, so nothing tried to send and
+    nothing failed. It would have surfaced at the first attempt the next
+    morning, as a wall of send errors rather than as the one fact that
+    explains them.
+    """
+    alarms = check(vitals(sending_provider_ok=False))
+
+    assert alarms, "a provider refusing every send raised nothing"
+    assert alarms[0].code == "sending_provider_rejected", (
+        "it outranks every other alarm: the others describe a pipeline working "
+        "badly, this one means no mail leaves at all"
+    )
+
+
+def test_a_working_provider_is_silent() -> None:
+    assert check(vitals(sending_provider_ok=True)) == []
+
+
+def test_an_unchecked_provider_does_not_alarm() -> None:
+    """None is not False. A probe that could not run is not evidence of
+    failure, and alarming on it pages somebody every time the network
+    hiccups."""
+    assert check(vitals(sending_provider_ok=None)) == []
+
+
+def test_the_reading_distinguishes_unchecked_from_refusing() -> None:
+    assert "not checked" in render(vitals(sending_provider_ok=None))
+    assert "REFUSING" in render(vitals(sending_provider_ok=False))
+    assert "ok" in render(vitals(sending_provider_ok=True))

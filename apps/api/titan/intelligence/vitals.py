@@ -123,6 +123,15 @@ class Vitals:
     #: is still being written and would read as a fall every morning.
     sends_by_day: tuple[int, ...] = field(default=())
 
+    #: Whether the sending provider still accepts Titan's credentials.
+    #:
+    #: ``None`` means nobody asked, which must not alarm -- a check that could
+    #: not run is not evidence of failure. ``False`` means it was asked and
+    #: refused, and that is the most serious thing this module can report:
+    #: every other alarm here describes the pipeline working badly, and this one
+    #: means nothing will leave at all.
+    sending_provider_ok: bool | None = None
+
     now: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
     # ---------------------------------------------------------- derived
@@ -188,6 +197,26 @@ def check(vitals: Vitals) -> list[Alarm]:
     arguable, which is the point.
     """
     alarms: list[Alarm] = []
+
+    # ---- nothing can leave the building at all ---------------------------
+    # First, because it outranks every other fault here. The others describe a
+    # pipeline working badly; this one means no mail goes out however well
+    # everything upstream is running.
+    if vitals.sending_provider_ok is False:
+        alarms.append(
+            Alarm(
+                code="sending_provider_rejected",
+                title="The sending provider is refusing Titan's credentials",
+                detail=(
+                    "Every send will fail until this is resolved, whatever the "
+                    "rest of the pipeline is doing.\n\n"
+                    "Usually the account rather than the key: an expired plan, "
+                    "a lapsed trial, or a failed payment. A rotated or revoked "
+                    "key looks identical from here. Check the provider's "
+                    "billing page first, then the key in the environment."
+                ),
+            )
+        )
 
     # ---- the machine has stopped producing -------------------------------
     rate = vitals.research_failure_rate
@@ -299,6 +328,7 @@ async def read_vitals(
     workspace_id: uuid.UUID,
     daily_send_capacity: int,
     mailboxes_sending: int,
+    sending_provider_ok: bool | None = None,
     now: dt.datetime | None = None,
     history_days: int = 7,
 ) -> Vitals:
@@ -424,6 +454,7 @@ async def read_vitals(
         research_finished=research_finished,
         research_failed=research_failed,
         sends_by_day=sends_by_day,
+        sending_provider_ok=sending_provider_ok,
         now=moment,
     )
 
@@ -455,6 +486,12 @@ def render(vitals: Vitals) -> str:
             ),
             f"  mailboxes sending   {vitals.mailboxes_sending:>6}"
             f"  of {vitals.mailboxes_active} active",
+            "  sending provider    "
+            + (
+                "     -  not checked"
+                if vitals.sending_provider_ok is None
+                else ("    ok" if vitals.sending_provider_ok else " REFUSING CREDENTIALS")
+            ),
         ]
     )
 

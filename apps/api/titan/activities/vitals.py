@@ -25,15 +25,48 @@ import uuid
 from sqlalchemy import select
 from temporalio import activity
 
+from titan.config import get_settings
 from titan.db.models import SenderHealthSnapshot, SenderIdentity
 from titan.db.session import workspace_unit_of_work
 from titan.delivery import adaptive_limits
 from titan.delivery.sender_health import SenderHealth
 from titan.intelligence.vitals import check, read_vitals, render
 from titan.notify.operator import NotificationKind, record_notification
+from titan.providers import smartlead
 from titan.workflows.types import CheckVitalsInput, CheckVitalsResult
 
 logger = logging.getLogger(__name__)
+
+
+async def _provider_accepts_us() -> bool | None:
+    """Whether the sending provider still accepts Titan's credentials.
+
+    ``None`` when there is nothing to ask -- no provider configured, or the
+    check itself could not run. A check that did not happen is not evidence of
+    failure, and alarming on it would page somebody every time the network
+    hiccuped.
+
+    Worth the one network call an hour. The provider refusing us is the only
+    fault in this module that stops mail entirely, and it is invisible until a
+    send is attempted: Smartlead returned ``401 {"message": "Plan expired!"}``
+    for hours while every other number on the dashboard looked healthy, because
+    the day's allowance had already been spent before the plan lapsed.
+    """
+    settings = get_settings()
+    if settings.email_provider != "smartlead" or settings.smartlead_api_key is None:
+        return None
+    client = smartlead.SmartleadClient.from_settings(settings)
+    try:
+        ok, _detail = await client.health_check()
+        return bool(ok)
+    except Exception as exc:
+        logger.info(
+            "sending provider probe did not complete",
+            extra={"error_code": type(exc).__name__},
+        )
+        return None
+    finally:
+        await client.aclose()
 
 
 @activity.defn(name="check_pipeline_vitals")
@@ -95,6 +128,7 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
             workspace_id=workspace_id,
             daily_send_capacity=capacity,
             mailboxes_sending=sending,
+            sending_provider_ok=await _provider_accepts_us(),
             now=now,
         )
 
