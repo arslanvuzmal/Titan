@@ -16,7 +16,9 @@ from __future__ import annotations
 import math
 
 from titan.intelligence.fuel import (
+    FALLBACK_CRAWL_RATE_PER_HOUR,
     FALLBACK_EXTRACTION_RATE,
+    MAX_QUEUE_HOURS,
     MIN_EXTRACTION_SAMPLE,
     MIN_USABLE_EXTRACTION_RATE,
     RESERVE_DAYS,
@@ -61,7 +63,12 @@ def test_research_outpaces_sending_rather_than_matching_it() -> None:
     """At a one-in-three extraction rate, researching as many leads as can be
     sent yields a third of what is needed. The budget has to exceed the send
     rate or the reserve can only ever fall."""
-    budget = research_budget(state(reachable_untouched=0), per_cycle_ceiling=1000).leads
+    # A crawler fast enough that the queue ceiling is not the bound under test.
+    # This is about the *yield*, and a second limit intervening would make the
+    # assertion below pass or fail for the wrong reason.
+    budget = research_budget(
+        state(reachable_untouched=0, crawl_rate_per_hour=10_000), per_cycle_ceiling=1000
+    ).leads
 
     assert budget > 24 * RESERVE_DAYS, "ordering only the shortfall ignores the yield"
 
@@ -135,8 +142,15 @@ def test_the_sample_floor_is_high_enough_to_mean_something() -> None:
 def test_a_worse_rate_orders_more_research() -> None:
     """The self-correction: the same reserve costs more crawls when fewer of
     them land."""
-    poor = research_budget(state(extraction_rate=0.10), per_cycle_ceiling=10_000).leads
-    good = research_budget(state(extraction_rate=0.50), per_cycle_ceiling=10_000).leads
+    # Crawl headroom deliberately generous: the relationship under test is
+    # between yield and volume, and the queue ceiling would flatten both to the
+    # same number.
+    poor = research_budget(
+        state(extraction_rate=0.10, crawl_rate_per_hour=10_000), per_cycle_ceiling=10_000
+    ).leads
+    good = research_budget(
+        state(extraction_rate=0.50, crawl_rate_per_hour=10_000), per_cycle_ceiling=10_000
+    ).leads
 
     assert poor > good
 
@@ -229,3 +243,78 @@ def test_the_freshness_bound_matches_the_sweeper_that_frees_them() -> None:
     from titan.intelligence.stale_runs import STALE_AFTER as sweeper_deadline
 
     assert fuel_deadline is sweeper_deadline
+
+
+# ------------------------------------------ what the crawler can actually make
+#
+# The reserve target says how much fuel is wanted. Nothing said how fast it
+# could be made, so twenty-three campaigns each ordered their per-cycle ceiling
+# into a queue the crawler had no chance of clearing. The surplus does not wait:
+# it retries eight times, exhausts, and fails.
+#
+#     research.started  1,242
+#     research.failed   1,123     ← in three hours, none of it a crawl going wrong
+
+
+def test_a_full_queue_orders_nothing_however_short_the_reserve() -> None:
+    """Planted violation: drop the headroom check and this fails.
+
+    An empty tank and a jammed crawler is exactly when the deficit is largest
+    and ordering is most useless.
+    """
+    starving_but_jammed = state(
+        reachable_untouched=0, in_flight=500, crawl_rate_per_hour=120
+    )
+
+    budget = research_budget(starving_but_jammed, per_cycle_ceiling=25)
+
+    assert budget.leads == 0
+    assert "already queued" in budget.reason
+
+
+def test_the_budget_never_exceeds_what_the_crawler_can_reach() -> None:
+    """Ordering past the queue ceiling does not produce leads sooner. It
+    produces workflows that expire behind a saturated crawler."""
+    s = state(reachable_untouched=0, in_flight=200, crawl_rate_per_hour=120)
+
+    assert s.queue_ceiling == 240
+    assert research_budget(s, per_cycle_ceiling=1000).leads == 40
+
+
+def test_a_faster_crawler_earns_a_deeper_queue() -> None:
+    """The bound tracks the machine rather than a number somebody typed. Raising
+    browser concurrency should widen this without anyone editing it."""
+    slow = state(reachable_untouched=0, in_flight=0, crawl_rate_per_hour=30)
+    fast = state(reachable_untouched=0, in_flight=0, crawl_rate_per_hour=300)
+
+    assert fast.queue_ceiling > slow.queue_ceiling
+    assert (
+        research_budget(fast, per_cycle_ceiling=10_000).leads
+        > research_budget(slow, per_cycle_ceiling=10_000).leads
+    )
+
+
+def test_an_unmeasured_crawler_gets_a_conservative_queue_not_none() -> None:
+    """Null is not zero here either -- but the asymmetry runs the other way
+    than it does for the extraction rate. Assuming no limit is what produced
+    the failures; assuming a low one costs an hour."""
+    unmeasured = state(reachable_untouched=0, in_flight=0, crawl_rate_per_hour=None)
+
+    assert unmeasured.queue_ceiling == FALLBACK_CRAWL_RATE_PER_HOUR * MAX_QUEUE_HOURS
+    assert research_budget(unmeasured, per_cycle_ceiling=1000).leads > 0
+
+
+def test_the_queue_ceiling_is_measured_from_completions_not_configuration() -> None:
+    """Planted violation: read the concurrency setting instead and this fails.
+
+    Browser concurrency is an upper bound on a number that real sites, timeouts
+    and blocked pages all reduce. Only completions say what the pipeline absorbs.
+    """
+    import inspect
+
+    from titan.intelligence import fuel
+
+    source = inspect.getsource(fuel.read_fuel_state)
+
+    assert "CrawlRun" in source
+    assert "crawl_rate_per_hour=" in source

@@ -86,6 +86,24 @@ FALLBACK_EXTRACTION_RATE = 0.25
 #: extraction is broken, which is a thing to fix rather than to out-crawl.
 MIN_USABLE_EXTRACTION_RATE = 0.05
 
+#: Never queue more research than the crawler can clear in this many hours.
+#:
+#: The reserve target says how much fuel is wanted; nothing said how fast it
+#: could be made. Twenty-three campaigns each ordering their per-cycle ceiling
+#: put roughly 575 leads an hour in front of a crawler that clears about 120,
+#: and the surplus does not wait -- it retries eight times, exhausts, and fails.
+#: Measured over three hours: **1,123 research runs failed against 1,242
+#: started.** Nine in ten, and none of it was a crawl going wrong.
+#:
+#: Two hours rather than one: a shorter queue idles the crawler between cycles,
+#: and a longer one is work that expires before it is reached.
+MAX_QUEUE_HOURS = 2
+
+#: How many crawls an hour to assume before any have been measured. Low on
+#: purpose -- ordering too little for one cycle costs an hour, and ordering far
+#: too much is the failure this bound exists to stop.
+FALLBACK_CRAWL_RATE_PER_HOUR = 30
+
 
 @dataclass(frozen=True, slots=True)
 class FuelState:
@@ -102,6 +120,24 @@ class FuelState:
     #: Leads already being researched. Fuel that is on its way but has not
     #: arrived, and the reason ordering more would be waste.
     in_flight: int = 0
+    #: Crawls the browser worker actually completed per hour recently, or None
+    #: when too little has run to say. Bounds the queue: the reserve decides how
+    #: much fuel is wanted and this decides how much can be made.
+    crawl_rate_per_hour: int | None = None
+
+    @property
+    def queue_ceiling(self) -> int:
+        """The most research that may be outstanding at once.
+
+        Ordering past this does not produce leads sooner. It produces workflows
+        that sit behind a saturated crawler, exhaust their retries and fail --
+        which is not free even now that a failed run returns its lead to the
+        queue, because it burns a worker slot that a crawl could have used.
+        """
+        rate = self.crawl_rate_per_hour
+        if rate is None or rate <= 0:
+            rate = FALLBACK_CRAWL_RATE_PER_HOUR
+        return rate * MAX_QUEUE_HOURS
 
     @property
     def expected_from_in_flight(self) -> int:
@@ -174,6 +210,18 @@ def research_budget(
             "no send capacity; keeping the pipeline warm at a trickle",
         )
 
+    # What the crawler can actually make, before what the reserve would like.
+    # A deficit is a statement about demand; it says nothing about whether the
+    # machine that fills it has any room left.
+    headroom = state.queue_ceiling - state.in_flight
+    if headroom <= 0:
+        return FuelBudget(
+            0,
+            f"{state.in_flight} leads already queued for research against a "
+            f"crawler clearing about {state.crawl_rate_per_hour or FALLBACK_CRAWL_RATE_PER_HOUR}"
+            f"/hour; more would expire in the queue rather than arrive sooner",
+        )
+
     deficit = target - state.effective_supply
     if deficit <= 0:
         return FuelBudget(
@@ -184,7 +232,7 @@ def research_budget(
         )
 
     rate = usable_rate(state.extraction_rate)
-    needed = math.ceil(deficit / rate)
+    needed = min(math.ceil(deficit / rate), headroom)
     measured = (
         f"{state.extraction_rate:.0%} measured"
         if state.extraction_rate is not None
@@ -312,16 +360,40 @@ async def read_fuel_state(
             )
         )
     ).scalar_one()
+    # Crawls actually finished per hour, measured rather than configured. The
+    # browser worker's concurrency setting is an upper bound on a number that
+    # real sites, timeouts and blocked pages all reduce; only the completions
+    # say what the pipeline can absorb.
+    #
+    # A four-hour window: long enough that one slow site does not halve the
+    # figure, short enough to notice the worker being restarted or resized.
+    crawl_window_hours = 4
+    crawls = (
+        await session.execute(
+            select(func.count())
+            .select_from(CrawlRun)
+            .where(
+                CrawlRun.workspace_id == workspace_id,
+                CrawlRun.created_at
+                >= dt.datetime.now(dt.UTC) - dt.timedelta(hours=crawl_window_hours),
+            )
+        )
+    ).scalar_one()
+    crawl_rate = int(crawls) // crawl_window_hours if crawls else None
+
     return FuelState(
         reachable_untouched=int(reachable),
         daily_send_capacity=daily_send_capacity,
         extraction_rate=extraction_rate,
         in_flight=int(in_flight),
+        crawl_rate_per_hour=crawl_rate,
     )
 
 
 __all__ = [
+    "FALLBACK_CRAWL_RATE_PER_HOUR",
     "FALLBACK_EXTRACTION_RATE",
+    "MAX_QUEUE_HOURS",
     "MIN_EXTRACTION_SAMPLE",
     "MIN_USABLE_EXTRACTION_RATE",
     "RESERVE_DAYS",
