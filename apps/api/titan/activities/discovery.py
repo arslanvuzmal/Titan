@@ -73,6 +73,32 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
 
+#: How many recent runs of the same query to judge exhaustion on.
+#:
+#: One run is noise -- Places returns a slightly different slice each time, so a
+#: single lucky record would reprieve a territory that has nothing left.
+EXHAUSTION_WINDOW_RUNS = 3
+
+#: Records the window must have returned before the rate means anything.
+MIN_RETURNED_TO_JUDGE = 30
+
+#: Share of returned records that must be new for the ground to be worth
+#: re-asking.
+#:
+#: The rule used to be "admitted nothing at all", and a single new record kept a
+#: query alive for ever. Measured on the live workspace: "dentists in Manchester
+#: UK" ran **69 times**, returned 1,676 records and deduplicated 1,562 of them
+#: -- about one and a half new businesses per run, at 3.2 cents a run, while 92
+#: other territories in the catalogue had never been searched once. Across all
+#: queries: $53.98 spent, and the eleven most-repeated account for almost all of
+#: it.
+#:
+#: Five per cent. Below that a query is returning the same twenty-five
+#: businesses it returned yesterday, and the money is better spent on ground
+#: nobody has looked at.
+MIN_ADMIT_RATE = 0.05
+
+
 async def _exhausted_geographies(
     session: AsyncSession, *, campaign_id: uuid.UUID, business_type: str
 ) -> set[str]:
@@ -117,18 +143,27 @@ async def _exhausted_geographies(
         )
     ).all()
 
-    # Most recent run per query text wins: a geography that yielded nothing in
-    # March and everything in August is not exhausted.
-    latest: dict[str, tuple[int, int]] = {}
+    # The most recent few runs per query text, not just the last one: a
+    # geography that yielded nothing in March and everything in August is not
+    # exhausted, but one judged on a single run is judged on noise.
+    recent: dict[str, list[tuple[int, int]]] = {}
     for label, returned, deduped in rows:
         key = (label or "").strip().casefold()
-        if key and key not in latest:
-            latest[key] = (int(returned or 0), int(deduped or 0))
+        if not key:
+            continue
+        window = recent.setdefault(key, [])
+        if len(window) < EXHAUSTION_WINDOW_RUNS:
+            window.append((int(returned or 0), int(deduped or 0)))
 
     spent: set[str] = set()
-    for key, (returned, deduped) in latest.items():
-        admitted = returned - deduped
-        if returned <= 0 or admitted > 0:
+    for key, window in recent.items():
+        returned = sum(r for r, _ in window)
+        admitted = sum(r - d for r, d in window)
+        if returned < MIN_RETURNED_TO_JUDGE:
+            # Too little to say. Not the same as worked out, and retiring a
+            # territory on one thin run would abandon ground nobody searched.
+            continue
+        if admitted / returned > MIN_ADMIT_RATE:
             continue
         spent.add(key.removeprefix(prefix).strip() if key.startswith(prefix) else key)
     return spent

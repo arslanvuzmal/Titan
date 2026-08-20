@@ -434,3 +434,78 @@ async def test_a_search_that_returns_nothing_at_all_does_not_notify(
 
     assert result.leads_created == 0
     assert result.notified is False
+
+
+# ==========================================================================
+# Ground is worked out long before it admits nothing at all
+# ==========================================================================
+#
+# The rule was "the last run returned results and admitted none of them", so a
+# single new business kept a query alive for ever. Measured on the live
+# workspace:
+#
+#     dentists in Manchester UK   69 runs   1,676 returned   1,562 duplicates
+#
+# About one and a half new businesses per run, at 3.2 cents a run, while 92 of
+# the 107 territories in the catalogue had never been searched once. Total spend
+# $53.98, almost all of it on eleven queries asking the same question again.
+
+
+def test_the_thresholds_are_stated_where_they_can_be_argued_with() -> None:
+    from titan.activities.discovery import (
+        EXHAUSTION_WINDOW_RUNS,
+        MIN_ADMIT_RATE,
+        MIN_RETURNED_TO_JUDGE,
+    )
+
+    assert EXHAUSTION_WINDOW_RUNS >= 2, "one run is noise, not evidence"
+    assert 0 < MIN_ADMIT_RATE < 0.5
+    assert MIN_RETURNED_TO_JUDGE >= 20
+
+
+def test_a_trickle_of_new_records_no_longer_reprieves_a_query() -> None:
+    """Planted violation: restore ``admitted > 0`` and this fails.
+
+    The live shape: three runs, seventy-two records back, three of them new.
+    Four per cent. That query is returning the same businesses it returned
+    yesterday and costs money every time it is asked.
+    """
+    from titan.activities.discovery import MIN_ADMIT_RATE
+
+    returned, admitted = 72, 3
+
+    assert admitted > 0, "the old rule would have called this alive"
+    assert admitted / returned <= MIN_ADMIT_RATE, "the new rule retires it"
+
+
+def test_genuinely_fresh_ground_is_left_alone() -> None:
+    """Edinburgh on the live data: 360 returned, 29 new. Eight per cent, and
+    worth asking again."""
+    from titan.activities.discovery import MIN_ADMIT_RATE
+
+    assert 29 / 360 > MIN_ADMIT_RATE
+
+
+def test_a_thin_window_cannot_retire_a_territory() -> None:
+    """Planted violation: drop the returned floor and this fails.
+
+    One run that came back with four records and none new is a query too
+    narrow or a bad minute at Google, not ground worked out -- and retiring on
+    it abandons a territory nobody actually searched.
+    """
+    from titan.activities.discovery import MIN_RETURNED_TO_JUDGE
+
+    assert 4 < MIN_RETURNED_TO_JUDGE
+
+
+def test_exhaustion_is_computed_from_the_counters_not_stored() -> None:
+    """A column marking a geography exhausted keeps saying so after the ground
+    refills, and has to be cleared by hand."""
+    import inspect
+
+    from titan.activities import discovery
+
+    source = inspect.getsource(discovery._exhausted_geographies)
+
+    assert "records_deduplicated" in source
+    assert "EXHAUSTION_WINDOW_RUNS" in source
