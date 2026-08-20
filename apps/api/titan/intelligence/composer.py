@@ -129,11 +129,30 @@ _IMPACT_REGISTERS: tuple[str, ...] = (
     "That matters because {impact_lower}",
 )
 
+#: What the sender does, said without a track record to lean on.
+#:
+#: "for businesses of this size" and "at about your scale" were doing no work.
+#: They imply a client base without naming one, which is the weakest possible
+#: move: a stranger who gestures at credentials they do not list has told the
+#: reader exactly how thin the credentials are.
+#:
+#: With no case studies to cite, the credential is the audit itself. Finding a
+#: real fault on somebody's site and offering the rest of the list demonstrates
+#: the capability instead of asserting it, and it cannot be faked -- which is
+#: more than most of the mail this competes with can say.
+#:
+#: Deliberately free of site-nouns. "the rest of the site" reads as a claim
+#: about the recipient's business and would need a finding to back it; "the rest
+#: of what I noticed" is a statement about the sender's own work and needs
+#: nothing.
 _OFFER_REGISTERS: tuple[str, ...] = (
-    "I build {solution} for businesses of this size.",
-    "Fixing this sort of thing is what I do -- {solution}, mostly for firms your size.",
-    "I work on {solution} with businesses at about your scale.",
-    "My work is {solution}, usually for teams around your size.",
+    # No article before {solution}: the validator reads "the ... booking" as a
+    # claim about the recipient's site, and a solution phrase containing
+    # "booking" turns an offer sentence into an unsupported assertion.
+    "That is what I set up -- {solution}.",
+    "My work is {solution}, and I noticed a few other things while I was there.",
+    "I do {solution}, and this is the sort of thing I turn up.",
+    "I work on {solution}, and there were a couple of others worth a look.",
 )
 
 #: What the defect is costing, said with the only audience figure that is
@@ -183,10 +202,16 @@ _STAKES_REGISTERS: tuple[str, ...] = (
 #: One ask, small, and answerable in a word. A cold email that asks for a
 #: 30-minute discovery call is asking a stranger for something they have no
 #: reason to give yet; a yes/no question costs them nothing to answer.
+#: Two of the four now offer the list rather than ask for time.
+#:
+#: A stranger asking for ten minutes is asking for something before giving
+#: anything. Offering the rest of what was found costs the recipient nothing,
+#: is worth having whether or not they ever reply, and the reply it invites is
+#: a single word.
 _ASK_REGISTERS: tuple[str, ...] = (
+    "Want me to send over the rest of what I noticed?",
+    "Happy to write the rest up and send it across -- shall I?",
     "Worth a short call next week?",
-    "Would it help if I sent over what I would change?",
-    "Happy to sketch out what fixing it involves -- want me to?",
     "Would ten minutes next week be useful?",
 )
 
