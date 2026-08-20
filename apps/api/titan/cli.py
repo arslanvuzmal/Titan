@@ -466,6 +466,55 @@ def _looks_like_uuid(value: str) -> bool:
     return True
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """The six numbers, and anything currently wrong.
+
+    The whole point is that it takes one command and no interpretation. Every
+    fault this system has had was visible in these numbers days before anyone
+    noticed, and none of them was anywhere a person would look.
+    """
+    import asyncio
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.activities.vitals import check_pipeline_vitals
+    from titan.db.models import Workspace
+    from titan.db.session import dispose_engine, get_sessionmaker
+    from titan.workflows.types import CheckVitalsInput
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            workspace_id = (await session.execute(query)).scalar_one_or_none()
+        if workspace_id is None:
+            print(f"no workspace matching {args.workspace!r}")
+            return 1
+
+        result = await check_pipeline_vitals(
+            CheckVitalsInput(workspace_id=str(workspace_id))
+        )
+        await dispose_engine()
+
+        print(f"Titan-OS  {args.workspace}\n")
+        print(result.reading)
+        if result.alarms or result.suppressed:
+            print("\n  alarms")
+            for code in result.alarms:
+                print(f"    ! {code}")
+            for code in result.suppressed:
+                print(f"    . {code}  (already raised today)")
+        else:
+            print("\n  no alarms")
+        return 0
+
+    return asyncio.run(run())
+
+
 def cmd_sweep(args: argparse.Namespace) -> int:
     """Queue the approved drafts nothing ever queued.
 
@@ -732,6 +781,13 @@ def main() -> int:
         ),
     )
     passcode_parser.set_defaults(func=cmd_set_passcode)
+
+    status_parser = sub.add_parser(
+        "status",
+        help="the six numbers that say whether the pipeline is alive",
+    )
+    status_parser.add_argument("--workspace", default="titan")
+    status_parser.set_defaults(func=cmd_status)
 
     sweep_parser = sub.add_parser(
         "sweep",

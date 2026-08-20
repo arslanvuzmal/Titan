@@ -205,6 +205,35 @@ class CollectRepliesResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class CheckVitalsInput:
+    """One pass over a workspace's pulse."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class CheckVitalsResult:
+    """What the pulse said, and what was raised because of it."""
+
+    leads_in_hand: int
+    days_of_fuel: float | None
+    sends_today: int
+    daily_send_capacity: int
+    research_failure_rate: float | None
+    #: Alarm codes raised on this pass. Empty is the healthy answer and is
+    #: reported as such -- "no alarms" and "the check did not run" are
+    #: different facts and the workflow log must be able to tell them apart.
+    alarms: tuple[str, ...] = ()
+    #: Alarms that were already open, so this pass wrote nothing new.
+    suppressed: tuple[str, ...] = ()
+    #: The rendered six-number reading, produced by the same pass that raised
+    #: the alarms. Carried rather than re-derived: a second render would be a
+    #: second reading taken a moment later, and the two could disagree about
+    #: the numbers the alarms were justified by.
+    reading: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class ReopenStaleRunsInput:
     """One pass over the research runs that never closed."""
 

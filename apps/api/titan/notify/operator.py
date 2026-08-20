@@ -58,6 +58,11 @@ class NotificationKind(StrEnum):
     DELIVERABILITY_ALERT = "deliverability_alert"
     #: A campaign stopped making progress for a reason worth knowing.
     CAMPAIGN_STALLED = "campaign_stalled"
+    #: The pipeline itself is failing, running dry, or has quietly stopped.
+    #: Every other kind here describes a lead, a campaign or a mailbox; none of
+    #: them could say "the machine stopped", which is why every stoppage so far
+    #: was found by a person going looking rather than by being told.
+    PIPELINE_ALERT = "pipeline_alert"
     #: The weekly summary.
     WEEKLY_REPORT = "weekly_report"
 
@@ -70,6 +75,10 @@ PRIORITY: dict[NotificationKind, int] = {
     NotificationKind.REPLY_NEEDS_READING: 80,
     NotificationKind.CONVERSATION_ACTIVE: 70,
     NotificationKind.DELIVERABILITY_ALERT: 60,
+    # Below deliverability, above approvals. A reputation problem is damage
+    # already being done; a stalled pipeline is revenue not being made, which
+    # is worse over a month and less urgent this hour.
+    NotificationKind.PIPELINE_ALERT: 55,
     NotificationKind.APPROVAL_NEEDED: 50,
     NotificationKind.CAMPAIGN_STALLED: 30,
     NotificationKind.WEEKLY_REPORT: 20,
@@ -83,6 +92,7 @@ DUE_WITHIN: dict[NotificationKind, dt.timedelta] = {
     NotificationKind.REPLY_NEEDS_READING: dt.timedelta(hours=12),
     NotificationKind.CONVERSATION_ACTIVE: dt.timedelta(hours=12),
     NotificationKind.DELIVERABILITY_ALERT: dt.timedelta(hours=2),
+    NotificationKind.PIPELINE_ALERT: dt.timedelta(hours=8),
     NotificationKind.APPROVAL_NEEDED: dt.timedelta(days=2),
 }
 

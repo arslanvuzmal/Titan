@@ -28,6 +28,8 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from titan.workflows.types import (
+        CheckVitalsInput,
+        CheckVitalsResult,
         ReopenStaleRunsInput,
         ReopenStaleRunsResult,
         SweepStrandedInput,
@@ -55,7 +57,7 @@ RETRY = RetryPolicy(
 
 @workflow.defn(name="HousekeepingWorkflow", sandboxed=False)
 class HousekeepingWorkflow:
-    """Reopen abandoned research runs, then queue stranded drafts."""
+    """Reopen abandoned research runs, queue stranded drafts, take the pulse."""
 
     @workflow.run
     async def run(self, request: SweepStrandedInput) -> SweepStrandedResult:
@@ -75,13 +77,40 @@ class HousekeepingWorkflow:
             stale.oldest_age_hours,
         )
 
-        return await workflow.execute_activity(
+        swept: SweepStrandedResult = await workflow.execute_activity(
             "sweep_stranded_drafts",
             request,
             start_to_close_timeout=TIMEOUT,
             retry_policy=RETRY,
             result_type=SweepStrandedResult,
         )
+
+        # Last, and deliberately after both repairs: the vitals should describe
+        # the pipeline as it stands once this pass has done what it can, not as
+        # it was before. A runway alarm that fires on a backlog the sweep was
+        # about to clear is an alarm nobody can act on.
+        #
+        # Its failure is swallowed. A health check that can stop the repairs is
+        # a worse liability than one that occasionally misses an hour.
+        try:
+            vitals: CheckVitalsResult = await workflow.execute_activity(
+                "check_pipeline_vitals",
+                CheckVitalsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                retry_policy=RETRY,
+                result_type=CheckVitalsResult,
+            )
+            workflow.logger.info(
+                "vitals: %s leads, %s sends of %s allowed, alarms %s",
+                vitals.leads_in_hand,
+                vitals.sends_today,
+                vitals.daily_send_capacity,
+                list(vitals.alarms) or "none",
+            )
+        except Exception as exc:
+            workflow.logger.warning("vitals check failed: %s", str(exc)[:300])
+
+        return swept
 
 
 def housekeeping_workflow_id(workspace_id: str) -> str:

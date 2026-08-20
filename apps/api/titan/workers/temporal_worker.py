@@ -34,6 +34,7 @@ from titan.activities import smartlead_replies as smartlead_reply_activities
 from titan.activities import stale_runs as stale_run_activities
 from titan.activities import stranded as stranded_activities
 from titan.activities import verification as verification_activities
+from titan.activities import vitals as vitals_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
@@ -105,6 +106,7 @@ async def main() -> None:
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
             stale_run_activities.reopen_stale_research_runs,
+            *vitals_activities.ALL_VITALS_ACTIVITIES,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
             *optout_activities.ALL_OPTOUT_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
