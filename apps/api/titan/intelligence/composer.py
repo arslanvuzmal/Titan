@@ -75,6 +75,12 @@ class ComposerContext:
     #: Published first name, when one was actually found. Never inferred from an
     #: email local part: "sam@" might be Samantha, Samuel, or the sales team.
     contact_first_name: str | None = None
+    #: The business's public review count and rating, when Google published
+    #: them. ``None`` means unknown, and the stakes sentence is then left out
+    #: rather than guessed at -- there is no honest way to imply an audience
+    #: nobody measured.
+    review_count: int | None = None
+    rating: float | None = None
     #: Seeds register selection. The lead id, so the choice is stable per lead.
     variant_seed: str = ""
     #: A register the campaign manager has promoted on measured evidence. None
@@ -130,6 +136,50 @@ _OFFER_REGISTERS: tuple[str, ...] = (
     "My work is {solution}, usually for teams around your size.",
 )
 
+#: What the defect is costing, said with the only audience figure that is
+#: actually known.
+#:
+#: This is the sentence that makes the message land, and it is the one that has
+#: to be handled most carefully. The temptation is a number -- "you are losing
+#: £4,000 a month" -- which nobody has measured and which the validator rejects
+#: as a fabricated metric, correctly: the recipient can tell, and a stranger who
+#: invents a figure about your business has told you everything about
+#: themselves.
+#:
+#: What *is* known is the review count on their own Google listing. Naming it
+#: alongside the broken step does the same work honestly: it puts a real,
+#: checkable number next to a real, checkable fault and lets the owner do the
+#: arithmetic. That is the difference between pressure and pretence.
+#:
+#: Below the floor the sentence is omitted entirely. "Your 3 reviews" argues
+#: against the pitch.
+MIN_REVIEWS_WORTH_CITING = 40
+
+# NOT YET IN USE. The sentence is written and the numbers are real, and it is
+# parked because `message_validator` requires every claim about the recipient to
+# name a finding that exists and carries evidence rows -- invariant 7, and the
+# rule that stops this system asserting anything it cannot show.
+#
+# A review count is backed by the stored Places record rather than by a crawl
+# finding, so it has no finding to point at. Pointing it at the *defect's*
+# finding would assert that the crawler observed the review count, which it did
+# not, and that is exactly the kind of quiet untruth the claim map exists to
+# prevent.
+#
+# The right fix is an evidence path for first-party record data, so the
+# strongest sentence available can be said with the same backing as every other.
+# Loosening the validator to get there would trade the guarantee for a
+# paragraph.
+_STAKES_REGISTERS: tuple[str, ...] = (
+    "Your Google listing carries {reviews} reviews at {rating}, and that is "
+    "the audience arriving at it.",
+    "That is the page {reviews} reviews' worth of interest is pointed at.",
+    "For a practice with {reviews} reviews at {rating}, that is a lot of "
+    "people meeting a dead end.",
+    "{reviews} reviews at {rating} is a steady stream of people, and this is "
+    "where they land.",
+)
+
 #: One ask, small, and answerable in a word. A cold email that asks for a
 #: 30-minute discovery call is asking a stranger for something they have no
 #: reason to give yet; a yes/no question costs them nothing to answer.
@@ -140,11 +190,17 @@ _ASK_REGISTERS: tuple[str, ...] = (
     "Would ten minutes next week be useful?",
 )
 
+#: Every register carries the specific. Two of the four used to be "Noticed
+#: this on {domain}" and "A broken step on {domain}" -- subject lines that could
+#: have been sent to any business on the internet, and which a recipient has
+#: seen a hundred times from people who looked at nothing. Which register a lead
+#: gets is decided by a hash of its id, so a generic option meant half the
+#: portfolio got the weakest possible opening by chance.
 _SUBJECT_REGISTERS: tuple[str, ...] = (
-    "{short_description} on {domain}",
+    "{short_description}",
     "{domain}: {short_description}",
-    "Noticed this on {domain}",
-    "A broken step on {domain}",
+    "Quick note: {short_description_lower}",
+    "{short_description} -- {domain}",
 )
 
 #: Follow-ups open by acknowledging the earlier message. Re-sending the same
@@ -159,12 +215,12 @@ _FOLLOWUP_OPENERS: tuple[str, ...] = (
 #: Plain-language renderings of each machine issue_type. The fallback is the
 #: finding's own title, which is always populated.
 _DESCRIPTIONS: dict[str, str] = {
-    "broken_primary_cta": "the main call-to-action button returns {observed}",
+    "broken_primary_cta": "the main button on {page} returns {observed}",
     "no_booking_or_enquiry_path": "there is no booking link or enquiry form anywhere on the site",
-    "high_friction_contact_form": "the enquiry form asks for {observed} separate fields",
+    "high_friction_contact_form": "the enquiry form on {page} asks for {observed} separate fields",
     "missing_mobile_viewport": "the homepage has no mobile viewport tag, so it renders at desktop width on phones",
-    "broken_internal_link": "a navigation link points at a page that returns {observed}",
-    "javascript_console_errors": "the page raises JavaScript errors as it loads",
+    "broken_internal_link": "{page} returns {observed}",
+    "javascript_console_errors": "{page} raises JavaScript errors as it loads",
     "no_visible_phone_number": "there is no phone number on any page I looked at",
 }
 
@@ -174,10 +230,35 @@ _SHORT_DESCRIPTIONS: dict[str, str] = {
     "no_booking_or_enquiry_path": "No way to enquire",
     "high_friction_contact_form": "Your enquiry form is losing people",
     "missing_mobile_viewport": "The site breaks on mobile",
-    "broken_internal_link": "A broken link",
+    # "A broken link" told the reader nothing and could have been about any site
+    # on the internet. The path is what makes a subject line worth opening.
+    "broken_internal_link": "{page} is down",
     "javascript_console_errors": "JavaScript errors",
     "no_visible_phone_number": "No phone number listed",
 }
+
+
+#: How a page is named to somebody who owns it.
+#:
+#: The finding has always carried the exact URL and the message threw it away:
+#: "a navigation link points at a page that returns HTTP 404" was written to the
+#: owner of a site whose ``/book`` page was down. It is the single most
+#: checkable fact available and the one that makes the difference between a
+#: stranger's generic warning and something that could only have been written
+#: about this business.
+#:
+#: Rendered as the path rather than the whole URL, because "your /book page"
+#: reads as English and "your https://example.com/book page" does not.
+def _page_name(finding: FindingLike) -> str:
+    url = (finding.page_url or "").strip()
+    if not url:
+        return "the page"
+    path = url.split("://", 1)[-1]
+    path = path[path.find("/") :] if "/" in path else "/"
+    path = path.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    if not path:
+        return "your home page"
+    return f"your {path} page"
 
 
 def compose(ctx: ComposerContext) -> ComposedMessage:
@@ -228,7 +309,8 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     body = (
         f"{greeting},\n\n"
         f"{observation}\n\n"
-        f"{impact} {offer}\n\n"
+        f"{impact}\n\n"
+        f"{offer}\n\n"
         f"{ask}\n\n"
         f"{ctx.owner_name}\n"
         f"{ctx.portfolio_url}\n"
@@ -236,9 +318,11 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
         f"Unsubscribe: {ctx.unsubscribe_url}\n"
     )
 
+    short = _short_description(finding)
     subject = _SUBJECT_REGISTERS[index].format(
         domain=ctx.org_domain,
-        short_description=_short_description(finding),
+        short_description=short,
+        short_description_lower=short[0].lower() + short[1:] if short else short,
     )[:120]
 
     # Both factual sentences map to the same finding. The impact line is Titan's
@@ -261,7 +345,6 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
             "source_url": finding.page_url,
         },
     ]
-
     return ComposedMessage(
         subject=subject,
         body=body,
@@ -290,6 +373,24 @@ def _register_index(seed: str, modulo: int) -> int:
     return digest[0] % modulo
 
 
+def _stakes(ctx: ComposerContext, index: int) -> str:
+    """The audience sentence, or nothing at all.
+
+    Omitted rather than softened when the count is unknown or small. A message
+    that says "your many reviews" to a business with four of them is worse than
+    saying nothing, because it proves nobody looked.
+    """
+    reviews = ctx.review_count
+    if reviews is None or reviews < MIN_REVIEWS_WORTH_CITING:
+        return ""
+    rating = (
+        f"{ctx.rating:.1f} stars" if ctx.rating else "a rating people evidently trust"
+    )
+    return _STAKES_REGISTERS[index % len(_STAKES_REGISTERS)].format(
+        reviews=f"{reviews:,}", rating=rating
+    )
+
+
 def _describe(finding: FindingLike) -> str:
     observed = (finding.observed_value or "").strip()
     template = _DESCRIPTIONS.get(finding.issue_type)
@@ -297,11 +398,13 @@ def _describe(finding: FindingLike) -> str:
         # The title is always populated and was written by the detector, which
         # saw the page. Better than a generic sentence about an unknown problem.
         return finding.title.lower().rstrip(".")
-    return template.format(observed=observed or "an error")
+    return template.format(observed=observed or "an error", page=_page_name(finding))
 
 
 def _short_description(finding: FindingLike) -> str:
-    return _SHORT_DESCRIPTIONS.get(finding.issue_type, "Something looks broken")
+    template = _SHORT_DESCRIPTIONS.get(finding.issue_type, "Something looks broken")
+    text = template.format(page=_page_name(finding))
+    return text[0].upper() + text[1:] if text else text
 
 
 def _default_impact(finding: FindingLike) -> str:

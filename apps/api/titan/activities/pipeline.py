@@ -1144,6 +1144,10 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             raise ValueError("draft references a missing organization or channel")
         org_domain = org.canonical_domain or org.display_name
         org_industry = org.industry
+        # Snapshotted with the rest: the composer names the audience arriving at
+        # the broken step, and the session is closed before it runs.
+        org_review_count = org.review_count
+        org_rating = org.rating
         channel_id = channel_row.id
         # Snapshotted with the id, because the footer's opt-out link is signed
         # over this address and the session is closed before the composer runs.
@@ -1279,6 +1283,10 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
                 else f"{portfolio}/unsubscribe"
             ),
             solution=offer.delivers,
+            # Their own published numbers, used to say what the defect is
+            # costing without inventing a figure nobody measured.
+            review_count=org_review_count,
+            rating=org_rating,
             # The lead, so the same lead always composes to the same message.
             # Seeding on anything that varies between runs would produce a
             # second, differently worded draft on an activity retry.
