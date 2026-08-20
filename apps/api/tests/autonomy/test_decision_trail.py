@@ -250,3 +250,76 @@ async def test_another_workspace_cannot_see_the_trail(db_session, sendable) -> N
         await db_session.rollback()
         await db_session.execute(delete(Workspace).where(Workspace.id == other_id))
         await db_session.commit()
+
+
+# ==========================================================================
+# A deliberate zero is not a starvation
+# ==========================================================================
+
+
+def test_a_health_reduction_still_keeps_a_trickle() -> None:
+    """The floor's original job, unchanged. A campaign cut to nothing on a
+    health judgement looks paused and recovers from neither."""
+    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+
+    verdict = evaluate(
+        Proposal(
+            actuation=Actuation.SET_DAILY_LIMIT,
+            campaign_id="c1",
+            current=25,
+            proposed=0,
+            reason="degraded: bouncing",
+        ),
+        Bounds(configured_daily_limit=25, configured_min_lead_score=70),
+    )
+
+    assert verdict.applied_value > 0
+
+
+def test_an_allocated_zero_is_left_at_zero() -> None:
+    """Planted violation: drop ``permits_zero`` and this fails.
+
+    Three floors sat at three layers, each defensible alone and their sum
+    checked by nothing. The allocator divided 25 sends between 23 campaigns
+    correctly; the actuator then raised every zero back to 2, restoring a total
+    of 46 against a capacity of 25 -- the exact over-commitment the allocator
+    exists to prevent.
+
+    A campaign that got no share has had nothing judged about it. It is behind
+    others in a queue, and it is first in line next cycle.
+    """
+    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+
+    verdict = evaluate(
+        Proposal(
+            actuation=Actuation.SET_DAILY_LIMIT,
+            campaign_id="c1",
+            current=2,
+            proposed=0,
+            reason="portfolio allocation: the workspace limit was exhausted",
+            permits_zero=True,
+        ),
+        Bounds(configured_daily_limit=25, configured_min_lead_score=70),
+    )
+
+    assert verdict.applied_value == 0
+
+
+def test_permitting_zero_does_not_lift_the_ceiling() -> None:
+    """It relaxes one bound, not both. The human's configured limit is still
+    the most any campaign may be given."""
+    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+
+    verdict = evaluate(
+        Proposal(
+            actuation=Actuation.SET_DAILY_LIMIT,
+            campaign_id="c1",
+            current=2,
+            proposed=999,
+            reason="portfolio allocation",
+            permits_zero=True,
+        ),
+        Bounds(configured_daily_limit=25, configured_min_lead_score=70),
+    )
+
+    assert verdict.applied_value == 25

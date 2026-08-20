@@ -97,6 +97,21 @@ class Proposal:
     #: How much the evidence supports this, 0 to 1. Recorded, never acted on --
     #: a threshold on confidence would be a second, unstated policy.
     confidence: float = 0.0
+    #: Whether zero is a legitimate answer for this proposal.
+    #:
+    #: ``floor_daily_limit`` exists to stop the manager *starving* a campaign on
+    #: a health judgement -- a campaign cut to nothing looks paused and recovers
+    #: from neither. That reasoning does not apply when the allocator has
+    #: divided a scarce budget and this campaign simply did not get a share:
+    #: nothing has been judged about it, and it is first in line next cycle.
+    #:
+    #: Without this the two disagree, and the actuator wins. The allocator
+    #: divided 25 sends between 23 campaigns, and the per-campaign floor then
+    #: raised every zero back to 2 -- restoring a total of 46 against a capacity
+    #: of 25, which is the over-commitment the allocator exists to prevent. Three
+    #: floors at three layers, each defensible alone, and their sum unchecked by
+    #: anything.
+    permits_zero: bool = False
     #: The numbers the decision was made on, stored so it can be re-read later.
     evidence: dict[str, Any] = field(default_factory=dict)
 
@@ -134,7 +149,7 @@ def evaluate(proposal: Proposal, bounds: Bounds) -> Verdict:
     if proposal.actuation is Actuation.SET_DAILY_LIMIT:
         return _clamp(
             proposal,
-            low=bounds.floor_daily_limit,
+            low=0 if proposal.permits_zero else bounds.floor_daily_limit,
             high=bounds.configured_daily_limit,
         )
 

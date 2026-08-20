@@ -862,6 +862,13 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                             proposed=share,
                             reason=f"portfolio allocation: {explain_share(demand, allocation)}",
                             confidence=1.0,
+                            # A share of zero here is scarcity, not a verdict on
+                            # the campaign. The actuator's floor exists to stop
+                            # a *health* judgement starving one, and applying it
+                            # to an allocation would put back more capacity than
+                            # the workspace has -- 23 campaigns floored at 2
+                            # against a budget of 25.
+                            permits_zero=True,
                             evidence={
                                 "health": health.value,
                                 "workspace_limit": allocation.workspace_limit,
