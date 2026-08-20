@@ -811,11 +811,20 @@ class OutboxWorker:
             titan_first_send, sender.warmup_started_at if sender else None
         )
 
-        # Highest single day in the trailing week, today included. Bounds how
-        # far today's allowance may exceed volume this mailbox has actually
-        # demonstrated. Returns None when nothing was sent in the window, which
-        # is "no evidence" rather than "evidence of zero" -- a mailbox blocked
-        # for a week must not be throttled to nothing by its own quarantine.
+        # Highest single day in the trailing week, **excluding today**. This is
+        # a bound on day-over-day growth, so today's own sends cannot be part
+        # of the evidence for how much may be sent today.
+        #
+        # Including them made the bound raise itself as it was consumed: six
+        # sent permitted twelve, the twelfth made the peak twelve which
+        # permitted twenty-four, and one batch walked a mailbox from six to its
+        # full ramp allowance in a single burst -- exactly the jump the bound
+        # exists to prevent, produced by the bound.
+        #
+        # None when nothing was sent in the window: "no evidence", not
+        # "evidence of zero". A mailbox quarantined for a week by the
+        # reputation gate must not also be throttled to the floor by its own
+        # quarantine, or it could never send its way back out.
         recent_peak_sends = (
             await session.execute(
                 text(
@@ -824,6 +833,7 @@ class OutboxWorker:
                     "  WHERE workspace_id = :workspace"
                     "    AND sender_identity_id = :sender"
                     "    AND sent_at >= :since"
+                    "    AND sent_at < :today_start"
                     "  GROUP BY (sent_at AT TIME ZONE 'UTC')::date"
                     ") d"
                 ),
@@ -831,6 +841,9 @@ class OutboxWorker:
                     "workspace": row.workspace_id,
                     "sender": row.sender_identity_id,
                     "since": now - dt.timedelta(days=WARMUP_PEAK_WINDOW_DAYS),
+                    "today_start": dt.datetime.combine(
+                        now.date(), dt.time.min, tzinfo=dt.UTC
+                    ),
                 },
             )
         ).scalar_one_or_none()

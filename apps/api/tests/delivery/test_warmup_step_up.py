@@ -141,3 +141,41 @@ def test_the_two_paths_now_read_the_same_field() -> None:
     assert "_earliest(" in gate
     assert "_earliest(" in health
     assert "warmup_started_at" in gate
+
+
+# ------------------------------------------- the bound must not feed itself
+
+
+def test_the_peak_window_excludes_today() -> None:
+    """Planted violation: drop ``sent_at < :today_start`` and this fails.
+
+    A bound on day-over-day growth cannot count today's own sends as evidence
+    for how much may be sent today. With today included the bound raised itself
+    as it was consumed -- six sent permitted twelve, the twelfth made the peak
+    twelve which permitted twenty-four -- and one batch walked sales@ from six
+    to its full ramp allowance of twenty-five in a single burst on 20 August.
+
+    The jump the bound exists to prevent, produced by the bound.
+    """
+    import inspect
+
+    from titan.delivery import outbox_worker
+
+    gate = inspect.getsource(outbox_worker.OutboxWorker._check_deliverability)
+    peak_query = gate[gate.index("recent_peak_sends = (") :]
+
+    assert "today_start" in peak_query
+    assert "sent_at < :today_start" in peak_query
+
+
+def test_the_bound_is_stable_as_the_day_is_consumed() -> None:
+    """The property the query above buys, stated on the pure function.
+
+    Yesterday's peak is a fixed number for the whole of today, so the allowance
+    it implies does not move while today's sends land against it.
+    """
+    yesterdays_peak = 6
+
+    allowance = stepped(13, yesterdays_peak)
+    for _sent_so_far in range(allowance):
+        assert stepped(13, yesterdays_peak) == allowance
