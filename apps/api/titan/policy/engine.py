@@ -265,13 +265,30 @@ def evaluate_send(ctx: SendContext) -> Decision:
         denials.append(
             Denial(DenyCode.LEAD_TERMINAL, f"lead status is {ctx.lead_status.value}")
         )
-    if ctx.lead_replied_at is not None:
-        denials.append(
-            Denial(
-                DenyCode.LEAD_REPLIED,
-                f"lead replied at {ctx.lead_replied_at.isoformat()}",
-            )
+    # Invariant 15, keyed on the status rather than on the timestamp.
+    #
+    # ``replied_at`` used to mean "a person answered" and no longer does.
+    # ``record_reply`` stamps it for *anything* that comes back, because
+    # Smartlead's statistics row carries a reply time and no body, and it
+    # passes ``stops_sequence=False`` for those -- deliberately, so that an
+    # autoresponder does not end a campaign. Denying on the bare timestamp
+    # defeated that decision from the other side: the one reply this workspace
+    # has ever received reads "I am currently on annual leave until Wed 19th
+    # August 2026", and it permanently retired that lead and cancelled two
+    # queued messages.
+    #
+    # ``LeadStatus.REPLIED`` is the durable statement that a human engaged --
+    # written only when the classifier has read the body. It is already in
+    # ``TERMINAL_LEAD_STATUSES``, so a genuine reply is refused by the gate
+    # above; this one names the reason precisely rather than as a generic
+    # terminal status.
+    if ctx.lead_status is LeadStatus.REPLIED:
+        replied = (
+            ctx.lead_replied_at.isoformat()
+            if ctx.lead_replied_at is not None
+            else "an unrecorded time"
         )
+        denials.append(Denial(DenyCode.LEAD_REPLIED, f"lead replied at {replied}"))
     if ctx.lead_score is None:
         denials.append(Denial(DenyCode.SCORE_BELOW_THRESHOLD, "lead has not been scored"))
     elif ctx.lead_score < ctx.min_lead_score:

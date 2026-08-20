@@ -301,13 +301,17 @@ services:
       # six of every eight crawl attempts got an immediate 503, burned their
       # four retries and failed -- 1,819 of 2,005 research runs in one day.
       #
-      # 8 is this machine's ceiling, not a preference. Measured: 6 lanes gave
-      # ~280 crawls/hour at 90% of one core; 10 gave ~380/hour at 850% -- every
-      # core on the box, starving postgres and the workers. 8 keeps headroom.
-      # ~300/hour is ~7,000 a day against the ~150 a day that 50 sends needs,
-      # so the constraint here stopped being crawl capacity and became how much
-      # research the orchestrator orders against it.
-      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-8}
+      # 4, and the number is set by what the pipeline needs rather than by what
+      # the box can be pushed to. Fifty sends a day needs roughly 150 crawls a
+      # day; 4 lanes give about 190 an hour, which is thirty times that.
+      #
+      # Higher was measured and rejected. 8 lanes looked fine in a 90-second
+      # snapshot -- 595% CPU -- and under sustained load sat at 450-850%, which
+      # with the outbox worker alongside is most of an 8-core machine. The test
+      # suite went from 3 minutes to 68 and 345 database tests skipped because
+      # the test postgres could not be reached. Buying 30x headroom we have no
+      # use for, at the price of the machine, is not a trade worth making.
+      BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-4}
     ports: ["${BROWSER_WORKER_HOST_PORT:-8800}:8800"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

@@ -307,19 +307,50 @@ def test_source_not_permitted_by_campaign_is_refused() -> None:
 # --------------------------------------------------------------------------
 def test_replied_lead_cannot_receive_another_message() -> None:
     decision = evaluate_send(
-        sendable_context(lead_replied_at=NOW - dt.timedelta(hours=3))
+        sendable_context(
+            lead_status=LeadStatus.REPLIED,
+            lead_replied_at=NOW - dt.timedelta(hours=3),
+        )
     )
     assert not decision.allowed
     assert DenyCode.LEAD_REPLIED in decision.codes
 
 
-def test_reply_blocks_even_when_status_lags_behind() -> None:
-    """replied_at is authoritative; a stale status must not permit a send."""
+def test_an_out_of_office_does_not_retire_the_lead() -> None:
+    """Planted violation: deny on ``lead_replied_at is not None`` again and
+    this fails.
+
+    ``replied_at`` stopped meaning "a person answered" when ``record_reply``
+    began stamping it for anything that comes back -- Smartlead's statistics
+    row reports a reply time and carries no body, so nothing at that point can
+    tell an interested prospect from an autoresponder. It passes
+    ``stops_sequence=False`` for exactly that reason, and the lead keeps its
+    CONTACTED status.
+
+    Denying here on the timestamp defeated that from the other side. The only
+    reply this workspace has ever received reads "I am currently on annual
+    leave until Wed 19th August 2026"; it retired the lead permanently and
+    cancelled two queued messages. At any real volume that silently discards
+    every prospect who sets an autoresponder before going on holiday.
+    """
     decision = evaluate_send(
         sendable_context(
             lead_status=LeadStatus.CONTACTED,
             lead_replied_at=NOW - dt.timedelta(minutes=1),
         )
+    )
+    assert DenyCode.LEAD_REPLIED not in decision.codes
+
+
+def test_a_human_reply_still_stops_outreach_by_status_alone() -> None:
+    """Invariant 15 must not depend on the timestamp having been written.
+
+    The status is what the classifier sets once it has read the body, and it
+    is sufficient on its own -- a reply recorded with no usable timestamp is
+    still a reply.
+    """
+    decision = evaluate_send(
+        sendable_context(lead_status=LeadStatus.REPLIED, lead_replied_at=None)
     )
     assert not decision.allowed
     assert DenyCode.LEAD_REPLIED in decision.codes
