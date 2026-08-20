@@ -260,11 +260,29 @@ def _broken_cta(page: PageEvidence) -> DetectedFinding | None:
     return None
 
 
+#: Statuses that mean the page a visitor was sent to is not there.
+#:
+#: Deliberately narrow, because this finding becomes a sentence written to a
+#: stranger about their own business, and it has to be true when they check.
+#:
+#: Everything else at 4xx and 5xx describes *our* access rather than their site.
+#: 403 is a refusal -- bot protection, a datacenter IP, a geo block -- and the
+#: page usually works perfectly for a person. 429 is our own crawl rate coming
+#: back at us. 401 is a login, which is not a defect. A 5xx is a server having a
+#: bad minute and is likely fixed before the email is read.
+#:
+#: Measured on the live workspace before this existed: of 1,896 broken-link
+#: findings, **89 rested on a 403 and 48 on a 429** -- 137 messages that would
+#: have told a business their site was broken on the evidence that it had
+#: declined to talk to us.
+BROKEN_LINK_STATUSES: frozenset[int] = frozenset({404, 410})
+
+
 def _broken_internal_links(pages: list[PageEvidence]) -> DetectedFinding | None:
     broken = [
         (p.url, p.http_status)
         for p in pages
-        if p.http_status is not None and p.http_status >= 400
+        if p.http_status is not None and p.http_status in BROKEN_LINK_STATUSES
     ]
     if not broken:
         return None

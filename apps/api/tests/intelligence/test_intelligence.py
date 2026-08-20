@@ -27,7 +27,10 @@ from titan.db.enums import (
     VerificationStatus,
 )
 from titan.intelligence import contacts as contacts_mod
-from titan.intelligence.findings import DetectedFinding, detect_findings
+from titan.intelligence.findings import (
+    DetectedFinding,
+    detect_findings,
+)
 from titan.intelligence.message_validator import (
     MessageContext,
     ViolationCode,
@@ -992,3 +995,72 @@ def test_a_digit_prefixed_local_part_is_still_accepted() -> None:
         "bellrose-dental.test",
     )
     assert found and found[0].is_usable
+
+
+# ==========================================================================
+# A broken link must be broken for them, not just for us
+# ==========================================================================
+#
+# This finding becomes a sentence written to a stranger about their own
+# business, so it has to be true when they go and check. The detector counted
+# every status at 400 or above, and most of those describe *our* access.
+#
+# Measured on the live workspace: of 1,896 broken-link findings, **89 rested on
+# a 403 and 48 on a 429**. Verified by hand, celsolicitors.co.uk returns 403 to
+# a real browser too -- bot protection or a datacenter IP, and the page works
+# perfectly for a person. 137 messages would have told a business their site was
+# broken on the evidence that it had declined to talk to us.
+
+
+def _statuses_flagged(*statuses: int) -> set[str]:
+    found = detect_findings(
+        crawl(
+            *[
+                page(url=f"https://x.test/p{i}", http_status=s)
+                for i, s in enumerate(statuses)
+            ]
+        )
+    )
+    return {f.issue_type for f in found}
+
+
+def test_a_404_is_a_broken_link() -> None:
+    """The definitive case: the page a visitor was sent to is not there."""
+    assert "broken_internal_link" in _statuses_flagged(404)
+
+
+def test_a_410_is_a_broken_link() -> None:
+    """Gone is as definitive as not found."""
+    assert "broken_internal_link" in _statuses_flagged(410)
+
+
+def test_a_403_is_not_a_broken_link() -> None:
+    """Planted violation: widen the check back to ``>= 400`` and this fails.
+
+    We were refused. Bot protection, a datacenter IP, a geo block -- the page
+    usually works perfectly for a person, and telling its owner it is broken is
+    a claim that falls apart the moment they click it.
+    """
+    assert "broken_internal_link" not in _statuses_flagged(403)
+
+
+def test_a_429_is_our_own_crawl_rate() -> None:
+    """The clearest case of all. Being rate-limited is a fact about Titan's
+    footprint on their server, not about their website."""
+    assert "broken_internal_link" not in _statuses_flagged(429)
+
+
+def test_a_login_page_is_not_a_defect() -> None:
+    assert "broken_internal_link" not in _statuses_flagged(401)
+
+
+def test_a_server_having_a_bad_minute_is_not_a_permanent_defect() -> None:
+    """A 5xx is likely fixed before the email is read, and a claim that has
+    repaired itself by the time it is checked reads as carelessness."""
+    assert "broken_internal_link" not in _statuses_flagged(500, 503)
+
+
+def test_the_real_ones_survive_alongside_the_noise() -> None:
+    """A page that is genuinely gone is still reported when other pages merely
+    refused us -- narrowing the rule must not silence it."""
+    assert "broken_internal_link" in _statuses_flagged(403, 429, 404)
