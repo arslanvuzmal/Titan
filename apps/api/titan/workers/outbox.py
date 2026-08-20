@@ -69,6 +69,30 @@ def build_provider() -> EmailProvider:
             timeout_seconds=float(settings.smtp_timeout_seconds),
         )
 
+    if settings.email_provider == "instantly":
+        if settings.instantly_api_key is None:
+            raise RuntimeError(
+                "TITAN_EMAIL_PROVIDER=instantly but TITAN_INSTANTLY_API_KEY is not set"
+            )
+        if settings.instantly_campaign_id is None:
+            raise RuntimeError(
+                "TITAN_EMAIL_PROVIDER=instantly but TITAN_INSTANTLY_CAMPAIGN_ID is "
+                "not set. Titan will not create a sending campaign implicitly: the "
+                "carrier campaign must be a single-step one an operator has seen."
+            )
+        from titan.delivery.providers.instantly import InstantlyProvider
+        from titan.providers.instantly import InstantlyClient
+
+        return InstantlyProvider(
+            InstantlyClient(settings.instantly_api_key.get_secret_value()),
+            campaign_id=settings.instantly_campaign_id,
+            webhook_secret=(
+                settings.instantly_webhook_secret.get_secret_value()
+                if settings.instantly_webhook_secret
+                else None
+            ),
+        )
+
     if settings.email_provider == "smartlead":
         if settings.smartlead_api_key is None:
             raise RuntimeError(

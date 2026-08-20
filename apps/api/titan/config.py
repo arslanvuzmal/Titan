@@ -230,7 +230,7 @@ class Settings(BaseSettings):
     imap_workspace_id: str | None = None
 
     # ---------------------------------------------------------------- email
-    email_provider: Literal["mock", "resend", "smartlead", "smtp"] = "mock"
+    email_provider: Literal["mock", "resend", "smartlead", "smtp", "instantly"] = "mock"
     resend_api_key: SecretStr | None = None
     resend_webhook_secret: SecretStr | None = None
 
@@ -241,6 +241,11 @@ class Settings(BaseSettings):
     #: still runs here before Smartlead is involved at all. See
     #: titan.delivery.providers.smartlead for what that costs and guarantees.
     smartlead_api_key: SecretStr | None = None
+    #: Instantly API v2. A second carrier behind the same EmailProvider port;
+    #: see titan.delivery.providers.instantly for what is and is not proven.
+    instantly_api_key: SecretStr | None = None
+    instantly_campaign_id: str | None = None
+    instantly_webhook_secret: SecretStr | None = None
     smartlead_base_url: AnyHttpUrl = AnyHttpUrl("https://server.smartlead.ai/api/v1")
     #: The campaign Titan delivers through. Its sequence must be a single step
     #: whose subject and body are the {{titan_subject}} / {{titan_body}}
