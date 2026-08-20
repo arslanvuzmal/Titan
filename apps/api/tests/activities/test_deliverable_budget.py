@@ -196,3 +196,94 @@ async def test_the_budget_is_stable_across_the_working_day(db_session, workspace
     evening = await _deliverable_budget(db_session, ws, NOW.replace(hour=17))
 
     assert morning == evening
+
+
+# ==========================================================================
+# A mailbox the health gate has stopped is not capacity
+# ==========================================================================
+#
+# ``sender_pool`` deliberately leaves health out of a slot's limit, and its
+# reasoning is right for what the pool is for: selection only needs the
+# ordering, and it notes that a degraded mailbox is "usually degraded across the
+# whole pool anyway".
+#
+# That is the assumption that failed. On the live workspace outreach@ was
+# blocked on a bounce rate while sales@ was healthy, so the pool reported
+# 31 + 25 and the allocator divided **56 sends that did not exist** between 23
+# campaigns against a real capacity of 25. Over-committed by more than double,
+# every campaign is back to competing by claim order -- the exact thing the
+# allocator was written to end.
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_mailbox_contributes_nothing_to_the_budget(
+    db_session, workspace
+) -> None:
+    """Planted violation: drop the blocked-sender exclusion and this fails."""
+    import datetime as _dt
+
+    from titan.db.models import SenderHealthSnapshot
+
+    fixture = await _pool_of_three(db_session, workspace, suffix="bud-blocked")
+    ws = await _set_workspace_limit(db_session, workspace, 1000)
+
+    healthy_budget = await _deliverable_budget(db_session, ws, NOW)
+
+    senders = (
+        (
+            await db_session.execute(
+                select(SenderIdentity).where(SenderIdentity.workspace_id == workspace)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    blocked = next(s for s in senders if s.id == fixture.sender_id)
+    db_session.add(
+        SenderHealthSnapshot(
+            workspace_id=workspace,
+            sender_identity_id=blocked.id,
+            sending_domain=blocked.sending_domain,
+            captured_on=NOW.date(),
+            status="blocked",
+            domain_verified=True,
+            spf_ok=True,
+            dkim_ok=True,
+            dmarc_ok=True,
+            auth_stale=False,
+            window_sent=94,
+            window_delivered=89,
+            window_bounced=5,
+            window_complained=0,
+            attempts=94,
+            retries=0,
+            deferred=0,
+            sent_today=0,
+            warmup_day=15,
+            warmup_limit=31,
+            reasons=["hard-bounce rate 5.32% over 94 sends"],
+        )
+    )
+    await db_session.commit()
+
+    budget = await _deliverable_budget(
+        db_session, ws, _dt.datetime.combine(NOW.date(), _dt.time(12, 0), tzinfo=_dt.UTC)
+    )
+
+    assert budget < healthy_budget, (
+        "a mailbox that cannot send today was counted as capacity, and the "
+        "allocator would divide sends that do not exist"
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unassessed_mailbox_is_not_treated_as_blocked(
+    db_session, workspace
+) -> None:
+    """Null is not zero. A mailbox nobody has assessed yet is UNKNOWN, and
+    treating that as blocked would zero a workspace's budget on its first
+    morning -- when there is no snapshot for anything."""
+    await _pool_of_three(db_session, workspace, suffix="bud-unknown")
+    ws = await _set_workspace_limit(db_session, workspace, 1000)
+
+    assert await _deliverable_budget(db_session, ws, NOW) > 0

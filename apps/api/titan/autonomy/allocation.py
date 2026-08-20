@@ -35,6 +35,7 @@ hand out a different total than it was given.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from titan.autonomy.health import CampaignHealth
@@ -62,6 +63,22 @@ HEALTH_WEIGHT: dict[CampaignHealth, int] = {
 #: to produce the outcomes its next assessment needs. Small: it is a trickle to
 #: keep evidence arriving, not a share of the capacity.
 EXPLORATION_FLOOR = 2
+
+#: The most of a day's capacity that exploration floors may consume between
+#: them.
+#:
+#: The floor is per campaign and the budget is not, so their sum scales with
+#: how many campaigns exist while the capacity does not. At 23 campaigns and 25
+#: sends, floors alone want 46 -- and the highest-averages pass below, which is
+#: the entire mechanism for putting volume where it earns most, is handed
+#: nothing to distribute. Every campaign gets an identical trickle, the
+#: portfolio never concentrates, and no campaign ever accumulates enough
+#: evidence to be judged on. The floor exists to keep learning possible; taking
+#: the whole budget defeats the thing it was protecting.
+#:
+#: Half. Learning still gets the larger share of a small budget than pure
+#: weighting would give it, and merit always has something left to work with.
+MAX_FLOOR_SHARE = 0.5
 
 #: Health states that receive an exploration floor at all.
 _FLOOR_ELIGIBLE = frozenset(
@@ -170,12 +187,17 @@ def allocate(demands: list[CampaignDemand], workspace_limit: int) -> Allocation:
         (d for d in demands if d.takes_a_floor),
         key=lambda d: (_FLOOR_PRIORITY.index(d.health), d.campaign_id),
     )
+    # Bounded as a share of the budget, not just by what is left. Without this
+    # the floors are handed out until the money runs out, and with more
+    # campaigns than the budget can floor that is every send.
+    floor_budget = math.floor(remaining * MAX_FLOOR_SHARE)
     for demand in by_priority:
-        if remaining <= 0:
+        if floor_budget <= 0 or remaining <= 0:
             break
-        floor = min(EXPLORATION_FLOOR, demand.configured_limit, remaining)
+        floor = min(EXPLORATION_FLOOR, demand.configured_limit, remaining, floor_budget)
         allocated[demand.campaign_id] = floor
         remaining -= floor
+        floor_budget -= floor
 
     # ---- the rest, by highest averages ----------------------------------
     # One send at a time to whichever campaign has the greatest weight per unit
@@ -232,6 +254,7 @@ def explain(demand: CampaignDemand, allocation: Allocation) -> str:
 __all__ = [
     "EXPLORATION_FLOOR",
     "HEALTH_WEIGHT",
+    "MAX_FLOOR_SHARE",
     "Allocation",
     "CampaignDemand",
     "allocate",

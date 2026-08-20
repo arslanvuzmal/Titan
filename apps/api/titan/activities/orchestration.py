@@ -69,13 +69,15 @@ from titan.db.models import (
     Lead,
     Message,
     Organization,
+    SenderHealthSnapshot,
     SenderIdentity,
     Workspace,
 )
 from titan.db.session import WORKSPACE_KEY, workspace_session, workspace_unit_of_work
-from titan.delivery import sender_pool
+from titan.delivery import adaptive_limits, sender_pool
 from titan.delivery.deliverability import ReputationWindow
 from titan.delivery.followup_scheduler import FollowUpScheduler
+from titan.delivery.sender_health import SenderHealth
 from titan.intelligence.composer import VARIANT_REGISTERS
 from titan.intelligence.fuel import (
     FuelState,
@@ -648,6 +650,38 @@ async def _run_manager(
     return effective_limit, effective_score
 
 
+async def _health_blocked_senders(
+    session: AsyncSession, workspace_id: uuid.UUID, now: dt.datetime
+) -> set[uuid.UUID]:
+    """Mailboxes today's health snapshot says may not send at all.
+
+    Read from the snapshot the outbox worker itself wrote rather than
+    recomputed, for the same reason the vitals check reads it: two components
+    deriving the same verdict independently is how they come to disagree, and
+    the one that governs sending must win.
+
+    An absent snapshot is not a block. A mailbox nobody has assessed yet is
+    UNKNOWN, and treating that as blocked would zero the budget of a workspace
+    on its first morning.
+    """
+    rows = (
+        await session.execute(
+            select(
+                SenderHealthSnapshot.sender_identity_id,
+                SenderHealthSnapshot.status,
+            ).where(
+                SenderHealthSnapshot.workspace_id == workspace_id,
+                SenderHealthSnapshot.captured_on == now.date(),
+            )
+        )
+    ).all()
+    return {
+        sender_id
+        for sender_id, status in rows
+        if adaptive_limits.HEALTH_FACTORS.get(SenderHealth(status), 1.0) <= 0.0
+    }
+
+
 async def _deliverable_budget(
     session: AsyncSession, workspace: Workspace, now: dt.datetime
 ) -> int:
@@ -684,7 +718,24 @@ async def _deliverable_budget(
         )
         return configured
 
-    ceiling = sender_pool.daily_ceiling(slots)
+    # Mailboxes the health gate has stopped contribute nothing today, and must
+    # not be counted into a budget that is then divided between campaigns.
+    #
+    # ``sender_pool`` deliberately leaves health out of a slot's limit, and its
+    # reasoning is right for what it is for: selection only needs the ordering,
+    # and it notes that a degraded mailbox is "usually degraded across the whole
+    # pool anyway". That is the assumption that fails here. outreach@ is blocked
+    # on a bounce rate while sales@ is healthy, so the pool reported 31 + 25 and
+    # the allocator divided **56 sends that did not exist** between 23 campaigns
+    # against a real capacity of 25 -- over-committing it by more than double,
+    # which puts every campaign back to competing by claim order, the exact
+    # thing the allocator was written to end.
+    blocked = await _health_blocked_senders(session, workspace.id, now)
+    ceiling = sum(
+        slot.daily_limit
+        for slot in slots
+        if slot.available and slot.sender_identity_id not in blocked
+    )
     if ceiling >= configured:
         return configured
 

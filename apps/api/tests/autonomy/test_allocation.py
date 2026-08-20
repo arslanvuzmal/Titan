@@ -16,6 +16,7 @@ import pytest
 from titan.autonomy.allocation import (
     EXPLORATION_FLOOR,
     HEALTH_WEIGHT,
+    MAX_FLOOR_SHARE,
     CampaignDemand,
     allocate,
     explain,
@@ -200,3 +201,89 @@ def test_a_starved_campaign_says_why() -> None:
 
     for d in starved:
         assert "exhausted" in explain(d, result) or "ceiling" in explain(d, result)
+
+
+# ==========================================================================
+# Floors must not consume the whole budget
+# ==========================================================================
+#
+# The floor is per campaign; the budget is not. Their sum therefore scales with
+# how many campaigns exist while the capacity does not, and past a certain
+# count the floors are the entire allocation.
+#
+# Measured live: 23 active campaigns against 25 sends a day. Floors alone
+# wanted 46. Every campaign received an identical 2 or 3, the highest-averages
+# pass had nothing to distribute, and the portfolio could not concentrate on
+# anything -- which is the mechanism the allocator exists to provide.
+
+
+def test_floors_cannot_spend_the_budget_before_merit_is_considered() -> None:
+    """Planted violation: remove the floor share cap and this fails.
+
+    The live shape. Twenty-two learning campaigns and one that is scaling,
+    against twenty-five sends. Floors are handed out worst-served first, so
+    LEARNING is served before SCALING -- unbounded, the twenty-two take
+    twenty-four of the twenty-five sends and the best campaign in the portfolio
+    is left with what fell off the end.
+
+    Measured on the final numbers rather than on the internals, because that is
+    what an operator sees: the total is the same either way, and what changes is
+    who holds it.
+    """
+    demands = [demand(f"learn{i:02}", H.LEARNING) for i in range(22)] + [
+        demand("scaling", H.SCALING)
+    ]
+
+    result = allocate(demands, 25)
+
+    # Unbounded, floors take 24 of the 25 and scaling is left with the 1 that
+    # fell off the end -- below the floor every learning campaign received.
+    # Capped, it earns more than a bare floor, which is the whole claim the
+    # weighting makes.
+    assert result.per_campaign["scaling"] > EXPLORATION_FLOOR, (
+        "the one campaign earning volume was crowded out by floors"
+    )
+    assert result.per_campaign["scaling"] > max(
+        v for k, v in result.per_campaign.items() if k != "scaling"
+    ), "merit did not outrank a floor"
+
+
+def test_merit_always_has_something_left_to_distribute() -> None:
+    """The point of the cap. A portfolio that cannot concentrate never produces
+    a campaign with enough volume to be judged on."""
+    demands = [demand(f"c{i}", H.LEARNING) for i in range(20)] + [
+        demand("winner", H.SCALING)
+    ]
+
+    result = allocate(demands, 25)
+
+    assert result.per_campaign["winner"] > EXPLORATION_FLOOR, (
+        "the best campaign in the portfolio got no more than a floor"
+    )
+
+
+def test_a_small_portfolio_is_unaffected() -> None:
+    """The cap is a bound, not a policy change. With capacity to spare, every
+    campaign still gets its floor and the weighting still decides the rest."""
+    demands = [demand("a", H.SCALING), demand("b", H.LEARNING)]
+
+    result = allocate(demands, 50)
+
+    assert result.per_campaign["b"] >= EXPLORATION_FLOOR
+    assert result.per_campaign["a"] > result.per_campaign["b"]
+
+
+def test_the_hard_bounds_still_hold_under_the_cap() -> None:
+    """Neither of the two numbers that belong to the human may move."""
+    demands = [demand(f"c{i}", H.LEARNING, ceiling=3) for i in range(30)]
+
+    result = allocate(demands, 25)
+
+    assert sum(result.per_campaign.values()) <= 25
+    assert all(v <= 3 for v in result.per_campaign.values())
+
+
+def test_the_cap_leaves_learning_better_off_than_pure_weighting() -> None:
+    """Half, not a tenth. The floor exists so a campaign with no history can
+    acquire one, and a cap that starved it would defeat the thing it protects."""
+    assert 0.3 <= MAX_FLOOR_SHARE <= 0.7
