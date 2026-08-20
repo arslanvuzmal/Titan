@@ -306,15 +306,7 @@ class ModelGateway:
         is_premium = task is ModelTask.PREMIUM
 
         if is_premium and self.budget.total_calls:
-            # Prospective share, including the call about to be made. Checking
-            # the share *before* the call meant a cap of 0 never bound, because
-            # 0 premium of 1 total is 0%.
-            prospective = (self.budget.premium_calls + 1) / (self.budget.total_calls + 1)
-            if prospective > self._settings.budget_premium_share_max:
-                raise BudgetExceededError(
-                    f"premium model share would reach {prospective:.0%}, above the "
-                    f"configured maximum {self._settings.budget_premium_share_max:.0%}"
-                )
+            self._check_premium_share()
 
         estimated = self._estimate_cost(route, max_tokens)
         self.budget.check(
@@ -330,6 +322,17 @@ class ModelGateway:
 
         last_error: Exception | None = None
         for index, candidate in enumerate(attempts):
+            # The cap follows the route. A cheap task that has fallen all the
+            # way through to the premium provider is still a premium call, and
+            # the day every cheap provider is rate-limited is precisely the day
+            # an unguarded back door would be walked through.
+            if index and self._is_premium_route(candidate):
+                try:
+                    self._check_premium_share()
+                except BudgetExceededError as exc:
+                    last_error = exc
+                    continue
+
             breaker = self._breakers.setdefault(candidate.provider, CircuitBreaker())
             if not breaker.allow(self._now()):
                 last_error = CircuitOpenError(
@@ -466,6 +469,32 @@ class ModelGateway:
             f"{last_validation}"
         )
 
+    def _check_premium_share(self) -> None:
+        """Refuse a premium call that would push its share past the cap.
+
+        Prospective share, including the call about to be made: checking after
+        the fact meant a cap of 0 never bound, because 0 premium of 1 total is
+        0%.
+
+        Keyed on the *route* rather than on the task, now that premium is
+        reachable as a fallback. Guarding only ``ModelTask.PREMIUM`` would let
+        every message reach the expensive model by the back door on a day the
+        cheap one was rate-limited -- which is exactly the day it would happen.
+        """
+        prospective = (self.budget.premium_calls + 1) / (self.budget.total_calls + 1)
+        if prospective > self._settings.budget_premium_share_max:
+            raise BudgetExceededError(
+                f"premium model share would reach {prospective:.0%}, above the "
+                f"configured maximum {self._settings.budget_premium_share_max:.0%}"
+            )
+
+    def _is_premium_route(self, route: Route) -> bool:
+        try:
+            premium = Route.parse(self._settings.model_route_premium)
+        except ValueError:
+            return False
+        return route.provider == premium.provider and route.model_id == premium.model_id
+
     def _fallbacks(self, primary: Route) -> list[Route]:
         """Other configured providers that could serve the same request.
 
@@ -489,6 +518,29 @@ class ModelGateway:
                 if candidate.provider == name:
                     out.append(candidate)
                     break
+
+        # The premium route, last and only if nothing cheaper is left.
+        #
+        # It used to be unreachable. The scan above covers extraction, research
+        # and message, and premium is on none of them -- so when Gemini began
+        # returning 429 the only fallback for a message was
+        # nvidia:meta/llama-3.1-8b-instruct, and every email this system has
+        # phrased was phrased by an eight-billion-parameter model while a
+        # frontier one sat configured, funded and never consulted.
+        #
+        # Appended rather than inserted: cheaper providers are still tried
+        # first, and this is what happens when they have all failed rather than
+        # a way of quietly upgrading the default.
+        try:
+            premium = Route.parse(self._settings.model_route_premium)
+        except ValueError:
+            return out
+        if premium.provider in self._providers and premium.provider != primary.provider:
+            if not any(
+                r.provider == premium.provider and r.model_id == premium.model_id
+                for r in out
+            ):
+                out.append(premium)
         return out
 
     def _estimate_cost(self, route: Route, max_tokens: int) -> float:
