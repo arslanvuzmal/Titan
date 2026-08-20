@@ -758,9 +758,23 @@ class OutboxWorker:
         sender = await session.get(SenderIdentity, row.sender_identity_id)
         now = self._now()
 
-        # Reputation is measured per sending domain over the trailing 30 days:
-        # a fresh window would let a bad week be forgotten too quickly, and a
-        # lifetime window would never recover.
+        # Trailing thirty days: a fresh window would let a bad week be forgotten
+        # too quickly, and a lifetime window would never recover.
+        #
+        # Measured per *mailbox*, not per sending domain. This comment used to
+        # claim the domain and the query has always said `sender_identity_id`,
+        # and the difference is not cosmetic. Receivers judge the domain, so
+        # per-domain is the truer model of the risk -- but it is also strictly
+        # harsher, and switching would currently take the workspace to zero:
+        # outreach@ carries 5 bounces over 94 sends and sales@ 0 over 30, so a
+        # domain-wide rate of 4% would pause the clean mailbox along with the
+        # dirty one.
+        #
+        # Per-mailbox is therefore a deliberate trade and not an oversight: it
+        # quarantines the mailbox that produced the bounces and lets a clean one
+        # keep working. What it does not do is make the clean mailbox safe --
+        # arslanvuzmallone.com carries that history whatever this query counts,
+        # and sales@ is sending on it.
         since = now - dt.timedelta(days=30)
         stats = (
             await session.execute(
