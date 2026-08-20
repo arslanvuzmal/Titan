@@ -19,10 +19,13 @@ import uuid
 from temporalio import activity
 
 from titan.activities.pipeline import queue_message
+from titan.activities.research import requires_human_approval
+from titan.db.enums import DraftStatus
 from titan.db.session import workspace_session
 from titan.delivery.stranded import DEFAULT_BATCH, find_stranded
 from titan.workflows.types import (
     QueueActivityInput,
+    ResearchLeadInput,
     SweepStrandedInput,
     SweepStrandedResult,
 )
@@ -32,7 +35,18 @@ logger = logging.getLogger(__name__)
 
 @activity.defn(name="sweep_stranded_drafts")
 async def sweep_stranded_drafts(request: SweepStrandedInput) -> SweepStrandedResult:
-    """Find approved drafts with nowhere to go, and give them somewhere."""
+    """Find drafts with nowhere to go, and give them somewhere.
+
+    Two dead ends, and they are not the same. An ``APPROVED`` draft has had its
+    decision made and is merely unqueued. One still ``AWAITING_APPROVAL`` has
+    had no decision made at all, because the workflow that would have asked
+    ended first -- 322 of them on the live workspace against 241 approved.
+
+    So this does not approve anything. It asks the same
+    ``requires_human_approval`` gate the workflow would have asked, from the
+    same rows, and queues only what that gate says needs no person. A campaign
+    that genuinely requires a human decision keeps its drafts.
+    """
     workspace_id = uuid.UUID(request.workspace_id)
     limit = request.limit or DEFAULT_BATCH
 
@@ -45,7 +59,33 @@ async def sweep_stranded_drafts(request: SweepStrandedInput) -> SweepStrandedRes
     queued = 0
     refused = 0
     reasons: dict[str, int] = {}
+    # One answer per campaign rather than per draft. The gate reads the
+    # workspace and the campaign policy, which do not change between two drafts
+    # of the same campaign in the same pass, and there are hundreds of drafts
+    # against twenty-three campaigns.
+    auto_approves: dict[uuid.UUID, bool] = {}
+
     for item in stranded:
+        if item.status is DraftStatus.AWAITING_APPROVAL:
+            if item.campaign_id not in auto_approves:
+                auto_approves[item.campaign_id] = not await requires_human_approval(
+                    ResearchLeadInput(
+                        workspace_id=request.workspace_id,
+                        campaign_id=str(item.campaign_id),
+                        lead_id=str(item.lead_id),
+                        run_key=f"sweep:{item.draft_id}",
+                    )
+                )
+            if not auto_approves[item.campaign_id]:
+                # A person genuinely has to decide this one. Not a refusal to
+                # record as a fault -- the draft is exactly where it belongs,
+                # and the sweeper's job was only to find out whether anything
+                # was still coming for it.
+                refused += 1
+                reasons["awaiting a human decision"] = (
+                    reasons.get("awaiting a human decision", 0) + 1
+                )
+                continue
         # The approval exists -- that is what APPROVED means -- but this path
         # does not carry its id. Passing None records "queued by the sweeper",
         # which is true, rather than attaching an approval this activity did
@@ -73,7 +113,7 @@ async def sweep_stranded_drafts(request: SweepStrandedInput) -> SweepStrandedRes
             activity.heartbeat(f"{queued} queued, {refused} refused")
 
     logger.info(
-        "swept stranded approved drafts",
+        "swept stranded drafts",
         extra={
             "workspace_id": request.workspace_id,
             "found": len(stranded),

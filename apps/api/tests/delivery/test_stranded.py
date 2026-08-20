@@ -12,7 +12,13 @@ nothing reported it because every component had done its own job correctly.
 
 from __future__ import annotations
 
-from titan.delivery.stranded import DEFAULT_BATCH, Stranded, find_stranded
+from titan.db.enums import DraftStatus
+from titan.delivery.stranded import (
+    DEFAULT_BATCH,
+    STRANDABLE_STATUSES,
+    Stranded,
+    find_stranded,
+)
 
 
 def test_the_batch_is_bounded() -> None:
@@ -26,7 +32,7 @@ def test_a_stranded_draft_carries_what_the_caller_needs() -> None:
     else -- the decision to send is re-made downstream by ``queue_message``."""
     fields = Stranded.__dataclass_fields__
 
-    assert set(fields) == {"draft_id", "lead_id", "campaign_id"}
+    assert set(fields) == {"draft_id", "lead_id", "campaign_id", "status"}
 
 
 def test_find_stranded_is_exported_for_the_activity() -> None:
@@ -46,7 +52,6 @@ class TestTheQueryShape:
 
         from sqlalchemy import select
         from sqlalchemy.dialects import postgresql
-        from titan.db.enums import DraftStatus
         from titan.db.models import Message, MessageDraft, OutboxMessage
 
         outbox_exists = (
@@ -61,7 +66,7 @@ class TestTheQueryShape:
             select(MessageDraft.id)
             .where(
                 MessageDraft.workspace_id == uuid.uuid4(),
-                MessageDraft.status == DraftStatus.APPROVED,
+                MessageDraft.status.in_(STRANDABLE_STATUSES),
                 MessageDraft.validation_passed.is_(True),
                 ~outbox_exists,
                 ~message_exists,
@@ -97,3 +102,70 @@ class TestTheQueryShape:
         """They were composed against the oldest evidence, so their claims are
         closest to going stale."""
         assert "ORDER BY message_drafts.created_at" in self._sql()
+
+
+# ------------------------------------------------- the earlier dead end
+#
+# The sweeper was built for a draft whose *decision* was made and never acted
+# on. The larger accident is one step before that: the workflow drafted, then
+# ended before it could ask whether a person had to approve. On the live
+# workspace, 322 drafts sat at AWAITING_APPROVAL with no outbox row against 241
+# APPROVED -- and the sweeper could see only the smaller half.
+
+
+def test_both_dead_ends_are_swept() -> None:
+    """Planted violation: narrow this back to APPROVED alone and 322 drafts go
+    back to being invisible."""
+    assert DraftStatus.APPROVED in STRANDABLE_STATUSES
+    assert DraftStatus.AWAITING_APPROVAL in STRANDABLE_STATUSES
+
+
+def test_no_other_status_is_swept() -> None:
+    """A validation failure is a verdict, not an accident, and a queued draft
+    already has somewhere to go. Widening past these two would send mail that
+    was refused on purpose."""
+    assert set(STRANDABLE_STATUSES) == {
+        DraftStatus.APPROVED,
+        DraftStatus.AWAITING_APPROVAL,
+    }
+
+
+def test_the_caller_can_tell_the_two_apart() -> None:
+    """They must not be handled alike. An approved draft may be queued on
+    sight; one still awaiting approval has had no decision made about it, and
+    queueing it without asking would be the sweeper granting an authority
+    nobody gave it."""
+    assert "status" in Stranded.__dataclass_fields__
+    assert Stranded.__dataclass_fields__["status"].default is DraftStatus.APPROVED
+
+
+def test_the_sweeper_asks_the_gate_rather_than_deciding() -> None:
+    """Planted violation: queue AWAITING_APPROVAL drafts unconditionally and
+    this fails.
+
+    ``requires_human_approval`` reads the workspace and campaign policy at
+    execution time. Using it here means a campaign that genuinely requires a
+    person keeps its drafts, and the sweeper cannot widen what Titan is
+    permitted to do -- which is the whole of invariant 18.
+    """
+    import inspect
+
+    from titan.activities import stranded as activity
+
+    source = inspect.getsource(activity.sweep_stranded_drafts)
+
+    assert "requires_human_approval" in source
+    assert "DraftStatus.AWAITING_APPROVAL" in source
+
+
+def test_the_gate_is_asked_once_per_campaign_not_once_per_draft() -> None:
+    """It reads two rows that cannot change between two drafts of the same
+    campaign in one pass, against hundreds of drafts and twenty-three
+    campaigns."""
+    import inspect
+
+    from titan.activities import stranded as activity
+
+    source = inspect.getsource(activity.sweep_stranded_drafts)
+
+    assert "auto_approves" in source
