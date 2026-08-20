@@ -95,6 +95,21 @@ WARMUP_DAYS = len(WARMUP_RAMP)
 #: but a tenth of 6 rounds to nothing.
 MIN_WARMUP_VOLUME = 1
 
+#: The most a mailbox's daily allowance may exceed the largest volume it has
+#: actually sent on a recent day.
+#:
+#: The ramp above positions a mailbox by *age*; this bounds it by *evidence*.
+#: The two come apart whenever a mailbox's age is credited from somewhere other
+#: than its own send history -- a provider's warm-up start date, an import, a
+#: mailbox that sat idle mid-ramp -- and the result is a day-13 allowance handed
+#: to a mailbox that has never sent more than six. Arriving at a volume is safe;
+#: jumping to it is one of the patterns receivers watch for, which is the same
+#: reason ``adaptive_limits`` recovers over three days rather than at once.
+#:
+#: Doubling reaches any ramp position within a few days, so this costs days and
+#: never the destination.
+MAX_DAILY_STEP_UP = 2.0
+
 
 class Severity(StrEnum):
     BLOCK = "block"
@@ -508,12 +523,34 @@ def warmup_limit(
     return max(MIN_WARMUP_VOLUME, min(allowed, target))
 
 
+def stepped_warmup_limit(
+    *,
+    first_send_at: dt.datetime | None,
+    now: dt.datetime,
+    target: int,
+    recent_peak_sends: int | None,
+) -> int | None:
+    """Today's allowance: the ramp position, bounded by demonstrated volume.
+
+    ``recent_peak_sends`` is the largest number this mailbox has sent on any
+    single recent day. ``None`` means nobody looked, which is not the same as
+    zero and must not throttle a mailbox on an absence of data -- the ramp
+    alone applies.
+    """
+    ramp = warmup_limit(first_send_at=first_send_at, now=now, target=target)
+    if ramp is None or recent_peak_sends is None:
+        return ramp
+    stepped = math.ceil(recent_peak_sends * MAX_DAILY_STEP_UP)
+    return max(MIN_WARMUP_VOLUME, min(ramp, stepped))
+
+
 def check_warmup(
     *,
     first_send_at: dt.datetime | None,
     sent_today: int,
     now: dt.datetime,
     target: int,
+    recent_peak_sends: int | None = None,
 ) -> list[Signal]:
     if target <= 0:
         # Not a warm-up state at all: either the mailbox is configured to send
@@ -528,16 +565,31 @@ def check_warmup(
                 "campaign at a mailbox that has one.",
             )
         ]
-    limit = warmup_limit(first_send_at=first_send_at, now=now, target=target)
+    limit = stepped_warmup_limit(
+        first_send_at=first_send_at,
+        now=now,
+        target=target,
+        recent_peak_sends=recent_peak_sends,
+    )
     if limit is None or sent_today < limit:
         return []
     day = warmup_day(first_send_at, now)
+    ramp = warmup_limit(first_send_at=first_send_at, now=now, target=target)
+    # Which bound actually bit. An operator reading "day 14 allows 12" against a
+    # ramp table that says 24 has been told something that looks like a bug.
+    bound = (
+        f"day {day + 1} of {WARMUP_DAYS} of warm-up allows {limit}"
+        if ramp is None or limit >= ramp
+        else (
+            f"day {day + 1} of {WARMUP_DAYS} of warm-up would allow {ramp}, "
+            f"stepped to {limit} until the mailbox has sent at that volume"
+        )
+    )
     return [
         Signal(
             "warmup_limit_reached",
             Severity.BLOCK,
-            f"day {day + 1} of {WARMUP_DAYS} of warm-up allows {limit} of the "
-            f"mailbox's {target} messages; {sent_today} sent",
+            f"{bound} of the mailbox's {target} messages; {sent_today} sent",
             "Remaining messages are deferred to tomorrow. Ramping volume "
             "gradually is what stops a new mailbox looking compromised.",
         )
@@ -565,6 +617,9 @@ class DeliverabilityContext:
     warmup_target: int
     #: Result of titan.delivery.dns_auth.verify_sender_domain, when available.
     auth_errors: tuple[str, ...] = field(default=())
+    #: Largest single-day send count in the recent window. None means nobody
+    #: measured, which must not be read as zero.
+    recent_peak_sends: int | None = None
 
 
 def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
@@ -599,6 +654,7 @@ def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
             sent_today=ctx.sent_today,
             now=ctx.now,
             target=ctx.warmup_target,
+            recent_peak_sends=ctx.recent_peak_sends,
         )
     )
     return DeliverabilityReport(signals=tuple(signals))

@@ -134,6 +134,13 @@ class ProcessResult:
     detail: str | None = None
 
 
+#: How far back to look for the mailbox's busiest day when bounding today's
+#: step up. A week spans a full send pattern including the weekend gap, and is
+#: short enough that a mailbox which genuinely stopped is not credited for
+#: volume it sent a fortnight ago.
+WARMUP_PEAK_WINDOW_DAYS = 7
+
+
 def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
     """The earliest of several timestamps, ignoring the ones that are absent.
 
@@ -778,7 +785,19 @@ class OutboxWorker:
             )
         ).one()
 
-        first_send_at = (
+        # The same rule ``_capture_sender_health`` uses, and it did not used to
+        # be. This read Titan's first send alone while the health snapshot took
+        # ``_earliest`` of that and the provider's warm-up start, so the two
+        # disagreed about the same mailbox on the same day: the snapshot for
+        # sales@ said day 13, allowance 25, and this gate enforced day 2,
+        # allowance 6. An operator reading the dashboard was told a number the
+        # sender was never going to be given.
+        #
+        # ``_earliest`` is the documented rule and the one kept. What stops it
+        # handing a day-13 allowance to a mailbox that has never sent more than
+        # six is ``recent_peak_sends`` below, which bounds the jump rather than
+        # the destination.
+        titan_first_send = (
             await session.execute(
                 text(
                     "SELECT min(sent_at) FROM messages "
@@ -786,6 +805,33 @@ class OutboxWorker:
                     "AND sent_at IS NOT NULL"
                 ),
                 {"workspace": row.workspace_id, "sender": row.sender_identity_id},
+            )
+        ).scalar_one_or_none()
+        first_send_at = _earliest(
+            titan_first_send, sender.warmup_started_at if sender else None
+        )
+
+        # Highest single day in the trailing week, today included. Bounds how
+        # far today's allowance may exceed volume this mailbox has actually
+        # demonstrated. Returns None when nothing was sent in the window, which
+        # is "no evidence" rather than "evidence of zero" -- a mailbox blocked
+        # for a week must not be throttled to nothing by its own quarantine.
+        recent_peak_sends = (
+            await session.execute(
+                text(
+                    "SELECT max(c) FROM ("
+                    "  SELECT count(*) AS c FROM messages"
+                    "  WHERE workspace_id = :workspace"
+                    "    AND sender_identity_id = :sender"
+                    "    AND sent_at >= :since"
+                    "  GROUP BY (sent_at AT TIME ZONE 'UTC')::date"
+                    ") d"
+                ),
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "since": now - dt.timedelta(days=WARMUP_PEAK_WINDOW_DAYS),
+                },
             )
         ).scalar_one_or_none()
 
@@ -831,6 +877,7 @@ class OutboxWorker:
                 ),
                 first_send_at=first_send_at,
                 sent_today=sent_today,
+                recent_peak_sends=recent_peak_sends,
                 now=now,
                 warmup_target=sender.daily_send_limit if sender else 0,
             )
