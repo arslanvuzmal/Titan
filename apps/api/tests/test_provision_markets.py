@@ -12,7 +12,9 @@ were asked for, and derives each campaign's clock rather than typing it in.
 from __future__ import annotations
 
 from titan.config import OperatingMode
-from titan.db.enums import Region
+from titan.db.enums import Industry, Region
+from titan.intelligence.playbooks import PLAYBOOKS
+from titan.intelligence.vernacular import VERNACULARS
 from titan.policy.schedule import (
     LEAD_IN_HOURS,
     REGION_WORKING_HOURS,
@@ -34,12 +36,7 @@ def test_every_planned_start_is_a_real_territory() -> None:
 
 
 def test_all_six_markets_the_operator_named_are_covered() -> None:
-    """USA, UK, Dubai, Australia, Canada and Eastern Europe.
-
-    The UK is absent from the plan on purpose: eleven UK campaigns already
-    exist with leads and history attached, and re-creating them is not this
-    script's business.
-    """
+    """USA, UK, Dubai, Australia, Canada and Eastern Europe."""
     markets = {territory.region for _, territory in plan_rows()}
 
     assert markets == {
@@ -48,7 +45,45 @@ def test_all_six_markets_the_operator_named_are_covered() -> None:
         Region.EUROPE,
         Region.MIDDLE_EAST,
         Region.AUSTRALIA,
+        Region.UK,
     }
+
+
+def test_the_uk_appears_only_for_trades_that_have_no_campaign_at_all() -> None:
+    """The UK was originally left out because eleven campaigns already existed
+    there with leads and history attached, and re-creating them is not this
+    script's business. It still is not.
+
+    What it is now also for is a trade nobody has ever searched for. Six
+    industries held 2,756 businesses and half of them were dentists, which read
+    as a discovery problem and was a catalogue problem -- a campaign stamps its
+    own industry onto everything it finds, and the enum held six kinds. A new
+    trade proves itself in one market before it is given six.
+    """
+    uk = {
+        entry.industry
+        for entry, territory in plan_rows()
+        if territory.region is Region.UK
+    }
+    established = {
+        entry.industry
+        for entry, territory in plan_rows()
+        if territory.region is not Region.UK
+    }
+
+    assert uk
+    assert not (uk & established), "a trade already running elsewhere is not new"
+    assert Industry.DENTIST not in uk
+    assert Industry.LAW_FIRM not in uk
+
+
+def test_the_new_trades_are_all_appointment_businesses() -> None:
+    """Planted violation: add a trade with no playbook and its whole campaign
+    silently writes in the general voice, which is the thing the catalogue
+    exists to prevent."""
+    for entry, _ in plan_rows():
+        assert entry.industry in PLAYBOOKS, entry.slug
+        assert entry.industry in VERNACULARS, entry.slug
 
 
 def test_eastern_europe_is_planned_not_just_catalogued() -> None:

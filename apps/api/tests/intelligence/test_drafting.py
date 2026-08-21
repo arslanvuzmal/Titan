@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from titan.db.enums import ReplyClass
+from titan.db.enums import Industry, ReplyClass
 from titan.intelligence.composer import FALLBACK_GREETING, ComposerContext, compose
 from titan.intelligence.message_validator import (
     MessageContext,
@@ -44,7 +44,9 @@ def context(**overrides) -> ComposerContext:
         "portfolio_url": PORTFOLIO,
         "mailing_address": ADDRESS,
         "unsubscribe_url": f"{PORTFOLIO}/unsubscribe",
-        "solution": "booking and follow-up automation",
+        "offer_key": "booking_improvement",
+        "industry": Industry.DENTIST,
+        "business_name": "Bellrose Dental",
         "variant_seed": "lead-1",
     }
     base.update(overrides)
@@ -317,7 +319,7 @@ def test_every_draft_carries_a_rationale():
         assert len(draft.rationale) > 30
 
 
-def test_a_message_cannot_be_composed_without_a_solution():
+def test_a_message_cannot_be_composed_without_an_offer():
     """The structural half of the fix.
 
     Refusing in the pipeline stops today's caller. Removing the default stops
@@ -325,6 +327,11 @@ def test_a_message_cannot_be_composed_without_a_solution():
     pass one silently produced a message claiming the sender builds "enquiry
     capture and follow-up automation", whatever the evidence said. A required
     field turns that into a TypeError at the call site.
+
+    The field carries the offer's key now rather than its prose, and is never
+    written into the body -- but it stays required for the same reason it was
+    made required: a caller that has not found an offer the evidence supports
+    has no business composing a message.
     """
     base = {
         "org_domain": "bellrose-dental.test",
@@ -339,4 +346,4 @@ def test_a_message_cannot_be_composed_without_a_solution():
     with pytest.raises(TypeError):
         ComposerContext(**base)  # type: ignore[arg-type]
 
-    assert ComposerContext(**base, solution="booking automation") is not None
+    assert ComposerContext(**base, offer_key="booking_improvement") is not None

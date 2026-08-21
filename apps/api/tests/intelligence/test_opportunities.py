@@ -105,13 +105,27 @@ def test_the_offers_value_is_carried_onto_the_opportunity() -> None:
 
 # ==========================================================================
 # Gaps -- problems this owner does not sell a fix for
+#
+# These used to be written with real finding types: an accessibility violation
+# and a failed network request were both genuinely unsellable, because no
+# playbook listed an offer for either. They are sellable now -- the offer has to
+# be justified by the finding a message actually cites, so a catalogue with
+# nothing for the seven thousand quality findings in the database would have
+# refused to write to almost everybody.
+#
+# So the exemplars here are a detector that does not exist yet, which is what
+# the gap mechanism is actually for: a signal shipped ahead of the offer that
+# would sell against it. A gap being rare is the mechanism working.
 # ==========================================================================
+UNSOLD = "cookie_banner_blocks_content"
+
+
 def test_a_severe_finding_no_offer_covers_is_recorded_as_a_gap() -> None:
     derived = derive_opportunities(
         Industry.GYM_FITNESS,
         [
             finding(
-                issue_type="serious_accessibility_violations",
+                issue_type=UNSOLD,
                 category=FindingCategory.ACCESSIBILITY,
                 severity=Severity.MEDIUM,
                 method=VerificationMethod.AXE_RULE,
@@ -122,7 +136,7 @@ def test_a_severe_finding_no_offer_covers_is_recorded_as_a_gap() -> None:
     assert len(derived) == 1
     gap = derived[0]
     assert gap.is_unserved
-    assert gap.offer_key == f"{UNSERVED_PREFIX}serious_accessibility_violations"
+    assert gap.offer_key == f"{UNSERVED_PREFIX}{UNSOLD}"
     assert gap.deliverable is False
 
 
@@ -132,7 +146,7 @@ def test_a_gap_is_never_priced() -> None:
         Industry.GYM_FITNESS,
         [
             finding(
-                issue_type="failed_network_requests",
+                issue_type=UNSOLD,
                 category=FindingCategory.TECHNICAL,
                 severity=Severity.MEDIUM,
                 method=VerificationMethod.BROWSER_NAVIGATION,
@@ -149,7 +163,7 @@ def test_a_gap_carries_no_implementation_outline() -> None:
         Industry.GYM_FITNESS,
         [
             finding(
-                issue_type="failed_network_requests",
+                issue_type=UNSOLD,
                 category=FindingCategory.TECHNICAL,
                 severity=Severity.MEDIUM,
                 method=VerificationMethod.BROWSER_NAVIGATION,
@@ -161,12 +175,12 @@ def test_a_gap_carries_no_implementation_outline() -> None:
 
 
 def test_a_minor_unmatched_finding_is_not_reported_as_a_gap() -> None:
-    """A missing meta description is not a hole in the catalogue."""
+    """A trivial unsold finding is not a hole in the catalogue."""
     derived = derive_opportunities(
         Industry.GYM_FITNESS,
         [
             finding(
-                issue_type="missing_meta_description",
+                issue_type=UNSOLD,
                 category=FindingCategory.CONTENT,
                 severity=Severity.LOW,
             )
@@ -182,7 +196,7 @@ def test_every_deliverable_outranks_every_gap() -> None:
         [
             # A gap at the highest severity there is.
             finding(
-                issue_type="serious_accessibility_violations",
+                issue_type=UNSOLD,
                 category=FindingCategory.ACCESSIBILITY,
                 severity=Severity.CRITICAL,
                 method=VerificationMethod.AXE_RULE,

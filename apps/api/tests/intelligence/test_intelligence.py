@@ -603,11 +603,12 @@ I was looking at bellrose-dental.test and noticed the "Book an appointment"
 button on your homepage opens a page that returns a 404, so anyone who clicks
 it cannot get through to your booking form.
 
-That is the step most likely to be used by someone who has already decided to
-come in, so it is worth checking. I build small booking and follow-up fixes for
-practices like yours and could outline what this would take in about ten minutes.
+That is worth fixing because someone clicking there has already moved past
+browsing treatments and is actively trying to book.
 
-Would a short call next week be useful?
+I build and repair patient-booking flows, so I can send you the exact issue.
+
+Want me to send you the exact fix?
 
 Arslan Vuzmal Lone
 https://arslanvuzmallone.dev

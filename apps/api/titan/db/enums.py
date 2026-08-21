@@ -555,6 +555,15 @@ class Industry(enum.StrEnum):
     HVAC_HOME_SERVICES = "hvac_home_services"
     MED_SPA = "med_spa"
     DENTIST = "dentist"
+    # Five appointment trades, added because the catalogue was the reason the
+    # portfolio looked narrow: 2,756 businesses across six types, and half of
+    # them dentists. Each of these books by telephone during office hours,
+    # which is the exact shape of what Titan sells against.
+    VETERINARY = "veterinary"
+    ACCOUNTANT = "accountant"
+    OPTICIAN = "optician"
+    PHYSIOTHERAPY = "physiotherapy"
+    SALON_BARBER = "salon_barber"
     GENERAL = "general"
 
 

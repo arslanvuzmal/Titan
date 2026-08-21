@@ -24,6 +24,17 @@ MAX_BODY_CHARS = 2200
 MAX_BODY_WORDS = 320
 MIN_BODY_WORDS = 40
 
+#: The band the four lines have to land in, counted before the signature.
+#:
+#: The whole-body count above is nearly useless as a quality bound: a footer
+#: with an address and an unsubscribe link is forty words on its own, so a body
+#: could pass MIN_BODY_WORDS while saying almost nothing, and a 140-word pitch
+#: with a paragraph of portfolio history passed MAX_BODY_WORDS comfortably.
+#: Both happened. What matters is the length of what the recipient actually has
+#: to read before deciding, and that is the pitch.
+PITCH_MIN_WORDS = 55
+PITCH_MAX_WORDS = 90
+
 
 class ViolationCode(StrEnum):
     UNSUPPORTED_CLAIM = "unsupported_claim"
@@ -39,6 +50,10 @@ class ViolationCode(StrEnum):
     MULTIPLE_OFFERS = "multiple_unrelated_offers"
     TOO_LONG = "message_too_long"
     TOO_SHORT = "message_too_short"
+    PITCH_TOO_LONG = "pitch_too_long"
+    PITCH_TOO_SHORT = "pitch_too_short"
+    UNVERIFIABLE_CLIENTELE = "claims_a_clientele_that_cannot_be_shown"
+    UNCOUNTED_FINDINGS = "claims_findings_that_were_not_counted"
     SUBJECT_TOO_LONG = "subject_too_long"
     DECEPTIVE_SUBJECT = "deceptive_subject"
     MISSING_FOOTER = "missing_required_footer"
@@ -223,6 +238,57 @@ _AI_SPAM = (
     re.compile(r"\b(?:your business could (?:really )?(?:use|benefit from) AI)\b", re.I),
 )
 
+#: A client base gestured at but never named.
+#:
+#: "mostly for firms your size", "usually for teams around your size", "for
+#: firms of this size" -- three phrasings of the same move, all of them sent.
+#: It implies a roster without listing one, which is the weakest possible play:
+#: a stranger who gestures at credentials they will not name has told the reader
+#: exactly how thin the credentials are.
+#:
+#: With no case studies to cite, the credential is the audit itself. Finding a
+#: real fault on somebody's site and offering the rest of the list demonstrates
+#: the capability instead of asserting it, and it cannot be faked.
+_UNVERIFIABLE_CLIENTELE = (
+    re.compile(
+        r"\b(?:firms?|business(?:es)?|clinics?|practices?|compan(?:y|ies)|teams?|"
+        r"gyms?|agenc(?:y|ies)|clients?|others?)\s+(?:of\s+)?"
+        r"(?:around\s+|about\s+)?(?:your|this|that|their)\s+(?:size|scale)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:business(?:es)?|compan(?:y|ies)|firms?|clinics?|practices?|gyms?|"
+        r"agenc(?:y|ies))\s+(?:just\s+)?like\s+(?:yours?|this)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:I|we)(?:'ve| have)\s+(?:helped|worked with)\s+"
+        r"(?:\d+\s+|many\s+|dozens of\s+|hundreds of\s+|lots of\s+|other\s+)?"
+        r"(?:business(?:es)?|compan(?:y|ies)|firms?|clinics?|practices?|gyms?|"
+        r"clients?|agenc(?:y|ies))\b",
+        re.I,
+    ),
+)
+
+#: A count of problems the message did not name.
+#:
+#: Three of the four offer registers used to end "and I noticed a few other
+#: things while I was there" or "there were a couple of others worth a look".
+#: Both assert a number of findings, in the one sentence the claim map does not
+#: check -- and the number was never read from anything. A message says one
+#: thing; if there is a second finding worth citing it goes in the follow-up,
+#: where it gets an evidence row like everything else.
+_UNCOUNTED_FINDINGS = (
+    re.compile(
+        r"\b(?:a\s+few|a\s+couple\s+of|several|a\s+number\s+of|some|"
+        r"various|multiple|other|more)\s+(?:other\s+)?"
+        r"(?:things?|issues?|problems?|faults?|errors?|others?)\b",
+        re.I,
+    ),
+    re.compile(r"\bamong other (?:things|issues|problems)\b", re.I),
+    re.compile(r"\bthe rest of (?:the |what )?(?:issues|problems|list)\b", re.I),
+)
+
 _PLACEHOLDER = re.compile(
     r"(\{\{[^}]*\}\}|\[(?:FIRST_?NAME|COMPANY|BUSINESS|NAME|CITY|X|INSERT[^\]]*)\]|<<[^>]+>>|TODO:|FIXME:|\bLorem ipsum\b)",
     re.IGNORECASE,
@@ -278,6 +344,21 @@ def _scan(
     return out
 
 
+def pitch_of(body: str, sender_name: str) -> str:
+    """What the recipient reads before the signature.
+
+    Split on the sender's own name, which is the first line of every footer
+    this system writes. Falls back to the whole body when the name is absent --
+    a message missing its signature is already a violation, and guessing a
+    boundary here would hide the more important one.
+    """
+    name = (sender_name or "").strip()
+    if not name:
+        return body
+    index = body.find("\n" + name)
+    return body if index < 0 else body[:index]
+
+
 def validate_message(ctx: MessageContext) -> ValidationReport:
     """Check a draft against every message policy rule."""
     violations: list[Violation] = []
@@ -309,6 +390,22 @@ def validate_message(ctx: MessageContext) -> ValidationReport:
         )
     if words < MIN_BODY_WORDS:
         violations.append(Violation(ViolationCode.TOO_SHORT, f"only {words} words"))
+
+    pitch_words = len(pitch_of(body, ctx.sender_name).split())
+    if pitch_words > PITCH_MAX_WORDS:
+        violations.append(
+            Violation(
+                ViolationCode.PITCH_TOO_LONG,
+                f"{pitch_words} words before the signature > {PITCH_MAX_WORDS}",
+            )
+        )
+    elif pitch_words < PITCH_MIN_WORDS:
+        violations.append(
+            Violation(
+                ViolationCode.PITCH_TOO_SHORT,
+                f"{pitch_words} words before the signature < {PITCH_MIN_WORDS}",
+            )
+        )
 
     # ---- required footer elements ----------------------------------------
     if ctx.sender_name and ctx.sender_name.lower() not in body.lower():
@@ -374,6 +471,18 @@ def validate_message(ctx: MessageContext) -> ValidationReport:
     )
     violations += _scan(
         _AI_SPAM, body, ViolationCode.AI_SPAM_LANGUAGE, "generic AI-outreach phrasing"
+    )
+    violations += _scan(
+        _UNVERIFIABLE_CLIENTELE,
+        body,
+        ViolationCode.UNVERIFIABLE_CLIENTELE,
+        "implies a client base that cannot be named",
+    )
+    violations += _scan(
+        _UNCOUNTED_FINDINGS,
+        body,
+        ViolationCode.UNCOUNTED_FINDINGS,
+        "claims further findings that carry no evidence",
     )
     violations += _scan(
         _INJECTION_ECHO,
@@ -535,10 +644,13 @@ def _normalize(text: str) -> str:
 
 __all__ = [
     "MAX_BODY_WORDS",
+    "PITCH_MAX_WORDS",
+    "PITCH_MIN_WORDS",
     "MessageContext",
     "ValidationReport",
     "Violation",
     "ViolationCode",
+    "pitch_of",
     "validate_message",
 ]
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 from titan.intelligence.composer import ComposedMessage
+from titan.intelligence.message_validator import PITCH_MAX_WORDS
 from titan.intelligence.rewriter import (
     MAX_SENTENCE_GROWTH,
     RewriteRefusal,
@@ -372,3 +373,22 @@ def test_a_fabricated_metric_is_refused_by_the_rewriter() -> None:
     )
 
     assert result is RewriteRefusal.PROHIBITED_CONTENT
+
+
+def test_the_sentence_allowance_can_clear_the_message_ceiling() -> None:
+    """Why the assembled message is measured again after a rewrite.
+
+    ``check_candidate`` allows a sentence to grow by sixty per cent and has no
+    way to see the other three. A composed pitch runs around sixty-seven words
+    against a ninety-word ceiling, so four sentences each taking the full
+    allowance overruns it -- and the overrun does not degrade the draft, it
+    destroys it: a message that would have been sendable becomes
+    VALIDATION_FAILED because a rewrite was attempted at all.
+
+    No sentence-level rule can catch that, because it is a property of the sum.
+    ``_rephrase`` checks the reassembled body and falls back to the
+    deterministic text, the way every other rewrite failure resolves.
+    """
+    typical_pitch_words = 67
+
+    assert typical_pitch_words * MAX_SENTENCE_GROWTH > PITCH_MAX_WORDS

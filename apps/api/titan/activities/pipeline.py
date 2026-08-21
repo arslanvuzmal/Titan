@@ -70,7 +70,12 @@ from titan.intelligence.contacts import (
 )
 from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
 from titan.intelligence.findings import DetectedFinding, detect_findings
-from titan.intelligence.message_validator import MessageContext, validate_message
+from titan.intelligence.message_validator import (
+    PITCH_MAX_WORDS,
+    MessageContext,
+    pitch_of,
+    validate_message,
+)
 from titan.intelligence.modernisation import (
     PageSignals,
 )
@@ -86,6 +91,7 @@ from titan.intelligence.playbooks import get_playbook, select_offers
 from titan.intelligence.scoring import ScoringInput
 from titan.intelligence.scoring import score_lead as compute_score
 from titan.intelligence.verifier import VerificationResult, build_verifier
+from titan.intelligence.vernacular import Engine, engine_for
 from titan.models.recording import record_calls
 from titan.outreach import unsubscribe
 from titan.providers.browser_client import BrowserWorkerClient
@@ -1073,6 +1079,17 @@ def _page_signals(url: str, observations: dict[str, Any] | None) -> PageSignals:
     )
 
 
+#: Highest first. ``Severity`` is a StrEnum, so sorting it directly would sort
+#: alphabetically -- "critical" before "high" by luck, "medium" before both by
+#: accident.
+_SEVERITY_ORDER: dict[Severity, int] = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 3,
+}
+
+
 async def _rephrase(
     composed: Any,
     *,
@@ -1131,6 +1148,36 @@ async def _rephrase(
                     await closer()
                 except Exception:  # noqa: S110
                     pass
+
+    # The rewriter checks each sentence on its own and allows it to grow by up
+    # to sixty per cent. Four sentences each taking that allowance clears the
+    # ninety-word ceiling, and the assembled message then fails validation --
+    # which does not degrade the draft, it destroys it: a message that would
+    # have been sendable becomes VALIDATION_FAILED because a rewrite was
+    # attempted at all.
+    #
+    # No sentence-level rule can see this, because the overrun is a property of
+    # the sum. Checked here, where the assembled message exists, and resolved
+    # the way every other rewrite failure is: keep the text that was already
+    # correct.
+    grew_past_the_band = (
+        len(pitch_of(outcome.message.body, get_settings().owner_name).split())
+        > PITCH_MAX_WORDS
+    )
+    if outcome.rewritten and grew_past_the_band:
+        logger.info(
+            "model rewrite overran the word band; sending the deterministic text",
+            extra={"lead_id": lead_id},
+        )
+        return (
+            composed,
+            {
+                "attempted": True,
+                "used": False,
+                "refusals": ["pitch_too_long_after_reassembly"],
+            },
+            list(gateway.calls),
+        )
 
     detail = {
         "attempted": True,
@@ -1212,10 +1259,9 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             raise ValueError("draft references a missing organization or channel")
         org_domain = org.canonical_domain or org.display_name
         org_industry = org.industry
-        # Snapshotted with the rest: the composer names the audience arriving at
-        # the broken step, and the session is closed before it runs.
-        org_review_count = org.review_count
-        org_rating = org.rating
+        # Snapshotted with the rest, because the session is closed before the
+        # composer runs and the subject line is written from it.
+        org_display_name = org.display_name
         channel_id = channel_row.id
         # Snapshotted with the id, because the footer's opt-out link is signed
         # over this address and the session is closed before the composer runs.
@@ -1278,6 +1324,22 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         if str(f.id) in evidenced
         and f.severity in {Severity.HIGH, Severity.CRITICAL, Severity.MEDIUM}
     ]
+    # A message says one thing, so which finding leads decides what the message
+    # is. Sorting by detector confidence alone made that decision on the wrong
+    # axis: an alt-text check is certain about 5,672 sites and a broken booking
+    # button is rarer and less certain, so the confident, cheap finding led
+    # almost every message and the expensive one was never mentioned.
+    #
+    # Conversion defects first, because they are the only findings that
+    # describe a person who tried to buy and could not. Severity and confidence
+    # break the tie inside each group, which is what they were always good for.
+    pitchable.sort(
+        key=lambda f: (
+            0 if engine_for(f.issue_type, f.page_url) is Engine.CONVERSION else 1,
+            _SEVERITY_ORDER.get(f.severity, 9),
+            -float(f.confidence or 0.0),
+        )
+    )
     if not pitchable:
         return DraftActivityResult(
             draft_id="",
@@ -1310,7 +1372,14 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         pitchable = unused
 
     headline = pitchable[0]
-    offers = select_offers(org_industry, {f.issue_type for f in pitchable})
+    # From the headline finding alone, never from the set.
+    #
+    # Passing every pitchable issue type here is how a message that opened with
+    # a broken navigation link closed by offering "follow-up for enquiries that
+    # do not book immediately" -- an offer some *other* finding on the same site
+    # justified, attached to a paragraph that had nothing to do with it. The
+    # rule is that the evidence hook and the offer are the same subject.
+    offers = select_offers(org_industry, {headline.issue_type})
     if not offers:
         # No draft rather than a mismatched one. This used to fall back to a
         # generic offer, so a lead whose evidence matched nothing in its
@@ -1350,11 +1419,11 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
                 if settings.unsubscribe_secret
                 else f"{portfolio}/unsubscribe"
             ),
-            solution=offer.delivers,
-            # Their own published numbers, used to say what the defect is
-            # costing without inventing a figure nobody measured.
-            review_count=org_review_count,
-            rating=org_rating,
+            offer_key=offer.key,
+            # Decides the vocabulary every sentence about their business is
+            # written in.
+            industry=org_industry,
+            business_name=org_display_name,
             # The lead, so the same lead always composes to the same message.
             # Seeding on anything that varies between runs would produce a
             # second, differently worded draft on an activity retry.
@@ -1421,7 +1490,16 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
                 else report.to_json()
             ),
             validation_passed=report.passed,
-            template_key=request.template_key,
+            # Which engine wrote it and which offer it implies, rather than
+            # the caller's static label -- every draft ever written carried
+            # "first_observation", so the column recorded nothing.
+            #
+            # The sequence step is not lost with it: ``variant`` carries
+            # ":step2" and the request's own key never varied by step anyway.
+            # What is gained is the ability to ask whether conversion messages
+            # out-reply quality ones, which is the only reason to have split
+            # them.
+            template_key=composed.template_key or request.template_key,
             # The composer picked this from the lead id and has always done so.
             # Recording it is what turns a real assignment into a measurable one.
             variant=composed.variant or None,

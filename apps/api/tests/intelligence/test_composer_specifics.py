@@ -43,7 +43,9 @@ def message(**overrides):
         "portfolio_url": "https://portfolio.test",
         "mailing_address": "An address",
         "unsubscribe_url": "https://portfolio.test/u",
-        "solution": "booking fixes",
+        "offer_key": "booking_improvement",
+        "industry": "dentist",
+        "business_name": "Example Dental",
         "variant_seed": "lead-1",
     }
     base.update(overrides)
@@ -58,9 +60,37 @@ def test_the_message_names_the_page() -> None:
     assert "/book" in message().body
 
 
-def test_the_subject_names_the_page() -> None:
-    """ "A broken link" could have been about any site on the internet."""
-    assert "/book" in message().subject
+def test_the_subject_names_the_step_that_is_broken() -> None:
+    """ "A broken link" could have been about any site on the internet.
+
+    The path is no longer the thing the subject leads with -- an owner reads
+    "booking page", not "/book", and the subject is the one line written in
+    their words rather than the crawler's. What has to survive is that the
+    subject names *which* step, and names the business it belongs to.
+    """
+    subject = message().subject
+
+    assert "booking page" in subject
+    assert "Example Dental" in subject or "example.test" in subject
+    for generic in ("A broken step", "Something looks broken", "A broken link"):
+        assert generic not in subject
+
+
+def test_a_dead_footer_link_is_not_sold_as_a_broken_booking_page() -> None:
+    """The reason ``broken_internal_link`` is not one engine.
+
+    It is the second-largest finding type in the database and it covers both
+    "/book returns 404" and "a link in your footer points at a dead press
+    release". Planted violation: match the money-path words as substrings and
+    "/news/2019/facebook-launch" becomes a booking emergency.
+    """
+    urgent = message(finding=Finding(page_url="https://example.test/book"))
+    minor = message(finding=Finding(page_url="https://example.test/news/2019/press"))
+
+    assert "booking page" in urgent.subject
+    assert "booking" not in minor.subject.lower()
+    assert "actively trying to book" in urgent.body
+    assert "actively trying to book" not in minor.body
 
 
 def test_a_root_page_is_named_as_the_home_page() -> None:

@@ -107,9 +107,14 @@ class InstantlyVerifier:
             )
 
         status, word = read_status(payload)
-        if word is not None and status is VerificationStatus.UNKNOWN and word not in (
-            "unknown",
-            "pending",
+        if (
+            word is not None
+            and status is VerificationStatus.UNKNOWN
+            and word
+            not in (
+                "unknown",
+                "pending",
+            )
         ):
             logger.warning(
                 "unmapped verification verdict; treated as unknown",

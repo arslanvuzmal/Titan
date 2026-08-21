@@ -65,9 +65,11 @@ class MarketCampaign:
     territory: str
 
 
-#: Two per market, in the trades that already work in the UK. Deliberately not
-#: one campaign per industry per market -- that is forty-two campaigns, and the
-#: approval queue is human-gated and already three hundred deep.
+#: Two per market, in the trades that already work in the UK, plus one per new
+#: trade in the UK itself. Deliberately not one campaign per industry per market
+#: -- that is a hundred and fifty campaigns, and the approval queue is
+#: human-gated and already three hundred deep. A trade proves itself in one
+#: market before it is given six.
 PLAN: tuple[MarketCampaign, ...] = (
     # ---- United States --------------------------------------------------
     MarketCampaign(
@@ -158,6 +160,62 @@ PLAN: tuple[MarketCampaign, ...] = (
         Industry.MED_SPA,
         "med spas",
         "Melbourne Australia",
+    ),
+    # ---- The trades the catalogue could not name until now --------------
+    #
+    # Six industries and 2,756 businesses, half of them dentists -- which read
+    # as a discovery problem and was a catalogue problem: a campaign stamps its
+    # own industry onto everything it finds, and the enum held six kinds of
+    # business.
+    #
+    # These start in the UK because that is where the sender has history and
+    # where the copy is written for. The rotation carries each of them onward
+    # through ``territories.GLOBAL_ORDER`` as the ground is worked out, the
+    # same way the market campaigns above do.
+    MarketCampaign(
+        "uk-veterinary-manchester",
+        "Veterinary practices, Manchester",
+        Industry.VETERINARY,
+        "veterinary practices",
+        "Manchester UK",
+    ),
+    MarketCampaign(
+        "uk-accountants-manchester",
+        "Accountants, Manchester",
+        Industry.ACCOUNTANT,
+        "accountants",
+        "Manchester UK",
+    ),
+    MarketCampaign(
+        "uk-opticians-birmingham",
+        "Opticians, Birmingham",
+        Industry.OPTICIAN,
+        "opticians",
+        "Birmingham UK",
+    ),
+    MarketCampaign(
+        "uk-physiotherapy-leeds",
+        "Physiotherapy clinics, Leeds",
+        Industry.PHYSIOTHERAPY,
+        "physiotherapy clinics",
+        "Leeds UK",
+    ),
+    MarketCampaign(
+        "uk-salons-liverpool",
+        "Salons and barbers, Liverpool",
+        Industry.SALON_BARBER,
+        "hair salons",
+        "Liverpool UK",
+    ),
+    # A playbook has existed for restaurants since the catalogue was written
+    # and no campaign has ever used it. Built and never wired is
+    # indistinguishable at runtime from never built.
+    MarketCampaign(
+        "uk-restaurants-manchester",
+        "Restaurants, Manchester",
+        Industry.RESTAURANT,
+        "restaurants",
+        "Manchester UK",
     ),
 )
 
