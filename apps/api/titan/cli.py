@@ -70,6 +70,73 @@ def cmd_preflight(_: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_consolidate(args: argparse.Namespace) -> int:
+    """Merge each industry's city campaigns into one business-type campaign.
+
+    Prints the plan and changes nothing unless ``--apply`` is given. The default
+    has to be the safe one: this reassigns every lead, draft and message a
+    campaign owns, and an operator who typed the wrong workspace should get a
+    report rather than a migration.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Workspace
+    from titan.db.session import get_sessionmaker, workspace_unit_of_work
+    from titan.outreach.consolidation import apply_move, build_plan
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id, Workspace.slug).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            row = (await session.execute(query)).first()
+        if row is None:
+            print(f"no workspace matched {args.workspace!r}")
+            return 1
+        workspace_id, slug = row
+
+        async with workspace_unit_of_work(workspace_id) as session:
+            plan = await build_plan(session, workspace_id=workspace_id)
+
+        print(f"Consolidation plan for {slug}")
+        print()
+        print(plan.render() or "  nothing to consolidate")
+        print()
+
+        actionable = plan.actionable
+        if not actionable:
+            print("Nothing to do.")
+            return 0
+
+        campaigns = sum(len(m.absorbed) for m in actionable)
+        print(
+            f"{campaigns} campaign(s) would be absorbed into {len(actionable)}, "
+            f"and each survivor would be marked as spanning all markets."
+        )
+        if not args.apply:
+            print("Dry run. Re-run with --apply to carry it out.")
+            return 0
+
+        for move in actionable:
+            # One transaction per industry. A lead whose drafts stayed behind
+            # has a draft whose campaign is not its own, and every gate that
+            # reads policy from the campaign would then read the wrong one.
+            async with workspace_unit_of_work(workspace_id) as session:
+                moved = await apply_move(session, move, workspace_id=workspace_id)
+            summary = ", ".join(f"{n} {t}" for t, n in sorted(moved.items())) or "nothing"
+            print(f"  {move.industry.value:<20} moved {summary}")
+        print()
+        print("Done. The absorbed campaigns are paused, not deleted.")
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def cmd_check_providers(_: argparse.Namespace) -> int:
     """Live health check. Makes real calls; reports what actually happened."""
     settings = get_settings()
@@ -861,6 +928,21 @@ def main() -> int:
         help="print which campaigns would be checked and change nothing",
     )
     sequences_parser.set_defaults(func=cmd_sequences)
+
+    consolidate_parser = sub.add_parser(
+        "consolidate",
+        help="merge each industry's city campaigns into one business-type campaign",
+    )
+    consolidate_parser.add_argument("--workspace", default="titan")
+    consolidate_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "carry the plan out. Without this the command prints what it would "
+            "do and changes nothing."
+        ),
+    )
+    consolidate_parser.set_defaults(func=cmd_consolidate)
 
     args = parser.parse_args()
     return int(args.func(args))
