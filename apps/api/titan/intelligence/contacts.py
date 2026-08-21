@@ -248,6 +248,23 @@ def email_domain(email: str) -> str:
     return normalize_email(email).partition("@")[2]
 
 
+def is_never_contact(email: str) -> bool:
+    """Whether this address must not receive outreach, whoever published it.
+
+    Three kinds, refused for the same reason -- writing to one is either
+    pointless or actively harmful: mail infrastructure, unattended mailboxes,
+    and addresses that are themselves a published request not to be contacted.
+    Hiring addresses joined them because they are the wrong person by
+    definition, not because they bounce.
+
+    One definition, because it is checked in three places that are days apart:
+    when an address is discovered, when a draft's contact is judged eligible,
+    and once more at the moment of sending -- by which time the list may have
+    been edited, and on this workspace it had been.
+    """
+    return normalize_email(email).partition("@")[0] in NEVER_CONTACT_LOCAL_PARTS
+
+
 def is_role_address(email: str) -> bool:
     return normalize_email(email).partition("@")[0] in ROLE_LOCAL_PARTS
 
@@ -289,7 +306,7 @@ def extract_contacts_from_pages(
             local = normalized.partition("@")[0]
             rejection: str | None = None
 
-            if local in NEVER_CONTACT_LOCAL_PARTS:
+            if is_never_contact(normalized):
                 rejection = f"{local}@ is never an outreach target"
             elif domain in THIRD_PARTY_DOMAINS:
                 rejection = f"{domain} is a third-party platform domain, not the business"
@@ -396,7 +413,7 @@ def check_contact_eligibility(
 
     if not is_valid_email(normalized):
         reasons.append("address is not a syntactically valid email")
-    if normalized.partition("@")[0] in NEVER_CONTACT_LOCAL_PARTS:
+    if is_never_contact(normalized):
         reasons.append(f"{normalized.partition('@')[0]}@ is never an outreach target")
     if source is ContactSource.PATTERN_GUESS:
         reasons.append("address was pattern-guessed and is never eligible")
@@ -449,6 +466,7 @@ __all__ = [
     "check_contact_eligibility",
     "email_domain",
     "extract_contacts_from_pages",
+    "is_never_contact",
     "is_role_address",
     "looks_like_a_guess",
     "normalize_email",

@@ -69,6 +69,7 @@ def sendable_context(**overrides) -> SendContext:
         contact_source=ContactSource.FIRST_PARTY_WEBSITE,
         contact_verification=VerificationStatus.PUBLISHED_FIRST_PARTY,
         contact_is_active=True,
+        recipient_email="owner@prospect.test",
         recipient_timezone="Europe/London",
         evidence_count=2,
         validation_passed=True,
@@ -570,3 +571,50 @@ def test_context_is_pure_data_and_engine_does_no_io() -> None:
     second = evaluate_send(dataclasses.replace(ctx))
     assert first.allowed == second.allowed
     assert first.codes == second.codes
+
+
+# ==========================================================================
+# The address itself, re-checked at the last moment
+# ==========================================================================
+@pytest.mark.parametrize(
+    ("address", "what_it_is"),
+    [
+        ("remove@expressestateagency.co.uk", "a published request not to be contacted"),
+        ("hr@hsmcuae.ae", "hiring, so the wrong person by definition"),
+        ("careers@faceretreat.com", "hiring"),
+        ("abuse@example.test", "monitored by the people who report senders"),
+    ],
+)
+def test_a_never_contact_address_is_refused_at_the_send_gate(
+    address: str, what_it_is: str
+) -> None:
+    """Planted violation: check this only at discovery and all four of these go
+    out.
+
+    Eligibility runs when an address is found. A message then sits in the outbox
+    for days, and the list is edited when somebody notices a category that
+    should never have been written to. All four of these were in the live queue
+    at the moment the hiring category was added -- including one to ``remove@``,
+    waiting three days behind an expired carrier plan.
+    """
+    decision = evaluate_send(sendable_context(recipient_email=address))
+
+    assert not decision.allowed, what_it_is
+    assert any(
+        denial.code is DenyCode.CONTACT_NEVER_TARGET for denial in decision.denials
+    )
+
+
+def test_a_real_recipient_still_passes_the_same_gate() -> None:
+    """Planted violation: match on a substring and Chris stops receiving mail."""
+    decision = evaluate_send(sendable_context(recipient_email="chris@prospect.test"))
+
+    assert decision.allowed
+
+
+def test_an_address_the_context_does_not_carry_is_not_guessed_at() -> None:
+    """None means "not supplied", and inventing a refusal from an absence would
+    stop every send the moment a caller forgot the field."""
+    decision = evaluate_send(sendable_context(recipient_email=None))
+
+    assert decision.allowed

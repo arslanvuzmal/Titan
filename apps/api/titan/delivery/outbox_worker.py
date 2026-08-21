@@ -358,6 +358,7 @@ class OutboxWorker:
             last_contacted_at=lead.last_contacted_at,
             contact_source=channel.source,
             contact_verification=channel.verification_status,
+            recipient_email=row.to_email_normalized,
             contact_is_active=channel.is_active,
             recipient_timezone=location.timezone if location else None,
             recipient_domain_health=domain_health,

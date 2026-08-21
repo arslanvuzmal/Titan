@@ -35,6 +35,7 @@ from titan.db.enums import (
     VerificationStatus,
     verification_permits_sending,
 )
+from titan.intelligence.contacts import is_never_contact
 from titan.intelligence.domain_health import DomainHealth
 from titan.policy.calendars import holiday_on, resolve_country
 from titan.policy.modes import Capability, EffectiveMode, resolve_mode
@@ -60,6 +61,7 @@ class DenyCode(StrEnum):
     CONTACT_GUESSED = "contact_address_was_guessed"
     CONTACT_NOT_VERIFIED = "contact_not_verified"
     CONTACT_INACTIVE = "contact_channel_inactive"
+    CONTACT_NEVER_TARGET = "contact_is_never_an_outreach_target"
     RECIPIENT_DOMAIN_BLOCKED = "recipient_domain_blocked"
     SUPPRESSED = "recipient_suppressed"
     NO_EVIDENCE = "no_evidence_backed_claims"
@@ -152,6 +154,11 @@ class SendContext:
     contact_source: ContactSource
     contact_verification: VerificationStatus
     contact_is_active: bool
+    #: The address itself, normalized. Checked here as well as at discovery
+    #: because the two happen days apart and the list can change in between --
+    #: which it just did, leaving three hiring addresses and one standing
+    #: opt-out request already drafted and queued.
+    recipient_email: str | None
     recipient_timezone: str | None
 
     # message
@@ -334,6 +341,26 @@ def evaluate_send(ctx: SendContext) -> Decision:
 
     if not ctx.contact_is_active:
         denials.append(Denial(DenyCode.CONTACT_INACTIVE, "contact channel is inactive"))
+
+    # Re-checked at the last possible moment, against the list as it stands now
+    # rather than as it stood when the draft was written. Eligibility runs at
+    # discovery; a message can sit in the outbox for days afterwards, and the
+    # list is edited when somebody notices a category that should never have
+    # been written to. Found in the live queue: one message to remove@ -- a
+    # standing request not to be contacted, published in advance -- waiting
+    # three days behind an expired plan, and three to hiring addresses drafted
+    # before those were refused.
+    #
+    # A set lookup on a string. Cheap enough that there is no argument for
+    # trusting a decision made days ago instead.
+    if ctx.recipient_email and is_never_contact(ctx.recipient_email):
+        local = ctx.recipient_email.partition("@")[0]
+        denials.append(
+            Denial(
+                DenyCode.CONTACT_NEVER_TARGET,
+                f"{local}@ is never an outreach target",
+            )
+        )
 
     # Provenance is part of this test, not just the status. A CATCH_ALL domain
     # tells us the server will accept anything, so what decides is who put the
