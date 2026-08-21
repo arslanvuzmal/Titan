@@ -207,9 +207,33 @@ async def test_a_lead_gets_a_location_and_a_domain(db_session, workspace):
     await run_discovery(run_for(workspace, campaign_id), places_result(found(1)))
 
     async with get_sessionmaker()() as s:
-        location = (await s.execute(select(OrganizationLocation))).scalars().one()
+        # Scoped to this workspace. An unscoped ``one()`` asserts something
+        # about the whole database rather than about this lead, and fails the
+        # moment another test leaves a location behind -- which says nothing
+        # about discovery.
+        location = (
+            (
+                await s.execute(
+                    select(OrganizationLocation).where(
+                        OrganizationLocation.workspace_id == workspace
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
         assert location.country_code == "GB"
-        domain = (await s.execute(select(OrganizationDomain))).scalars().one()
+        domain = (
+            (
+                await s.execute(
+                    select(OrganizationDomain).where(
+                        OrganizationDomain.workspace_id == workspace
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
         assert domain.domain == "harborline-1.test"
         # Places said this is their website; nothing has confirmed it serves one.
         assert domain.verified_at is None

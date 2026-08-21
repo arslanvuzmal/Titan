@@ -135,8 +135,26 @@ async def capture_sender_health(
     by_status: dict[str, int] = {}
     try:
         async with workspace_unit_of_work(workspace_id) as session:
+            # Scoped explicitly, not left to the session.
+            #
+            # ``__table__.select()`` is a Core select and goes round the ORM's
+            # workspace guard exactly the way a raw ``text()`` query does -- and
+            # that guard is the only thing scoping reads here, because row-level
+            # security is not switched on. So this captured health for every
+            # sending identity in the database, in every workspace.
+            #
+            # One workspace exists, so it has never mattered in production. It
+            # took a test that left senders behind in another workspace to show
+            # it, which is the whole argument for the filter being written down
+            # rather than assumed.
             identities = (
-                (await session.execute(SenderIdentity.__table__.select()))
+                (
+                    await session.execute(
+                        SenderIdentity.__table__.select().where(
+                            SenderIdentity.__table__.c.workspace_id == workspace_id
+                        )
+                    )
+                )
                 .mappings()
                 .all()
             )
