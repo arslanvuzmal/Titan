@@ -461,3 +461,67 @@ def test_the_word_band_is_counted_before_the_signature() -> None:
     assert ViolationCode.PITCH_TOO_LONG in codes
     # And the old whole-body ceiling would have let it through.
     assert ViolationCode.TOO_LONG not in codes
+
+
+# ==========================================================================
+# What the send gate refuses, weeks after the draft was written
+# ==========================================================================
+
+
+def test_a_stale_draft_is_re_checked_at_send_time() -> None:
+    """A stamp from the day of writing is not a check.
+
+    628 of the 745 drafts standing in the queue fail the rules as they now are,
+    366 of them claiming a client base that cannot be named. Thirty-nine were
+    armed in the outbox, waiting only on a carrier plan being paid. Nothing
+    would have looked at them again.
+
+    Planted violation: return ``draft.validation_passed`` from
+    ``_still_passes_todays_rules`` and every one of them sends.
+    """
+    from titan.delivery.outbox_worker import _still_passes_todays_rules
+
+    class Draft:
+        id = "draft-1"
+        validation_passed = True
+        body_text = (
+            "Hi there,\n\nI was looking through example.test and noticed your "
+            "/book page currently returns HTTP 404.\n\nThat is worth fixing "
+            "because someone clicking through there has already moved past "
+            "browsing treatments and is actively trying to book.\n\nFixing this "
+            "sort of thing is what I do, mostly for firms your size.\n\nWant me "
+            f"to send you the exact fix?\n\n{OWNER}\n{PORTFOLIO}\n{ADDRESS}\n"
+        )
+
+    assert not _still_passes_todays_rules(Draft())
+
+
+def test_a_draft_that_still_reads_well_is_not_blocked() -> None:
+    """The re-check must not become a reason nothing sends."""
+    from titan.delivery.outbox_worker import _still_passes_todays_rules
+
+    composed = message(
+        "broken_internal_link", "1 internal page(s) return an error", "/book", "HTTP 404"
+    )
+
+    class Draft:
+        id = "draft-2"
+        validation_passed = True
+        body_text = composed.body
+
+    assert _still_passes_todays_rules(Draft())
+
+
+def test_a_draft_that_never_passed_is_not_resurrected_by_the_re_check() -> None:
+    from titan.delivery.outbox_worker import _still_passes_todays_rules
+
+    composed = message(
+        "broken_internal_link", "1 internal page(s) return an error", "/book", "HTTP 404"
+    )
+
+    class Draft:
+        id = "draft-3"
+        validation_passed = False
+        body_text = composed.body
+
+    assert not _still_passes_todays_rules(Draft())

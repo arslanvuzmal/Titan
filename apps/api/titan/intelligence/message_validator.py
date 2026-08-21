@@ -685,6 +685,16 @@ PROHIBITED_RHETORIC: tuple[
     (_FEAR_APPEAL, ViolationCode.FEAR_APPEAL, "fear-based framing"),
     (_EXCESSIVE_PRAISE, ViolationCode.EXCESSIVE_PRAISE, "exaggerated flattery"),
     (_AI_SPAM, ViolationCode.AI_SPAM_LANGUAGE, "generic AI-outreach phrasing"),
+    (
+        _UNVERIFIABLE_CLIENTELE,
+        ViolationCode.UNVERIFIABLE_CLIENTELE,
+        "implies a client base that cannot be named",
+    ),
+    (
+        _UNCOUNTED_FINDINGS,
+        ViolationCode.UNCOUNTED_FINDINGS,
+        "claims further findings that carry no evidence",
+    ),
 )
 
 

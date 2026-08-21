@@ -213,14 +213,22 @@ async def build_sendable(
         # correctly refused by the deliverability gate: too short, no postal
         # address in the text. A fixture that could not legitimately be sent
         # would make every delivery test vacuous.
+        #
+        # It went stale once already, for exactly the reason 628 real drafts
+        # did: it said "for businesses of this size", which the message rules
+        # now refuse, and the send gate re-checks the body rather than trusting
+        # the stamp it was given. Every delivery test failed at once, which is
+        # the check doing its job on a fixture rather than on a stranger.
         body_text=(
             "Hi there,\n\n"
-            "On fixture-business.test the booking button returns a 404, so anyone "
-            "who clicks it cannot reach your booking form. That is the step most "
-            "likely to be used by someone ready to act. I build booking and "
-            "follow-up fixes for businesses of this size, and could outline what "
-            "it would take in about ten minutes.\n\n"
-            "Would a short call next week be useful?\n\n"
+            "I was looking through fixture-business.test and noticed your /book "
+            "page currently returns HTTP 404.\n\n"
+            "That is worth fixing because someone clicking through there has "
+            "already moved past browsing treatments and is actively trying to "
+            "book.\n\n"
+            "I build and repair patient-booking flows, so I can send you the "
+            "exact issue and the simplest way I would correct it.\n\n"
+            "Want me to send you the exact fix?\n\n"
             "Arslan Vuzmal Lone\n"
             "https://arslanvuzmallone.dev\n"
             "12 Fictional Row, Testville, TE1 1ST\n"

@@ -76,6 +76,12 @@ from titan.delivery.providers.base import (
 from titan.delivery.suppression import is_suppressed, suppress
 from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
+from titan.intelligence.message_validator import (
+    PITCH_MAX_WORDS,
+    PITCH_MIN_WORDS,
+    pitch_of,
+    prohibited_content,
+)
 from titan.intelligence.sender_auth import is_stale
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.calendars import holiday_on, resolve_country
@@ -154,6 +160,65 @@ def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
     """
     known = [m for m in moments if m is not None]
     return min(known) if known else None
+
+
+#: Rules re-checked at send time rather than trusted from the day of writing.
+#:
+#: ``draft.validation_passed`` is a stamp, and a draft can stand in the queue
+#: for weeks. The same reasoning already governs the recipient address, which is
+#: re-checked here rather than trusted from discovery "because the two happen
+#: days apart and the list can change in between".
+#:
+#: The message rules change too, and when they last changed it was not a small
+#: difference: **628 of the 745 drafts standing in the queue fail the rules as
+#: they now are** -- 366 of them claiming a client base that cannot be named, in
+#: three phrasings that were written, approved and sent. Thirty-nine were armed
+#: in the outbox waiting only on a carrier plan being paid.
+#:
+#: Re-checking makes that class of problem impossible instead of fixing one
+#: instance: a rule tightened today applies to every message not yet sent,
+#: without anybody remembering to go back for the queue.
+#:
+#: Deliberately narrower than the full validator. The footer rules depend on
+#: sender configuration that is re-derived elsewhere in this function, and
+#: re-deriving it here to re-check something that has not changed would invent
+#: failures rather than find them. What is checked is the content: the rhetoric
+#: nothing may contain, and the length a stranger will actually read.
+def _still_passes_todays_rules(draft: MessageDraft) -> bool:
+    """Whether this body would pass the content rules as they stand now.
+
+    Fails open on an unexpected error, deliberately. This check stops sends, and
+    a bug in it must not stop every send -- the stored stamp is the fallback,
+    which is exactly where the gate stood before.
+    """
+    if not draft.validation_passed:
+        return False
+    body = draft.body_text or ""
+    try:
+        violation = prohibited_content(body)
+        if violation is not None:
+            logger.info(
+                "draft no longer passes the message rules; not sending",
+                extra={
+                    "draft_id": str(draft.id),
+                    "violation": violation.code.value,
+                },
+            )
+            return False
+        words = len(pitch_of(body, get_settings().owner_name).split())
+        if not PITCH_MIN_WORDS <= words <= PITCH_MAX_WORDS:
+            logger.info(
+                "draft is outside the message length band; not sending",
+                extra={"draft_id": str(draft.id), "pitch_words": words},
+            )
+            return False
+    except Exception:
+        logger.warning(
+            "could not re-check a draft at send time; using the stored result",
+            extra={"draft_id": str(draft.id)},
+        )
+        return draft.validation_passed
+    return True
 
 
 class OutboxWorker:
@@ -377,7 +442,7 @@ class OutboxWorker:
             ),
             campaign_region=campaign.region,
             evidence_count=_evidence_count(draft),
-            validation_passed=draft.validation_passed,
+            validation_passed=_still_passes_todays_rules(draft),
             provider_idempotency_key=row.provider_idempotency_key,
             approval_decision=approval.decision if approval else None,
             approval_draft_version=approval.draft_version if approval else None,
