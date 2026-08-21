@@ -176,6 +176,7 @@ def cmd_redraft(args: argparse.Namespace) -> int:
             owner_name=owner,
             apply=args.apply,
             limit=args.limit,
+            everything=args.all,
         )
 
         print(f"Drafts the message rules would now refuse, in {slug}")
@@ -1027,6 +1028,14 @@ def main() -> int:
         type=int,
         default=None,
         help="rewrite at most this many, for a first pass you can read",
+    )
+    redraft_parser.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "rewrite every unsent draft, not only the ones a rule would "
+            "refuse. For an improvement to the writing that no rule can catch."
+        ),
     )
     redraft_parser.add_argument(
         "--apply",

@@ -188,15 +188,92 @@ _FOLLOWUP_OPENERS: tuple[str, ...] = (
 # --------------------------------------------------------------------------
 
 #: What a conversion defect is called to the person who owns it. ``None`` means
-#: "use the industry's own name for its money page", which is how a broken link
-#: on ``/consultation`` becomes "consultation page" at a firm and "booking page"
-#: at a clinic.
+#: "read it off the page that is broken", and only if that fails does the
+#: industry's own name for its money page stand in.
+#:
+#: Reading it off the page matters more than it looks. A gym whose ``/join``
+#: page was down got the subject "Quick note about kingstreetgym.co.uk's
+#: free-trial page" while the body named ``/join``; a clinic whose ``/pricing``
+#: page was down was told about its "booking page". Neither is false and both
+#: are a mismatch the reader meets in the first two seconds, between the line
+#: that made them open it and the line underneath.
 _CONVERSION_TOPICS: dict[str, str | None] = {
     "broken_primary_cta": None,
     "broken_internal_link": None,
     "high_friction_contact_form": "enquiry form",
     "no_visible_phone_number": "phone number",
 }
+
+#: The page segment, as its owner says it out loud. Keyed on the same words the
+#: money-path test matches, so a path that routes to the conversion engine can
+#: always be named -- anything unlisted falls back to the trade's money page.
+_PAGE_NOUNS: dict[str, str] = {
+    "appointment": "appointment page",
+    "appointments": "appointment page",
+    "apply": "application page",
+    "basket": "checkout",
+    "book": "booking page",
+    "booking": "booking page",
+    "bookings": "booking page",
+    "callout": "callout request page",
+    "cart": "checkout",
+    "checkout": "checkout",
+    "consult": "consultation page",
+    "consultation": "consultation page",
+    "contact": "contact page",
+    "contact-us": "contact page",
+    "enquire": "enquiry page",
+    "enquiries": "enquiry page",
+    "enquiry": "enquiry page",
+    "estimate": "estimate page",
+    "free-trial": "free-trial page",
+    "get-a-quote": "quote page",
+    "inquiry": "enquiry page",
+    "join": "membership page",
+    "member": "membership page",
+    "membership": "membership page",
+    "menu": "menu page",
+    "new-patient": "new-patient page",
+    "new-patients": "new-patient page",
+    "packages": "packages page",
+    "prices": "pricing page",
+    "pricing": "pricing page",
+    "quote": "quote page",
+    "referral": "referral page",
+    "register": "registration page",
+    "registration": "registration page",
+    "reserve": "reservation page",
+    "schedule": "scheduling page",
+    "service": "services page",
+    "services": "services page",
+    "sign-up": "sign-up page",
+    "signup": "sign-up page",
+    "treatment": "treatments page",
+    "treatments": "treatments page",
+    "trial": "free-trial page",
+    "valuation": "valuation page",
+    "viewing": "viewing page",
+}
+
+
+def _page_noun(page_url: str | None) -> str | None:
+    """What the broken page is called, from the path itself."""
+    url = (page_url or "").strip().lower()
+    if not url:
+        return None
+    path = url.split("://", 1)[-1]
+    path = path[path.find("/") :] if "/" in path else ""
+    path = path.split("?", 1)[0].split("#", 1)[0]
+    segments = [seg for seg in path.replace("_", "-").split("/") if seg]
+    if not segments:
+        return None
+    segments[-1] = segments[-1].rsplit(".", 1)[0]
+    for segment in reversed(segments):
+        noun = _PAGE_NOUNS.get(segment)
+        if noun:
+            return noun
+    return None
+
 
 _CONVERSION_SUBJECTS: tuple[str, ...] = (
     "{business} -- {topic} issue",
@@ -511,7 +588,11 @@ def _subject(
         template = _AUTOMATION_SUBJECTS[index % len(_AUTOMATION_SUBJECTS)]
         subject = template.format(workflow=vern.automation_workflow, **fields)
     elif engine is Engine.CONVERSION:
-        topic = _CONVERSION_TOPICS.get(ctx.finding.issue_type, None) or vern.money_page
+        topic = (
+            _CONVERSION_TOPICS.get(ctx.finding.issue_type)
+            or _page_noun(ctx.finding.page_url)
+            or vern.money_page
+        )
         template = _CONVERSION_SUBJECTS[index % len(_CONVERSION_SUBJECTS)]
         subject = template.format(topic=topic, **fields)
     else:
@@ -521,7 +602,15 @@ def _subject(
     # Registers that open on the topic rather than the name would otherwise send
     # "enquiry form on example.test" -- a sentence fragment starting lower case,
     # which reads as a truncation of something the recipient never saw.
+    #
+    # A domain is exempt, and has to be: capitalising one produces
+    # "Thegigalegal.com -- consultation page issue", which is not how anybody
+    # writes their own address and is the kind of small wrong that reads as a
+    # mail merge.
     subject = subject.strip()
+    first = subject.split(" ", 1)[0]
+    if "." in first and first[:1].islower():
+        return subject[:MAX_SUBJECT_CHARS]
     return (subject[:1].upper() + subject[1:])[:MAX_SUBJECT_CHARS]
 
 

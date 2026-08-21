@@ -124,8 +124,17 @@ class RedraftReport:
         )
 
 
-async def find_stale(workspace_id: uuid.UUID, *, owner_name: str) -> list[StaleDraft]:
-    """Drafts that would be refused at the door, and can still be replaced."""
+async def find_stale(
+    workspace_id: uuid.UUID, *, owner_name: str, everything: bool = False
+) -> list[StaleDraft]:
+    """Drafts that would be refused at the door, and can still be replaced.
+
+    ``everything`` widens it to every unsent draft, whatever its copy says.
+    Needed because not every improvement to the writing is something a rule
+    can refuse: a subject line that named the trade's usual money page while
+    the body named the page that was actually broken passed every check and
+    still met the reader with a mismatch in the first two seconds.
+    """
     out: list[StaleDraft] = []
     async with workspace_session(workspace_id) as session:
         rows = (
@@ -146,8 +155,10 @@ async def find_stale(workspace_id: uuid.UUID, *, owner_name: str) -> list[StaleD
                 reason = "validation_failed: " + (", ".join(codes) or "unknown")
             else:
                 reason = why_stale(draft.body_text, owner_name)
-            if not reason:
+            if not reason and not everything:
                 continue
+            reason = reason or "rewriting every draft"
+
             # A message that has left the building is a record, not a draft.
             sent = (
                 await session.execute(
@@ -314,14 +325,19 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
 
 
 async def redraft_all(
-    workspace_id: uuid.UUID, *, owner_name: str, apply: bool, limit: int | None = None
+    workspace_id: uuid.UUID,
+    *,
+    owner_name: str,
+    apply: bool,
+    limit: int | None = None,
+    everything: bool = False,
 ) -> tuple[RedraftReport, list[str]]:
     """Rewrite every stale draft. Reports without changing anything unless
     ``apply`` is given."""
     report = RedraftReport()
     lines: list[str] = []
 
-    stale = await find_stale(workspace_id, owner_name=owner_name)
+    stale = await find_stale(workspace_id, owner_name=owner_name, everything=everything)
     report.stale = len(stale)
     if limit is not None:
         stale = stale[:limit]
