@@ -111,6 +111,8 @@ export interface PageEvidence {
   review_links: string[];
   structured_data_types: string[];
   technologies: string[];
+  /** Third-party script hosts, deduplicated. Hosts only, never URLs. */
+  script_hosts: string[];
   console_errors: string[];
   failed_requests: string[];
   images_missing_alt: number;

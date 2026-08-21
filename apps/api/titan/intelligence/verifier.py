@@ -30,10 +30,13 @@ reads the stored status.
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from titan.db.enums import VerificationStatus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,21 +170,60 @@ class DeterministicVerifier:
 
 #: Resolvable names, so a settings value selects an adapter without the caller
 #: importing one. A real vendor adapter is added here and nowhere else.
+#:
+#: The two that need no configuration are constructed by name. A vendor adapter
+#: needs a key, so it is built from settings in :func:`build_verifier` instead
+#: of being called with no arguments here.
 _REGISTRY: dict[str, type[NullVerifier] | type[DeterministicVerifier]] = {
     NullVerifier.name: NullVerifier,
     DeterministicVerifier.name: DeterministicVerifier,
 }
 
 
-def build_verifier(name: str | None) -> MailboxVerifier:
+def _instantly(settings: Any) -> MailboxVerifier:
+    """Instantly's verifier, or the null one when it is not usable.
+
+    Falling back rather than raising, for the same reason an unrecognised name
+    does: a missing key must not take the discovery pipeline down, and the null
+    verifier is safe in the direction that matters -- it can never mark an
+    address sendable. Loud in the log, harmless in behaviour.
+    """
+    key = getattr(settings, "instantly_api_key", None)
+    if key is None:
+        logger.error(
+            "TITAN_MAILBOX_VERIFIER=instantly but TITAN_INSTANTLY_API_KEY is not "
+            "set; falling back to the null verifier, which verifies nothing"
+        )
+        return NullVerifier()
+
+    from titan.intelligence.instantly_verifier import InstantlyVerifier
+    from titan.providers.instantly import InstantlyClient
+
+    # from_settings, not the raw value: unwrapping a SecretStr is confined to
+    # the provider layer by an invariant test, and this module is not it.
+    return InstantlyVerifier(InstantlyClient.from_settings(settings))
+
+
+def build_verifier(name: str | None, settings: Any = None) -> MailboxVerifier:
     """The configured verifier, or the null one.
 
     An unrecognised name falls back to null rather than raising. A typo in
     configuration must not take the discovery pipeline down, and the null
     verifier's answers are safe in the direction that matters: it can never
     mark an address sendable.
+
+    ``settings`` is optional so every existing caller keeps working. A vendor
+    adapter without it falls back to null and says so, rather than being
+    constructed with no credentials and failing on the first address.
     """
-    factory = _REGISTRY.get((name or "").strip().lower(), NullVerifier)
+    key = (name or "").strip().lower()
+    if key == "instantly":
+        if settings is None:
+            from titan.config import get_settings
+
+            settings = get_settings()
+        return _instantly(settings)
+    factory = _REGISTRY.get(key, NullVerifier)
     return factory()
 
 

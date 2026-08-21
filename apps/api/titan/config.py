@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     #: validator below refuses it in a deployed environment, because an answer
     #: derived from a hash of the address is indistinguishable from a real one
     #: once it is stored on the contact.
-    mailbox_verifier: Literal["null", "deterministic"] = "null"
+    mailbox_verifier: Literal["null", "deterministic", "instantly"] = "null"
 
     # ------------------------------------------------------------------ smtp
     #: Used both for a real mailbox and for Mailpit, the local capture server

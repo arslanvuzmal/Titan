@@ -20,7 +20,6 @@ from titan.intelligence.languages import (
     why_excluded,
 )
 
-
 # ------------------------------------------------------- the counter-intuitive
 
 

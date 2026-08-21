@@ -76,8 +76,12 @@ const DOM_COLLECTOR_SCRIPT = `() => {
     .map((a) => a.href)
     .filter((h) => h.startsWith('http://') || h.startsWith('https://'));
 
+  // The verbs are word-bounded, and social links are excluded where this is
+  // used. Unbounded, "book" matched inside "facebook.com", so every business
+  // with a Facebook page was recorded as taking online bookings -- 2,056 of
+  // 2,494 crawled businesses, which is what made the number implausible.
   const bookingPattern =
-    /(calendly|cal\\.com|acuity|squareup\\/appointments|setmore|booksy|opentable|resy|simplybook|youcanbook|appointlet|book|schedule|reserve|appointment)/i;
+    /(calendly|cal\\.com|acuity|squareup\\/appointments|setmore|booksy|opentable|resy|simplybook|youcanbook|appointlet|\\b(book|schedule|reserve|appointment))/i;
   const contactPattern = /(contact|get-in-touch|enquir|inquir|quote|consultation)/i;
   const socialPattern =
     /(facebook\\.com|instagram\\.com|linkedin\\.com|x\\.com|twitter\\.com|youtube\\.com|tiktok\\.com|yelp\\.com)/i;
@@ -155,6 +159,30 @@ const DOM_COLLECTOR_SCRIPT = `() => {
   if (w.fbq) tech.push('meta-pixel');
   if (w.hbspt) tech.push('hubspot');
 
+  // Hosts serving script tags, minus our own. A vendor's presence is proved by
+  // its script being loaded, which is true of every widget, tag manager and
+  // booking embed -- and is far more complete than a hand-written detector
+  // list, which by definition only finds what somebody already thought of.
+  const scriptHosts = [];
+  try {
+    const pageHost = location.hostname.replace(/^www\./, '');
+    for (const el of Array.from(document.scripts)) {
+      const src = el.src || '';
+      if (!src.startsWith('http')) continue;
+      let host = '';
+      try {
+        host = new URL(src).hostname.replace(/^www\./, '');
+      } catch (err) {
+        continue;
+      }
+      if (!host || host === pageHost || host.endsWith('.' + pageHost)) continue;
+      scriptHosts.push(host.toLowerCase());
+    }
+  } catch (err) {
+    // A page that forbids reading location or scripts tells us nothing here,
+    // and must not take the rest of the collection down with it.
+  }
+
   const chatSelectors =
     '#intercom-frame,.intercom-launcher,#drift-widget,#tidio-chat,#crisp-chatbox,' +
     '[id*="livechat"],[class*="chat-widget"],#hubspot-messages-iframe-container,.tawk-min-container';
@@ -227,12 +255,23 @@ const DOM_COLLECTOR_SCRIPT = `() => {
       Array.from(new Set([...tels, ...textPhones])).map((p) => p.trim()),
       20,
     ),
-    booking_links: cap(Array.from(new Set(hrefs.filter((h) => bookingPattern.test(h)))), 20),
+    booking_links: cap(
+      Array.from(
+        new Set(hrefs.filter((h) => bookingPattern.test(h) && !socialPattern.test(h))),
+      ),
+      20,
+    ),
     contact_links: cap(Array.from(new Set(hrefs.filter((h) => contactPattern.test(h)))), 20),
     social_links: cap(Array.from(new Set(hrefs.filter((h) => socialPattern.test(h)))), 30),
     review_links: cap(Array.from(new Set(hrefs.filter((h) => reviewPattern.test(h)))), 20),
     structured_data_types: cap(Array.from(new Set(structured)), 30),
     technologies: cap(Array.from(new Set(tech)), 30),
+    // Third-party script hosts, deduplicated. The named detectors above cover
+    // nine things and a business runs more than nine; this is the raw material
+    // that lets a vendor be recognised without a detector being written for it
+    // first. Hosts only -- never full URLs, which carry query strings that can
+    // carry identifiers.
+    script_hosts: cap(Array.from(new Set(scriptHosts)), 30),
     images_missing_alt: images.filter((i) => !i.getAttribute('alt')).length,
     image_count: images.length,
     has_chat_widget: !!document.querySelector(chatSelectors),

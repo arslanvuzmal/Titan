@@ -358,6 +358,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         "titan/delivery/providers/resend.py",
         "titan/models/providers.py",  # build_providers hands keys to clients
         "titan/providers/browser_client.py",  # bearer token for the worker
+        "titan/providers/instantly.py",  # from_settings() builds the Instantly client
         "titan/providers/places.py",  # from_settings() builds the Places client
         "titan/providers/smartlead.py",  # from_settings() builds the Smartlead client
         "titan/api/security.py",  # signs and verifies session tokens

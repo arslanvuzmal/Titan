@@ -100,6 +100,19 @@ class InstantlyClient:
         self._client = client
         self._timeout = timeout
 
+    @classmethod
+    def from_settings(cls, settings: Any) -> InstantlyClient:
+        """Build from configuration, unwrapping the key exactly once.
+
+        The same shape as the Places and Smartlead clients, and for the same
+        reason: an invariant test confines ``get_secret_value()`` to the
+        provider layer, so every caller passes the ``SecretStr`` and only this
+        module sees the value.
+        """
+        if settings.instantly_api_key is None:
+            raise InstantlyError("TITAN_INSTANTLY_API_KEY is not configured")
+        return cls(settings.instantly_api_key.get_secret_value())
+
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(

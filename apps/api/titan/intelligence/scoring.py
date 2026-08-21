@@ -32,7 +32,7 @@ from titan.intelligence.findings import DetectedFinding
 
 #: Bumped whenever a weight or rule changes, and stored on every LeadScore row
 #: so a past decision remains interpretable after a policy change.
-SCORING_POLICY_VERSION = "2026.08.02-1"
+SCORING_POLICY_VERSION = "2026.08.21-1"
 
 
 class Band(StrEnum):
@@ -108,6 +108,12 @@ class ScoringInput:
     contact_is_generic_role: bool
     # commercial
     estimated_project_value_usd: float | None
+    #: How traditional this business is: 1.0 runs nothing, 0.0 runs everything.
+    #:
+    #: None means not measured -- the site was obstructed, or too little of it
+    #: was read -- and is deliberately not the same as 0.0. See
+    #: titan.intelligence.modernisation for why the distinction is load-bearing.
+    modernisation_gap: float | None = None
     # risk
     compliance_risk_flags: tuple[str, ...] = field(default=())
     outreach_risk_flags: tuple[str, ...] = field(default=())
@@ -116,16 +122,27 @@ class ScoringInput:
 #: Weights sum to 100. Kept explicit rather than derived so that a change is a
 #: visible diff and forces a policy-version bump.
 WEIGHTS: dict[str, float] = {
-    "industry_fit": 10.0,
-    "geographic_fit": 5.0,
+    "industry_fit": 8.0,
+    "geographic_fit": 3.0,
     "service_fit": 10.0,
-    "finding_severity": 20.0,
+    "finding_severity": 18.0,
     "finding_confidence": 8.0,
-    "opportunity_breadth": 7.0,
-    "commercial_impact": 10.0,
+    "opportunity_breadth": 5.0,
+    "commercial_impact": 8.0,
     "contact_quality": 15.0,
     "decision_maker": 5.0,
-    "business_activity": 10.0,
+    "business_activity": 8.0,
+    # How far behind the business actually is. Twelve points taken evenly from
+    # six existing dimensions rather than bolted on top, so the total still
+    # sums to 100 and every lead scored before this can be told apart by its
+    # policy version.
+    #
+    # Weighted third-largest on purpose. A broken booking page is a defect and
+    # says how to open a message; having no booking system at all is a position
+    # and says whether to write one. Two of the dimensions it took from --
+    # industry_fit and geographic_fit -- were coarse proxies for exactly this
+    # question, asked before anything could measure it.
+    "modernisation_gap": 12.0,
 }
 
 #: Penalties are applied after the weighted sum, so a high-scoring lead with a
@@ -252,6 +269,12 @@ def score_lead(data: ScoringInput, threshold: int = 70) -> ScoreResult:
     contact_raw, contact_reason = _contact_quality(data)
     components.append(
         Component(
+            "modernisation_gap",
+            *_modernisation(data),
+        )
+    )
+    components.append(
+        Component(
             "contact_quality", contact_raw, WEIGHTS["contact_quality"], contact_reason
         )
     )
@@ -326,6 +349,42 @@ def score_lead(data: ScoringInput, threshold: int = 70) -> ScoreResult:
         threshold_applied=threshold,
         passed_threshold=total >= threshold,
     )
+
+
+def _modernisation(data: ScoringInput) -> tuple[float, float, str]:
+    """The gap dimension: raw, weight, reason.
+
+    **Unmeasured scores zero, and the reason says which zero it is.** That puts
+    a business nobody could read alongside one already running everything, and
+    the two are not the same fact -- but they call for the same action, which is
+    not to prioritise. One does not need us; about the other we know nothing,
+    and there are over a thousand reachable leads we do know something about.
+
+    The alternative -- awarding an average -- would invent a measurement, and
+    the alternative to that -- renormalising the whole score -- would change
+    every other lead's number to accommodate the ones we failed to read.
+
+    So the error is deliberate, it runs in the safe direction, and the reason
+    string carries the distinction the number cannot.
+    """
+    weight = WEIGHTS["modernisation_gap"]
+    if data.modernisation_gap is None:
+        return (
+            0.0,
+            weight,
+            (
+                "modernisation not measured: the site could not be read well enough "
+                "to tell what this business already runs"
+            ),
+        )
+    gap = max(0.0, min(1.0, data.modernisation_gap))
+    if gap >= 0.75:
+        detail = "runs almost none of it; this is who the offer is for"
+    elif gap >= 0.4:
+        detail = "runs some of it, with real gaps"
+    else:
+        detail = "already runs most of it, so there is little to sell"
+    return gap, weight, f"modernisation gap {gap:.0%} -- {detail}"
 
 
 def _contact_quality(data: ScoringInput) -> tuple[float, str]:

@@ -71,6 +71,15 @@ from titan.intelligence.contacts import (
 from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
 from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import MessageContext, validate_message
+from titan.intelligence.modernisation import (
+    PageSignals,
+)
+from titan.intelligence.modernisation import (
+    merge as merge_modernisation,
+)
+from titan.intelligence.modernisation import (
+    profile as modernisation_profile,
+)
 from titan.intelligence.mx import MxCheck, check_many
 from titan.intelligence.opportunities import DerivedOpportunity, derive_opportunities
 from titan.intelligence.playbooks import get_playbook, select_offers
@@ -580,6 +589,29 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
         )
         is_decision_maker = bool(contact and contact.is_decision_maker)
         is_generic_role = bool(contact and contact.is_generic_role)
+        page_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT p.url, p.observations
+                      FROM pages p
+                      JOIN crawl_runs c ON c.id = p.crawl_run_id
+                     WHERE c.research_run_id = :run
+                       AND p.workspace_id = :workspace
+                     LIMIT 40
+                    """
+                ),
+                {"run": uuid.UUID(request.research_run_id), "workspace": workspace_id},
+            )
+        ).all()
+
+    # How far behind this business actually is: what it already runs, and what
+    # it does not. Absence is only read from pages that could actually be read
+    # -- see titan.intelligence.modernisation for why that distinction decides
+    # whether cookie-walled sites rank first or last.
+    gap = merge_modernisation(
+        modernisation_profile(_page_signals(url, obs)) for url, obs in page_rows
+    ).gap
 
     detected = [_to_detected(f) for f in findings]
     evidenced_types = {f.issue_type for f in detected if f.is_pitchable()}
@@ -603,6 +635,7 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
             estimated_project_value_usd=(
                 max((o.estimated_value_usd for o in offers), default=0.0)
             ),
+            modernisation_gap=gap,
         ),
         threshold=min_score,
     )
@@ -1002,6 +1035,41 @@ async def _assess_bounce_risk(
         mx=mx,
         history=history,
         verification=result,
+    )
+
+
+def _page_signals(url: str, observations: dict[str, Any] | None) -> PageSignals:
+    """One stored page, in the shape the modernisation reader takes.
+
+    Defensive throughout: ``observations`` is a JSON column written by a
+    contract that has changed before and will again, and a scorer that raises
+    on an unexpected shape stops every lead rather than one signal.
+    """
+    obs = observations or {}
+
+    def _strings(key: str) -> tuple[str, ...]:
+        value = obs.get(key)
+        if not isinstance(value, list):
+            return ()
+        return tuple(v for v in value if isinstance(v, str))
+
+    host = ""
+    if "://" in url:
+        host = url.split("://", 1)[1].split("/", 1)[0].split(":")[0].lower()
+
+    return PageSignals(
+        technologies=_strings("technologies"),
+        # The nine named detectors find nine things. The script hosts are what
+        # let a vendor be recognised without somebody having written a detector
+        # for it first -- which is why reputation automation read as 0% of
+        # 2,511 businesses before this was collected.
+        script_urls=_strings("script_hosts"),
+        has_chat_widget=bool(obs.get("has_chat_widget")),
+        booking_links=_strings("booking_links"),
+        site_host=host or None,
+        obstructed=bool(obs.get("has_cookie_obstruction")),
+        # A page row exists, so something was fetched and parsed.
+        readable=True,
     )
 
 

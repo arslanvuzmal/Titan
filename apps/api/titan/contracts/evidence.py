@@ -137,6 +137,9 @@ class PageEvidence(StrictModel):
 
     structured_data_types: list[str] = Field(default_factory=list, max_length=40)
     technologies: list[str] = Field(default_factory=list, max_length=60)
+    #: Third-party script hosts, deduplicated. Hosts only, never URLs:
+    #: a full script URL carries query strings, and those carry identifiers.
+    script_hosts: list[str] = Field(default_factory=list, max_length=40)
     console_errors: list[str] = Field(default_factory=list, max_length=60)
     failed_requests: list[str] = Field(default_factory=list, max_length=60)
     images_missing_alt: int = 0
