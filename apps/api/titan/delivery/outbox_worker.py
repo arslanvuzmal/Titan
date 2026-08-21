@@ -570,7 +570,12 @@ class OutboxWorker:
                     SELECT
                       count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
                       count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
-                      count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                      -- Hard and unknown, never soft. See
+                      -- titan.delivery.bounces.COUNTS_AGAINST_REPUTATION
+                      -- for why, and an invariant test that keeps every
+                      -- copy of this predicate saying the same thing.
+                      count(*) FILTER (WHERE bounced_at IS NOT NULL AND bounce_kind IS DISTINCT FROM 'soft')
+                                                                        AS bounced,
                       count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
                       min(sent_at)                                      AS first_send_at,
                       count(*) FILTER (WHERE sent_at >= :day_start)     AS sent_today
@@ -813,7 +818,9 @@ class OutboxWorker:
                     SELECT
                       count(*) FILTER (WHERE sent_at IS NOT NULL)      AS sent,
                       count(*) FILTER (WHERE delivered_at IS NOT NULL) AS delivered,
-                      count(*) FILTER (WHERE bounced_at IS NOT NULL)   AS bounced,
+                      -- Hard and unknown, never soft.
+                      count(*) FILTER (WHERE bounced_at IS NOT NULL AND bounce_kind IS DISTINCT FROM 'soft')
+                                                                       AS bounced,
                       count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
                       FROM messages
                      WHERE workspace_id = :workspace

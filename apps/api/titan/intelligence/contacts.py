@@ -113,6 +113,25 @@ NEVER_CONTACT_LOCAL_PARTS: frozenset[str] = frozenset(
         "legal",
         "compliance",
         "gdpr",
+        # Hiring. Not a deliverability judgement -- a "who is this" judgement.
+        # These addresses exist for job applicants; they are read by whoever
+        # handles hiring, are frequently pointed at an applicant-tracking
+        # system that accepts nothing else, and are as frequently abandoned
+        # between vacancies. A pitch about a broken booking page is the wrong
+        # message to the wrong person however well it is written.
+        #
+        # Found by looking: recruitment@zenlaw.co.uk was one of five bounces on
+        # the live workspace, published on the firm's own contact page and
+        # syntactically perfect.
+        "recruitment",
+        "recruiting",
+        "careers",
+        "career",
+        "jobs",
+        "vacancies",
+        "hr",
+        "cv",
+        "applications",
     }
 )
 
@@ -271,9 +290,7 @@ def extract_contacts_from_pages(
             rejection: str | None = None
 
             if local in NEVER_CONTACT_LOCAL_PARTS:
-                rejection = (
-                    f"{local}@ is a system mailbox and is never an outreach target"
-                )
+                rejection = f"{local}@ is never an outreach target"
             elif domain in THIRD_PARTY_DOMAINS:
                 rejection = f"{domain} is a third-party platform domain, not the business"
             elif org_domain and not _domains_related(domain, org_domain):
@@ -380,7 +397,7 @@ def check_contact_eligibility(
     if not is_valid_email(normalized):
         reasons.append("address is not a syntactically valid email")
     if normalized.partition("@")[0] in NEVER_CONTACT_LOCAL_PARTS:
-        reasons.append("system mailbox; never an outreach target")
+        reasons.append(f"{normalized.partition('@')[0]}@ is never an outreach target")
     if source is ContactSource.PATTERN_GUESS:
         reasons.append("address was pattern-guessed and is never eligible")
     elif source not in ELIGIBLE_CONTACT_SOURCES:

@@ -51,9 +51,19 @@ from titan.outreach.smartlead_markets import (
 from titan.providers.smartlead import SmartleadClient
 from titan.runtime import configure_event_loop
 
-#: Held out of every outreach campaign under the operator's standing rule. A
-#: real working mailbox whose reputation was never meant to carry cold mail.
-FORBIDDEN_MAILBOXES: frozenset[str] = frozenset({"projects@arslanvuzmallone.com"})
+#: Mailboxes held out of every outreach campaign, whatever Smartlead reports.
+#:
+#: Empty as of 2026-08-21. The projects mailbox sat here under a standing rule --
+#: a working mailbox whose reputation was never meant to carry cold mail -- and
+#: the operator has now asked for it in outreach explicitly and in as many
+#: words, having been asked about it before and having kept the rule then. It is
+#: his mailbox and his business, and the risk was put to him plainly before this
+#: line changed.
+#:
+#: The mechanism stays. Emptying the set is one line and refilling it is one
+#: line, and everything downstream still routes through ``excluded_mailboxes``,
+#: so a future exclusion needs no other change anywhere.
+FORBIDDEN_MAILBOXES: frozenset[str] = frozenset()
 
 #: The carrier these campaigns belong to, as the routing table keys them.
 #: Named once because a typo here routes nothing and fails silently.

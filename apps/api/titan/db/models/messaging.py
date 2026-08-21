@@ -223,7 +223,7 @@ class Message(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         Index("ix_messages_ws_state", "workspace_id", "state"),
         Index("ix_messages_provider_msg", "provider_message_id"),
         CheckConstraint(
-            "bounce_kind IS NULL OR bounce_kind IN ('hard', 'soft')",
+            "bounce_kind IS NULL OR bounce_kind IN ('hard', 'soft', 'unknown')",
             name="bounce_kind_allowed",
         ),
         # The soft-bounce counter's read path: every soft bounce for one address
@@ -311,7 +311,10 @@ class Message(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     #: flag, the IMAP parser reads the DSN status code -- and both discarded it,
     #: so soft bounces could not be counted and titan.intelligence.domain_health
     #: had to treat every bounce as hard.
-    bounce_kind: Mapped[str | None] = mapped_column(String(4))
+    #: hard, soft or unknown. Eight characters rather than four: the column
+    #: was sized for the first two before UNKNOWN existed, and writing the
+    #: value the code already produces raised "value too long".
+    bounce_kind: Mapped[str | None] = mapped_column(String(8))
 
     #: When this message landed in the *recipient's* day, stamped at send time.
     #:

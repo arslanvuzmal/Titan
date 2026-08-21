@@ -492,7 +492,9 @@ async def _campaign_outcomes(
                 """
                 SELECT count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
                        count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
-                       count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                       -- Hard and unknown, never soft.
+                       count(*) FILTER (WHERE bounced_at IS NOT NULL AND bounce_kind IS DISTINCT FROM 'soft')
+                                                                        AS bounced,
                        count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
                        count(DISTINCT lead_id) FILTER (
                            WHERE sent_at IS NOT NULL

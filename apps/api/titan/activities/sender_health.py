@@ -72,7 +72,23 @@ async def _measure(
                 """
                 SELECT count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
                        count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
-                       count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                       -- Hard and unknown, never soft. The threshold this
+                       -- feeds is a *hard-bounce* threshold: receivers read a
+                       -- high hard-bounce rate as evidence the sender does not
+                       -- know who it is mailing. A 4.x.x soft bounce is a real
+                       -- mailbox that was briefly unable to accept, and says
+                       -- nothing about list quality.
+                       --
+                       -- Unknown counts, because Smartlead reports a bounce and
+                       -- no diagnosis, and the conservative reading of "we do
+                       -- not know" is the one that protects the mailbox.
+                       count(*) FILTER (
+                           WHERE bounced_at IS NOT NULL
+                             AND bounce_kind IS DISTINCT FROM 'soft'
+                       )                                                 AS bounced,
+                       count(*) FILTER (
+                           WHERE bounced_at IS NOT NULL AND bounce_kind = 'soft'
+                       )                                                 AS soft_bounced,
                        count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained,
                        count(*) FILTER (
                            WHERE sent_at IS NOT NULL
@@ -96,6 +112,10 @@ async def _measure(
         "sent": int(row.sent),
         "delivered": int(row.delivered),
         "bounced": int(row.bounced),
+        # Carried but never fed to the gate: an operator looking at a blocked
+        # mailbox needs to see the composition, and a number that exists only
+        # inside a WHERE clause cannot be looked at.
+        "soft_bounced": int(row.soft_bounced),
         "complained": int(row.complained),
         "sent_today": int(row.sent_today),
     }

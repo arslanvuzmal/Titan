@@ -80,6 +80,32 @@ SOFT_BOUNCE_BACKOFF: tuple[dt.timedelta, ...] = (
 _ATTRIBUTION_WINDOW = dt.timedelta(days=14)
 
 
+#: SQL predicate for a bounce that counts against sender reputation.
+#:
+#: Hard and unknown; never soft. The thresholds these feed are *hard-bounce*
+#: thresholds -- a receiver reads a high hard-bounce rate as evidence the sender
+#: does not know who it is mailing. A 4.x.x soft bounce is a real mailbox that
+#: was briefly unable to accept, and says nothing about list quality.
+#:
+#: Unknown counts. Smartlead reports a bounce and no diagnosis, and the
+#: conservative reading of "we do not know" is the one that protects a mailbox
+#: that took three weeks to warm.
+#:
+#: The queries repeat this text rather than interpolating it -- a predicate
+#: spliced into SQL by an f-string reads as string plumbing and trips the
+#: injection linter, which would then be silenced at four call sites. An
+#: invariant test asserts every copy matches this constant exactly, so drift
+#: is a failing test rather than a mailbox blocked on the wrong evidence.
+#:
+#: Written down because it was written five times, and every copy read
+#: ``bounced_at IS NOT NULL`` while feeding a field named ``hard_bounced``. On
+#: the live workspace that blocked a mailbox holding **zero** hard bounces and
+#: five the provider never explained.
+COUNTS_AGAINST_REPUTATION = (
+    "bounced_at IS NOT NULL AND bounce_kind IS DISTINCT FROM 'soft'"
+)
+
+
 class BounceKind(StrEnum):
     HARD = "hard"
     SOFT = "soft"
@@ -336,6 +362,7 @@ async def _suppress_and_stop(
 
 
 __all__ = [
+    "COUNTS_AGAINST_REPUTATION",
     "SOFT_BOUNCES_TO_SUPPRESS",
     "SOFT_BOUNCE_BACKOFF",
     "SOFT_BOUNCE_WINDOW",
