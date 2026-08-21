@@ -10,12 +10,14 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     false,
 )
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -386,3 +388,68 @@ class CampaignPolicy(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
                 "campaign policy lists pattern_guess as an allowed contact source"
             )
         return errors
+
+
+class CarrierCampaign(Base, WorkspaceScoped, TimestampMixin):
+    """The carrier campaign that serves one market.
+
+    Which Smartlead or Instantly campaign a message is handed to decides one
+    thing above all others: *when it is actually sent*. Both carriers hold one
+    clock per campaign, so the campaign is the timezone.
+
+    That routing used to hang off ``Campaign.smartlead_campaign_id``, which is
+    correct only while a Titan campaign is a single city. A campaign that is a
+    business type spans six markets, and one column cannot name six carriers --
+    so the market names its own carrier here, and a message is routed by the
+    market its recipient is actually in.
+    """
+
+    __tablename__ = "carrier_campaigns"
+    # Partial indexes, not a unique constraint over the nullable column:
+    # Postgres treats NULLs as distinct, so a constraint including ``timezone``
+    # would admit two market rows for one market -- and then which clock a lead
+    # rides would depend on row order.
+    __extra_table_args__ = (
+        Index(
+            "uq_carrier_campaign_market",
+            "workspace_id",
+            "provider",
+            "region",
+            unique=True,
+            postgresql_where=sa_text("timezone IS NULL"),
+        ),
+        Index(
+            "uq_carrier_campaign_clock",
+            "workspace_id",
+            "provider",
+            "timezone",
+            unique=True,
+            postgresql_where=sa_text("timezone IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+
+    #: ``smartlead`` or ``instantly``. Plain text rather than an enum: the set
+    #: of carriers is settings-driven, and adding one must not need a migration
+    #: before a single message can be routed through it.
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # No index: one row per market per carrier is single digits, and the whole
+    # table is read at once by the router rather than looked up per message.
+    region: Mapped[Region] = mapped_column(pg_enum(Region, "region"), nullable=False)
+
+    #: The clock this carrier campaign keeps, when it was provisioned for one
+    #: rather than for a whole market. Null means it is the market's carrier,
+    #: scheduled on the market's representative zone.
+    #:
+    #: An IANA name rather than a SubRegion band: bands are defined only for
+    #: the USA, Canada and Australia, and two of the five markets getting this
+    #: wrong are Europe (Dublin against Berlin) and the Gulf (Riyadh against
+    #: Dubai), which no band can express.
+    timezone: Mapped[str | None] = mapped_column(String(64))
+
+    #: Text, because Smartlead's ids are numeric and Instantly's are not. A
+    #: column typed for one carrier would need migrating to admit the other,
+    #: and this is the value that decides where mail goes.
+    carrier_campaign_id: Mapped[str] = mapped_column(String(64), nullable=False)

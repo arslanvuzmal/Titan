@@ -188,7 +188,7 @@ class SendContext:
     #: Which carrier campaign this message is handed to, when the provider is
     #: one that has them. None means the process-wide default configured for the
     #: worker -- which is what every message used before markets existed.
-    carrier_campaign_id: int | None = None
+    carrier_campaign_id: str | None = None
     #: The band this recipient's own address falls in, derived from their state
     #: and coordinates. More specific than anything the campaign can declare.
     recipient_subregion: SubRegion = SubRegion.UNSPECIFIED

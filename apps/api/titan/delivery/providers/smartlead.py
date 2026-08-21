@@ -71,6 +71,31 @@ _LEAD_STATUS_TO_STATE: dict[str, MessageState] = {
 }
 
 
+def _as_campaign_id(value: str | None) -> int | None:
+    """The carrier id as Smartlead addresses campaigns, or None.
+
+    Smartlead's campaign ids are integers; Instantly's are not. Both arrive
+    here as text from the same routing table, so a value that will not parse
+    means this market's row holds another carrier's id.
+
+    None rather than a raised error, because ``send`` already refuses an
+    unverifiable campaign as a configuration fault. Coercing it into some
+    plausible number is the one outcome that must not happen -- that is a
+    message delivered to a campaign nobody chose, on a clock nobody chose.
+    """
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        logger.error(
+            "carrier campaign id is not a Smartlead id; falling back to the "
+            "configured campaign",
+            extra={"carrier_campaign_id": value[:64]},
+        )
+        return None
+
+
 class SmartleadProvider:
     """Hands one authorized message to a single-step Smartlead campaign."""
 
@@ -144,7 +169,11 @@ class SmartleadProvider:
     # ----------------------------------------------------------------- send
     async def send(self, email: OutboundEmail) -> SendResult:
         """Hand the message over. Never called before Titan's gates have passed."""
-        campaign_id = email.carrier_campaign_id or self._campaign_id
+        # Smartlead addresses campaigns by integer id. A non-numeric value
+        # here means the routing table holds another carrier's id for this
+        # market, which is a configuration fault and not this recipient's
+        # problem -- refused below rather than coerced into a plausible number.
+        campaign_id = _as_campaign_id(email.carrier_campaign_id) or self._campaign_id
         if campaign_id not in self._shape_verified:
             ok, detail = await self.verify_campaign_shape(campaign_id)
             if not ok:

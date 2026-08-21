@@ -37,7 +37,7 @@ from sqlalchemy import select
 
 from titan.config import get_settings
 from titan.db.enums import Region
-from titan.db.models import Campaign
+from titan.db.models import Campaign, CarrierCampaign
 from titan.db.session import workspace_unit_of_work
 from titan.outreach.smartlead_markets import (
     CARRIER_SETTINGS,
@@ -54,6 +54,10 @@ from titan.runtime import configure_event_loop
 #: Held out of every outreach campaign under the operator's standing rule. A
 #: real working mailbox whose reputation was never meant to carry cold mail.
 FORBIDDEN_MAILBOXES: frozenset[str] = frozenset({"projects@arslanvuzmallone.com"})
+
+#: The carrier these campaigns belong to, as the routing table keys them.
+#: Named once because a typo here routes nothing and fails silently.
+PROVIDER = "smartlead"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,11 +83,32 @@ async def record_carriers(
     creating them in Smartlead is only half the job; this is the half that makes
     a Dubai lead leave through the Dubai campaign.
 
+    **The market-to-carrier map is written here too**, and it is the one that
+    matters going forward. The column on the campaign can only be right while a
+    campaign is a single market; ``carrier_campaigns`` is keyed by the market
+    itself, so a campaign covering six of them routes each lead to the carrier
+    for the market that lead is actually in. Both are written from the same
+    source in the same transaction, so they cannot disagree.
+
     Scoped to one workspace and written through the ORM, so the workspace guard
     applies. Returns the number of campaigns updated per market.
     """
     updated: dict[Region, int] = {}
     async with workspace_unit_of_work(workspace_id) as session:
+        existing = {
+            row.region: row
+            for row in (
+                (
+                    await session.execute(
+                        select(CarrierCampaign).where(
+                            CarrierCampaign.provider == PROVIDER
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        }
         for region, carrier_id in carriers.items():
             campaigns = (
                 (await session.execute(select(Campaign).where(Campaign.region == region)))
@@ -93,6 +118,19 @@ async def record_carriers(
             for campaign in campaigns:
                 campaign.smartlead_campaign_id = carrier_id
             updated[region] = len(campaigns)
+
+            row = existing.get(region)
+            if row is None:
+                session.add(
+                    CarrierCampaign(
+                        workspace_id=workspace_id,
+                        provider=PROVIDER,
+                        region=region,
+                        carrier_campaign_id=str(carrier_id),
+                    )
+                )
+            else:
+                row.carrier_campaign_id = str(carrier_id)
     return updated
 
 

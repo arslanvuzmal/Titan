@@ -79,9 +79,13 @@ class OutboundEmail:
     tags: dict[str, str] = field(default_factory=dict)
     #: Which of the provider's own campaigns to hand this to, for providers that
     #: have them. None means the one the worker was configured with. Set per
-    #: message because a campaign's market decides its clock, and one carrier for
+    #: message because the carrier campaign holds the clock: one carrier for
     #: every market is what scheduled a Dubai recipient to London hours.
-    carrier_campaign_id: int | None = None
+    #:
+    #: Text, not an integer. Smartlead's ids are numeric and Instantly's are
+    #: not, and a value that changes type as it crosses the port is a value
+    #: that will eventually arrive as the wrong one.
+    carrier_campaign_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

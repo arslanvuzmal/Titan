@@ -67,6 +67,7 @@ from titan.db.models import (
 )
 from titan.db.session import get_sessionmaker
 from titan.delivery import adaptive_limits, deliverability, quotas, sender_health
+from titan.delivery.carrier_routing import carriers_for_workspace, route_for_market
 from titan.delivery.providers.base import (
     EmailProvider,
     OutboundEmail,
@@ -299,6 +300,35 @@ class OutboxWorker:
 
         domain_health = await self._recipient_domain_health(session, row)
 
+        # Which carrier campaign, and therefore on whose clock. Routed by the
+        # recipient's own country rather than by the campaign's, because a
+        # campaign that is a business type rather than a city has leads in six
+        # markets and one recorded id can serve exactly one of them.
+        carriers = await carriers_for_workspace(
+            session,
+            workspace_id=row.workspace_id,
+            provider=self._settings.email_provider,
+        )
+        route = route_for_market(
+            carriers=carriers,
+            recipient_country_code=location.country_code if location else None,
+            recipient_timezone=location.timezone if location else None,
+            campaign_carrier_id=campaign.smartlead_campaign_id,
+        )
+        if not route.routed_by_market:
+            # Not a failure -- it is what every message did before markets had
+            # their own carriers -- but it is the case where a lead rides a
+            # clock nobody chose for it, so it is said out loud rather than
+            # inferred later from where the message ended up.
+            logger.info(
+                "carrier not chosen by recipient market",
+                extra={
+                    "outbox_message_id": str(row.id),
+                    "reason": route.reason,
+                    "carrier_campaign_id": route.campaign_id,
+                },
+            )
+
         ctx = SendContext(
             settings=self._settings,
             now=self._now(),
@@ -308,7 +338,7 @@ class OutboxWorker:
             campaign_status=campaign.status,
             campaign_sending_authorized=policy.sending_authorized,
             campaign_auto_approve=policy.auto_approve,
-            carrier_campaign_id=campaign.smartlead_campaign_id,
+            carrier_campaign_id=route.campaign_id,
             min_lead_score=policy.min_lead_score,
             require_verified_email=policy.require_verified_email,
             require_evidence_backed_claims=policy.require_evidence_backed_claims,

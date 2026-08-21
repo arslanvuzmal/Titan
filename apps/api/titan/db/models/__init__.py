@@ -14,6 +14,7 @@ from titan.db.models.campaign import (
     Campaign,
     CampaignPolicy,
     CampaignSender,
+    CarrierCampaign,
     IndustryPlaybook,
     MailboxRampState,
 )
@@ -86,6 +87,7 @@ __all__ = [
     "Campaign",
     "CampaignPolicy",
     "CampaignSender",
+    "CarrierCampaign",
     "Contact",
     "ContactChannel",
     "ContactVerification",

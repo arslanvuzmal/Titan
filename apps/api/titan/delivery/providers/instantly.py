@@ -167,11 +167,7 @@ class InstantlyProvider:
     # --------------------------------------------------------------- send
     async def send(self, email: OutboundEmail) -> SendResult:
         """Hand the message over. Never called before Titan's gates have passed."""
-        campaign_id = (
-            str(email.carrier_campaign_id)
-            if email.carrier_campaign_id is not None
-            else self._campaign_id
-        )
+        campaign_id = email.carrier_campaign_id or self._campaign_id
 
         if campaign_id not in self._shape_verified:
             ok, detail = await self.verify_campaign_shape(campaign_id)

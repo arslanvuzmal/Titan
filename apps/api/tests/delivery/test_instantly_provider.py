@@ -158,7 +158,7 @@ async def test_the_shape_is_checked_once_per_campaign_not_once_ever() -> None:
     p = provider(client)
 
     await p.send(email())
-    await p.send(email(carrier_campaign_id=99))
+    await p.send(email(carrier_campaign_id="99"))
 
     assert {c["campaign_id"] for c in client.created} == {"camp-1", "99"}
 

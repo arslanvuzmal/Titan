@@ -245,7 +245,7 @@ async def test_a_message_goes_to_the_carrier_its_campaign_names() -> None:
         return campaign_routes()(request)
 
     result = await provider_with(handler, campaign_id=42).send(
-        email(carrier_campaign_id=77)
+        email(carrier_campaign_id="77")
     )
 
     assert result.accepted is True
@@ -289,7 +289,7 @@ async def test_each_carrier_is_shape_checked_on_its_own() -> None:
 
     assert (await provider.send(email())).accepted is True
 
-    refused = await provider.send(email(carrier_campaign_id=77))
+    refused = await provider.send(email(carrier_campaign_id="77"))
     assert refused.accepted is False
     assert refused.is_configuration_failure is True
     assert "2 sequence steps" in (refused.error_detail or "")
@@ -306,8 +306,8 @@ async def test_a_verified_carrier_is_not_re_checked() -> None:
         return campaign_routes()(request)
 
     provider = provider_with(handler, campaign_id=42)
-    await provider.send(email(carrier_campaign_id=77))
-    await provider.send(email(carrier_campaign_id=77))
+    await provider.send(email(carrier_campaign_id="77"))
+    await provider.send(email(carrier_campaign_id="77"))
 
     assert len(sequence_reads) == 1
 
