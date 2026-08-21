@@ -137,6 +137,79 @@ def cmd_consolidate(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def cmd_redraft(args: argparse.Namespace) -> int:
+    """Rewrite every draft the message rules would now refuse.
+
+    Prints what it would do and changes nothing unless ``--apply`` is given.
+    The default has to be the safe one: this replaces the words waiting to go to
+    several hundred strangers.
+
+    Nothing that has actually been sent is touched. There is no unsending, and
+    rewriting the record of what left the building would destroy the only
+    account of what a recipient read.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.config import get_settings
+    from titan.db.models import Workspace
+    from titan.db.session import get_sessionmaker
+    from titan.outreach.redraft import redraft_all
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id, Workspace.slug).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            row = (await session.execute(query)).first()
+        if row is None:
+            print(f"no workspace matched {args.workspace!r}")
+            return 1
+        workspace_id, slug = row
+        owner = get_settings().owner_name
+
+        report, lines = await redraft_all(
+            workspace_id,
+            owner_name=owner,
+            apply=args.apply,
+            limit=args.limit,
+        )
+
+        print(f"Drafts the message rules would now refuse, in {slug}")
+        print()
+        if not report.stale:
+            print("  none -- every draft in the queue passes.")
+            return 0
+
+        if not args.apply:
+            for line in lines:
+                print(line)
+            print()
+            print(
+                f"{report.stale} draft(s) would be rewritten through the same "
+                f"drafting path a new lead goes through."
+            )
+            print("Dry run. Re-run with --apply to carry it out.")
+            return 0
+
+        print(f"  {report.line()}")
+        for code, count in sorted(report.refused.items()):
+            print(f"    refused: {code:<44} {count}")
+        print()
+        print(
+            "Rewritten drafts await approval again. A queued row keeps its "
+            "place and picks up the new words, and cannot send on an approval "
+            "given for the old ones."
+        )
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def cmd_check_providers(_: argparse.Namespace) -> int:
     """Live health check. Makes real calls; reports what actually happened."""
     settings = get_settings()
@@ -943,6 +1016,27 @@ def main() -> int:
         ),
     )
     consolidate_parser.set_defaults(func=cmd_consolidate)
+
+    redraft_parser = sub.add_parser(
+        "redraft",
+        help="rewrite every draft the message rules would now refuse",
+    )
+    redraft_parser.add_argument("--workspace", default="titan")
+    redraft_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="rewrite at most this many, for a first pass you can read",
+    )
+    redraft_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "carry it out. Without this the command prints what it would "
+            "rewrite and changes nothing."
+        ),
+    )
+    redraft_parser.set_defaults(func=cmd_redraft)
 
     args = parser.parse_args()
     return int(args.func(args))

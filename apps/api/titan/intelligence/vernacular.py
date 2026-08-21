@@ -86,6 +86,12 @@ _OPERATIONAL: frozenset[str] = frozenset({"no_booking_or_enquiry_path"})
 #: /book page is down" and "a link in your footer points at a dead press
 #: release". Sending the first as an emergency is right; sending the second as
 #: one is the thing that makes a reader stop reading.
+#:
+#: The pages a visitor chooses *what* to buy on are here too, not only the ones
+#: they buy on. A broken /treatments page at a day spa was being called "a
+#: modest issue" -- true of a dead press release and false of the page standing
+#: between somebody and a booking. Every trade in the catalogue sells from one
+#: of these, so none of them is a footer link.
 _MONEY_PATH_WORDS: frozenset[str] = frozenset(
     {
         "appointment",
@@ -113,16 +119,24 @@ _MONEY_PATH_WORDS: frozenset[str] = frozenset(
         "join",
         "member",
         "membership",
+        "menu",
         "new-patient",
         "new-patients",
+        "packages",
+        "prices",
+        "pricing",
         "quote",
         "referral",
         "register",
         "request",
         "reserve",
         "schedule",
+        "service",
+        "services",
         "signup",
         "sign-up",
+        "treatment",
+        "treatments",
         "trial",
         "valuation",
         "viewing",
