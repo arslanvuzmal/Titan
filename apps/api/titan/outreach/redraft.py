@@ -56,12 +56,20 @@ LIVE_OUTBOX: frozenset[OutboxStatus] = frozenset(
 
 #: Draft states a redraft may replace. A rejected or expired draft is a decision
 #: somebody made and is left alone.
+#:
+#: ``VALIDATION_FAILED`` is here because it is not a decision, it is an attempt
+#: that did not land -- and such a draft is unsendable by definition, so
+#: replacing it can only improve matters. It earned its place: a first pass run
+#: without the sender's mailing address in the environment produced 306 of them
+#: with perfectly good copy and no footer, and without this they would have been
+#: unreachable by the very command that made them.
 REDRAFTABLE: frozenset[DraftStatus] = frozenset(
     {
         DraftStatus.GENERATED,
         DraftStatus.AWAITING_APPROVAL,
         DraftStatus.APPROVED,
         DraftStatus.QUEUED,
+        DraftStatus.VALIDATION_FAILED,
     }
 )
 
@@ -130,7 +138,14 @@ async def find_stale(workspace_id: uuid.UUID, *, owner_name: str) -> list[StaleD
             .all()
         )
         for draft in rows:
-            reason = why_stale(draft.body_text, owner_name)
+            if draft.status is DraftStatus.VALIDATION_FAILED:
+                codes = [
+                    v.get("code", "")
+                    for v in (draft.validation_report or {}).get("violations", [])
+                ]
+                reason = "validation_failed: " + (", ".join(codes) or "unknown")
+            else:
+                reason = why_stale(draft.body_text, owner_name)
             if not reason:
                 continue
             # A message that has left the building is a record, not a draft.
@@ -191,6 +206,26 @@ async def _research_run_for(
     return None
 
 
+async def _free_key(session: AsyncSession, key: str) -> str:
+    """A parking place for the old key that nothing else is using.
+
+    A lead can be redrafted twice -- the first pass produced 306 drafts that
+    could not send -- and a fixed suffix collides with the draft the first pass
+    parked there, which violates the unique constraint and fails the whole
+    rewrite for that lead.
+    """
+    for attempt in range(1, 100):
+        candidate = f"{key}#superseded-{attempt}"[:200]
+        taken = (
+            await session.execute(
+                select(MessageDraft.id).where(MessageDraft.idempotency_key == candidate)
+            )
+        ).first()
+        if taken is None:
+            return candidate
+    raise RuntimeError(f"no free parking key for {key!r} after 99 attempts")
+
+
 async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
     """Replace one draft. Returns "" on success, or the refusal code.
 
@@ -199,9 +234,8 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
     """
     from titan.activities.pipeline import generate_draft
 
-    aside = f"{stale.idempotency_key}#superseded"[:200]
-
     async with workspace_unit_of_work(workspace_id) as session:
+        aside = await _free_key(session, stale.idempotency_key)
         await session.execute(
             update(MessageDraft)
             .where(MessageDraft.id == stale.draft_id)
@@ -219,6 +253,9 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
         )
     )
 
+    # A draft row exists but did not pass is not a success. The first pass
+    # reported 578 rewritten when 306 of them could not send, because it counted
+    # rows written rather than messages that would leave.
     if not result.draft_id:
         # Nothing composed. Put the lead back exactly as it was: a draft the
         # gate refuses is worse than no draft only if it can still be sent, and
@@ -235,6 +272,14 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
         return result.violation_codes[0] if result.violation_codes else "refused"
 
     new_id = uuid.UUID(result.draft_id)
+    # Written, but it still has to pass. Reporting a row as rewritten when it
+    # cannot send is how a run says 578 and means 272.
+    outcome = (
+        ""
+        if result.validation_passed
+        else "wrote_but_failed_validation: "
+        + (", ".join(result.violation_codes) or "unknown")
+    )
     async with workspace_unit_of_work(workspace_id) as session:
         await session.execute(
             update(MessageDraft)
@@ -265,7 +310,7 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
             await session.execute(
                 update(Message).where(Message.id == message_id).values(draft_id=new_id)
             )
-    return ""
+    return outcome
 
 
 async def redraft_all(
