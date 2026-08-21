@@ -99,6 +99,33 @@ def cmd_check_providers(_: argparse.Namespace) -> int:
         else:
             print("  smartlead:     skipped (not configured)")
 
+        if settings.email_provider == "instantly" and settings.instantly_api_key:
+            from titan.providers.instantly import InstantlyClient
+
+            instantly = InstantlyClient(settings.instantly_api_key.get_secret_value())
+            ok, detail = await instantly.health_check()
+            print(f"  instantly:     {'ok' if ok else 'FAIL'} - {detail}")
+            failures += 0 if ok else 1
+            if ok and settings.instantly_campaign_id:
+                # The carrier campaign must send exactly one step, and the only
+                # place that is currently discovered is the first send. Checked
+                # here so a misshapen campaign is found while an operator is
+                # watching, not when a message is already in the queue.
+                from titan.delivery.providers.instantly import InstantlyProvider
+
+                shape_ok, shape_detail = await InstantlyProvider(
+                    instantly, campaign_id=settings.instantly_campaign_id
+                ).verify_campaign_shape()
+                label = "ok" if shape_ok else "FAIL"
+                print(f"  instantly campaign: {label} - {shape_detail}")
+                failures += 0 if shape_ok else 1
+            elif ok:
+                print("  instantly campaign: no TITAN_INSTANTLY_CAMPAIGN_ID set")
+                failures += 1
+            await instantly.aclose()
+        else:
+            print("  instantly:     skipped (not configured)")
+
         try:
             from sqlalchemy import text
 
