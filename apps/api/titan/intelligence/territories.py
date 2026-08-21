@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from titan.db.enums import Region, SubRegion
+from titan.intelligence.languages import english_outreach_ok
 
 #: Zones used by more than one territory, named once. A typo in an IANA string
 #: is not a syntax error -- ``zoneinfo`` raises at the moment of use, deep in
@@ -436,6 +437,83 @@ def next_territory(
     return None
 
 
+#: The order markets are worked in by a campaign that spans all of them.
+#:
+#: Not alphabetical and not by size. English-first markets lead because the copy
+#: is written in English and nothing has yet established that it lands anywhere
+#: else; the Gulf follows because its private clinics work in English too; the
+#: European markets that pass the language gate come last, because they are the
+#: ones whose suitability rests on an index rather than on the language itself.
+#:
+#: A campaign rotates through this order, so its early searches -- the ones that
+#: happen before anybody has looked at the results -- land where the message is
+#: most likely to be read.
+GLOBAL_ORDER: tuple[Region, ...] = (
+    Region.UK,
+    Region.USA,
+    Region.CANADA,
+    Region.AUSTRALIA,
+    Region.MIDDLE_EAST,
+    Region.EUROPE,
+)
+
+
+def workable(territory: Territory, *, english_only: bool = True) -> bool:
+    """Whether Titan can write to this territory in the language it writes.
+
+    ``english_only`` is the state of the world today rather than a preference:
+    the composer writes English and nothing translates it. A campaign told
+    otherwise takes every territory, which is the correct behaviour the day a
+    second language exists and the wrong one until then.
+    """
+    if not english_only:
+        return True
+    return english_outreach_ok(territory.country_code)
+
+
+def all_territories(*, english_only: bool = True) -> tuple[Territory, ...]:
+    """Every territory worth working, in the order a global campaign works them.
+
+    The market ordering is ``GLOBAL_ORDER``; inside a market the catalogue's own
+    order holds, which is densest first.
+    """
+    ordered: list[Territory] = []
+    for region in GLOBAL_ORDER:
+        ordered.extend(
+            t for t in for_region(region) if workable(t, english_only=english_only)
+        )
+    return tuple(ordered)
+
+
+def next_territory_anywhere(
+    *,
+    exhausted: set[str],
+    english_only: bool = True,
+) -> Territory | None:
+    """The next place worth searching for a campaign that works every market.
+
+    The counterpart to :func:`next_territory` for a campaign that is a business
+    type rather than a city. ``next_territory`` deliberately refuses to leave
+    its market, and that refusal is right for a campaign that declared one --
+    it was written because a UK campaign quietly searching Phoenix would send on
+    the wrong clock, in the wrong working week.
+
+    A campaign that declares *no* market is not that campaign. Its leads are
+    routed to their own market's carrier by ``titan.delivery.carrier_routing``,
+    so the clock and the working week follow the recipient rather than the
+    campaign, and crossing a border is what it is for rather than an accident.
+
+    None means every workable territory is spent -- a real answer, and one that
+    says "widen the business type or add a language" rather than "search again".
+    """
+    spent = {name.strip().casefold() for name in exhausted}
+    for territory in all_territories(english_only=english_only):
+        if territory.query_name.casefold() in spent:
+            continue
+        return territory
+    return None
+
+
 def timezone_of(query_name: str | None) -> str | None:
     """The IANA zone of a stored geography, when it is a known territory.
 
@@ -461,11 +539,15 @@ def describe(territory: Territory) -> str:
 
 
 __all__ = [
+    "GLOBAL_ORDER",
     "TERRITORIES",
     "Territory",
+    "all_territories",
     "describe",
     "find",
     "for_region",
     "next_territory",
+    "next_territory_anywhere",
     "timezone_of",
+    "workable",
 ]

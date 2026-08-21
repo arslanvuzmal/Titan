@@ -121,6 +121,22 @@ class Campaign(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
         nullable=False,
     )
 
+    #: Whether this campaign is a business type rather than a place.
+    #:
+    #: A campaign crossed with a city exhausts one market and stops. A campaign
+    #: that is "dentists worth writing to" rotates through every territory the
+    #: language gate admits, and each of its leads is routed to the carrier for
+    #: the market that lead is actually in -- so the clock and the working week
+    #: follow the recipient rather than the campaign.
+    #:
+    #: Distinct from ``region == UNSPECIFIED``, which means nobody has said.
+    #: "Every market" and "not stated" must not be the same value: the twenty
+    #: leftover test campaigns in this workspace are the second, and a rule that
+    #: read them as the first would put them to work.
+    spans_all_markets: Mapped[bool] = mapped_column(
+        nullable=False, default=False, server_default=false()
+    )
+
     #: Which carrier campaign this one's leads are handed to.
     #:
     #: Null falls back to ``TITAN_SMARTLEAD_CAMPAIGN_ID``, which is how every

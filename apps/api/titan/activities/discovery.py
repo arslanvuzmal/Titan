@@ -194,6 +194,7 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         blockers = targeting_blockers(
             business_type=campaign.target_business_type,
             geography=campaign.target_geography,
+            spans_all_markets=bool(campaign.spans_all_markets),
         )
         if blockers:
             return DiscoverActivityResult(refused_reason="; ".join(blockers))
@@ -245,28 +246,57 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         # admits nothing -- which is exactly what every campaign here was doing
         # each cycle.
         #
-        # The replacement stays inside the campaign's own market. A UK campaign
-        # that quietly started searching Phoenix would be sending on the wrong
-        # clock, in the wrong working week, with a message written for somewhere
-        # else.
+        # Where it moves to depends on what kind of campaign it is, and the two
+        # answers are both right for their own case:
+        #
+        # A campaign that declared a market stays inside it. That refusal was
+        # written because a UK campaign quietly searching Phoenix would send on
+        # the wrong clock, in the wrong working week, with a message written for
+        # somewhere else.
+        #
+        # A campaign that is a *business type* declared no market, and its leads
+        # are routed to their own market's carrier by carrier_routing -- so the
+        # clock and the working week follow the recipient. Crossing a border is
+        # what it exists to do. What still binds it is language: it takes only
+        # territories where an English cold email is a reasonable thing to send.
+        spans_markets = bool(campaign.spans_all_markets)
         spent = await _exhausted_geographies(
             session, campaign_id=campaign_id, business_type=business_type
         )
-        if geography.strip().casefold() in spent:
-            moved_on = territories.next_territory(
-                campaign.region, exhausted=spent, current=geography
+        if geography.strip().casefold() in spent or (spans_markets and not geography):
+            moved_on = (
+                territories.next_territory_anywhere(exhausted=spent)
+                if spans_markets
+                else territories.next_territory(
+                    campaign.region, exhausted=spent, current=geography
+                )
             )
             if moved_on is not None:
                 logger.info(
                     "geography exhausted; moving to the next territory",
                     extra={
                         "campaign_id": str(campaign_id),
-                        "from": geography,
+                        "from": geography or "(none)",
                         "to": moved_on.query_name,
+                        "scope": "all markets"
+                        if spans_markets
+                        else campaign.region.value,
                     },
                 )
                 geography = moved_on.query_name
                 country_code = moved_on.country_code
+
+    if not geography.strip():
+        # Only reachable for a campaign that spans markets: every territory the
+        # language gate admits has been worked out. A real answer, and one that
+        # says "widen the business type, or add a language" rather than
+        # "search again" -- so it is reported, not retried.
+        return DiscoverActivityResult(
+            refused_reason=(
+                "every territory this campaign can write to is worked out; "
+                "widen the business type or add a language"
+            )
+        )
 
     settings = get_settings()
     if settings.google_places_api_key is None:

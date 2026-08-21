@@ -128,20 +128,32 @@ class Admission:
         return self.refusal is None
 
 
-def targeting_blockers(*, business_type: str | None, geography: str | None) -> list[str]:
+def targeting_blockers(
+    *,
+    business_type: str | None,
+    geography: str | None,
+    spans_all_markets: bool = False,
+) -> list[str]:
     """Why this campaign cannot be discovered for.
 
     Mirrors ``_authorization_blockers`` in the planner: a list of sentences an
     operator can act on, rather than a bare False. A campaign with no targeting
     is not broken -- it has simply never been told who to look for -- and the
     difference matters in the notification.
+
+    ``spans_all_markets`` excuses the geography and nothing else. A campaign
+    that is a business type has no city of its own by design; the rotation hands
+    it one from the catalogue before any search is built, so the search is still
+    bounded to a named metro. What the geography blocker guards against -- an
+    unbounded query returning businesses on other continents -- cannot happen
+    either way, and refusing here would refuse the whole design.
     """
     blockers: list[str] = []
     if not (business_type or "").strip():
         blockers.append(
             "campaign has no target_business_type; there is nothing to search for"
         )
-    if not (geography or "").strip():
+    if not (geography or "").strip() and not spans_all_markets:
         blockers.append(
             "campaign has no target_geography; an unbounded search would return "
             "businesses on other continents"
