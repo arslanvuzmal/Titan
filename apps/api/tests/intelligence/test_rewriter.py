@@ -9,6 +9,8 @@ business.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from titan.intelligence.composer import ComposedMessage
 from titan.intelligence.message_validator import PITCH_MAX_WORDS
@@ -392,3 +394,39 @@ def test_the_sentence_allowance_can_clear_the_message_ceiling() -> None:
     typical_pitch_words = 67
 
     assert typical_pitch_words * MAX_SENTENCE_GROWTH > PITCH_MAX_WORDS
+
+
+def test_a_rewrite_carries_every_field_the_composer_set() -> None:
+    """The message a rewrite returns is the same message, reworded.
+
+    ``ComposedMessage`` gained ``engine`` and ``template_key`` and the rewriter
+    kept building a fresh one from four fields, so every draft the model
+    successfully rewrote lost its engine stamp and fell back to the caller's
+    static label -- 388 of 749 in a single run. The copy was correct and only
+    the attribution was gone, which is why nothing noticed.
+
+    Planted violation: build a new ComposedMessage here instead of replacing,
+    and this fails for whichever field was forgotten.
+    """
+    from dataclasses import fields
+
+    from titan.intelligence.composer import ComposedMessage
+    from titan.intelligence.vernacular import Engine
+
+    original = ComposedMessage(
+        subject="A subject",
+        body="Hi there,\n\nOne.\n\nTwo.\n",
+        claim_map=[{"sentence": "One.", "claim": "c"}],
+        variant="v2",
+        engine=Engine.CONVERSION,
+        template_key="conversion:booking_improvement",
+        pitch_words=61,
+    )
+
+    carried = replace(original, body="Hi there,\n\nOne again.\n\nTwo.\n")
+
+    reworded = {"body", "claim_map", "variant"}
+    for f in fields(ComposedMessage):
+        if f.name in reworded:
+            continue
+        assert getattr(carried, f.name) == getattr(original, f.name), f.name

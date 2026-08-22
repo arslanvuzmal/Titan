@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
@@ -193,8 +193,18 @@ def apply_rewrites(
                 entry["sentence"] = rewrite.candidate
 
     return RewriteOutcome(
-        message=ComposedMessage(
-            subject=message.subject,
+        # ``replace`` rather than a fresh ComposedMessage, so a field added to
+        # the message tomorrow survives a rewrite without anybody remembering
+        # this line.
+        #
+        # It was a fresh one, and it cost exactly that: ``engine`` and
+        # ``template_key`` were added to ComposedMessage and not copied here, so
+        # every draft the model successfully rewrote lost its engine stamp and
+        # fell back to the caller's static label. 388 of 749 in one run --
+        # invisible, because the copy was correct and only the attribution was
+        # gone.
+        message=replace(
+            message,
             body=body,
             claim_map=claim_map,
             variant=f"{message.variant}+model" if message.variant else "model",
