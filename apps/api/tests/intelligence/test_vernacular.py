@@ -245,7 +245,7 @@ def test_each_industry_is_written_to_in_its_own_words() -> None:
     assert "browsing treatments" in said[Industry.DENTIST]
     assert "try the place or join it" in said[Industry.GYM_FITNESS]
     assert "choosing a treatment" in said[Industry.MED_SPA]
-    assert "interested in a property" in said[Industry.REAL_ESTATE]
+    assert "found a property they want to ask about" in said[Industry.REAL_ESTATE]
     assert len({body for body in said.values()}) == len(said)
 
 
@@ -525,3 +525,24 @@ def test_a_draft_that_never_passed_is_not_resurrected_by_the_re_check() -> None:
         body_text = composed.body
 
     assert not _still_passes_todays_rules(Draft())
+
+
+@pytest.mark.parametrize("industry", list(Industry))
+def test_the_consequence_is_true_of_every_conversion_finding(
+    industry: Industry,
+) -> None:
+    """One sentence covers four different defects, so it may not name one.
+
+    An estate agency with a 51-field enquiry form was told the problem was
+    unlike "an ordinary broken link" -- a sentence written for a broken link
+    and reused for a form. The consequence explains why the *page* matters, and
+    nothing about it may assume how the page fails.
+
+    Planted violation: put "broken" back into any conversion line and this
+    fails for that trade.
+    """
+    vern = vernacular_for(industry)
+    lowered = vern.conversion_consequence.lower()
+
+    for defect_word in ("broken", "error", "404", "returns", "link"):
+        assert defect_word not in lowered, vern.conversion_consequence

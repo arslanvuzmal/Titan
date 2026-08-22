@@ -217,9 +217,9 @@ _LAW_FIRM = Vernacular(
     noun="firm",
     money_page="consultation page",
     conversion_consequence=(
-        "For a law firm that is particularly unfortunate, because someone "
+        "For a law firm that is particularly unfortunate, because somebody "
         "reaching that page is likely already considering making an enquiry, "
-        "so the broken step sits very close to conversion."
+        "so it sits very close to the point of instruction."
     ),
     conversion_capability=(
         "I work on website and intake flows like this and can show you exactly "
@@ -342,9 +342,9 @@ _REAL_ESTATE = Vernacular(
     noun="agency",
     money_page="enquiry page",
     conversion_consequence=(
-        "For an estate agency that sits directly in the path of someone already "
-        "interested in a property, so I would treat it differently from an "
-        "ordinary broken link."
+        "For an estate agency that sits directly in the path of somebody who "
+        "has already found a property they want to ask about, rather than "
+        "somewhere they were browsing."
     ),
     conversion_capability=(
         "I build enquiry flows that route new leads to the right agent, and can "
@@ -468,8 +468,8 @@ _ACCOUNTANT = Vernacular(
     money_page="enquiry page",
     conversion_consequence=(
         "Accountancy enquiries cluster around filing deadlines and go to "
-        "whoever answers first, so a broken step there costs a client rather "
-        "than a visit."
+        "whoever answers first, so anything in the way there costs a client "
+        "rather than a visit."
     ),
     conversion_capability=(
         "I work on enquiry and onboarding flows like this and can show you "
