@@ -318,9 +318,18 @@ def test_jwks_url_is_derived_from_the_issuer() -> None:
 # The request path: identity in, database-authoritative role out
 # ==========================================================================
 @pytest_asyncio.fixture
-async def clerk_client(jwks_server, monkeypatch):
-    """The real ASGI app, in clerk auth mode, wired to the fixture issuer."""
+async def clerk_client(jwks_server, monkeypatch, database_available: bool):
+    """The real ASGI app, in clerk auth mode, wired to the fixture issuer.
+
+    Every request through it resolves an account, which is a database read --
+    so gate on the database the way the fixtures around it do. Without this the
+    tests that never reach a ``workspace`` fixture fail on a connection timeout
+    instead of skipping with their 350 siblings.
+    """
     import os
+
+    if not database_available:
+        pytest.skip("integration database unavailable (set TITAN_TEST_DATABASE_URL)")
 
     os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
     # Settings is frozen by design, so the mode is switched through the

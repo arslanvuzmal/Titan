@@ -69,5 +69,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     for table, column in _COLUMNS:
         op.execute(
-            f"UPDATE {table} SET {column} = 'unknown' WHERE {column} = 'catch_all'"  # noqa: S608
+            f"UPDATE {table} SET {column} = 'unknown' WHERE {column} = 'catch_all'"
         )

@@ -24,6 +24,7 @@ const NAV = [
   { href: '/crm/meetings', label: 'Meetings' },
   { href: '/crm/campaigns', label: 'Campaigns' },
   { href: '/crm/messages', label: 'Delivery' },
+  { href: '/crm/performance', label: 'Performance' },
   { href: '/crm/compliance', label: 'Compliance' },
   { href: '/crm/operations', label: 'Operations' },
 ];

@@ -33,6 +33,7 @@ from titan.activities import sender_health as sender_health_activities
 from titan.activities import smartlead_replies as smartlead_reply_activities
 from titan.activities import stale_runs as stale_run_activities
 from titan.activities import stranded as stranded_activities
+from titan.activities import trickle as trickle_activities
 from titan.activities import verification as verification_activities
 from titan.activities import vitals as vitals_activities
 from titan.config import get_settings
@@ -106,6 +107,7 @@ async def main() -> None:
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
             stale_run_activities.reopen_stale_research_runs,
+            trickle_activities.release_held_contacts,
             *vitals_activities.ALL_VITALS_ACTIVITIES,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
             *optout_activities.ALL_OPTOUT_ACTIVITIES,

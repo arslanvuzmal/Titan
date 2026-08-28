@@ -34,10 +34,13 @@ from titan.intelligence.findings import (
 from titan.intelligence.message_validator import (
     MessageContext,
     ViolationCode,
+    sentences,
     validate_message,
 )
 from titan.intelligence.playbooks import PLAYBOOKS, get_playbook, select_offers
 from titan.intelligence.scoring import Band, ScoringInput, score_lead
+
+from tests.support import sample_message
 
 NOW = dt.datetime(2026, 8, 2, 12, 0, tzinfo=dt.UTC)
 
@@ -597,24 +600,11 @@ def test_unknown_industry_falls_back_to_general() -> None:
 # ==========================================================================
 # Message validator
 # ==========================================================================
-GOOD_BODY = """Hi there,
+# The one canonical sendable message, shared with the delivery and
+# redraft fixtures. Three copies of this used to drift apart every time
+# the word band moved -- see tests/support/sample_message.py.
+GOOD_BODY = sample_message.body()
 
-I was looking at bellrose-dental.test and noticed the "Book an appointment"
-button on your homepage opens a page that returns a 404, so anyone who clicks
-it cannot get through to your booking form.
-
-That is worth fixing because someone clicking there has already moved past
-browsing treatments and is actively trying to book.
-
-I build and repair patient-booking flows, so I can send you the exact issue.
-
-Want me to send you the exact fix?
-
-Arslan Vuzmal Lone
-https://arslanvuzmallone.dev
-12 Fictional Row, Testville, TE1 1ST
-Unsubscribe: https://arslanvuzmallone.dev/unsubscribe?t=abc
-"""
 
 CLAIM_SENTENCE = (
     'I was looking at bellrose-dental.test and noticed the "Book an appointment" '
@@ -629,12 +619,15 @@ def message_context(**overrides) -> MessageContext:
         body=GOOD_BODY,
         claim_map=[
             {
-                "sentence": CLAIM_SENTENCE,
+                "sentence": sentence,
                 "claim": "primary booking CTA returns 404",
                 "finding_id": "finding-1",
                 "evidence_ids": ["ev-1"],
                 "source_url": "https://bellrose-dental.test/",
             }
+            # Split with the validator's own splitter rather than by hand: a
+            # fixture that disagrees with it tests the splitter, not the rule.
+            for sentence in sentences(sample_message.claimed_text())
         ],
         evidenced_finding_ids=frozenset({"finding-1"}),
         sender_name="Arslan Vuzmal Lone",

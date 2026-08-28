@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import pytest
 from titan.intelligence.composer import ComposedMessage
-from titan.intelligence.message_validator import PITCH_MAX_WORDS
+from titan.intelligence.message_validator import PITCH_MAX_WORDS, PITCH_MIN_WORDS
 from titan.intelligence.rewriter import (
     MAX_SENTENCE_GROWTH,
     RewriteRefusal,
@@ -391,7 +391,10 @@ def test_the_sentence_allowance_can_clear_the_message_ceiling() -> None:
     ``_rephrase`` checks the reassembled body and falls back to the
     deterministic text, the way every other rewrite failure resolves.
     """
-    typical_pitch_words = 67
+    # Derived from the band rather than hardcoded, so widening the band cannot
+    # quietly turn this assertion into a tautology or a lie. A message in the
+    # middle of the permitted range is the honest "typical" case.
+    typical_pitch_words = (PITCH_MIN_WORDS + PITCH_MAX_WORDS) // 2
 
     assert typical_pitch_words * MAX_SENTENCE_GROWTH > PITCH_MAX_WORDS
 

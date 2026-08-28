@@ -25,6 +25,7 @@ from titan.models.gateway import (
     CircuitBreaker,
     ModelError,
     ModelGateway,
+    ModelResponse,
     Route,
     SchemaValidationError,
 )
@@ -384,3 +385,120 @@ def test_ordinary_business_copy_is_not_flagged() -> None:
         "online or call us. Our system for reminders keeps patients on track."
     )
     assert looks_like_injection(benign) == []
+
+
+# ==========================================================================
+# Cost settlement
+#
+# NVIDIA and Gemini return token counts and no price. Reading that silence as
+# $0.00 is what left 1,850 of 1,862 recorded runs free of charge and the budget
+# caps permanently unable to fire -- a spend guard that never sees spend.
+# ==========================================================================
+class _PricelessProvider:
+    """A provider that reports tokens but no cost, as NVIDIA and Gemini do."""
+
+    def __init__(
+        self,
+        name: str = "nvidia",
+        *,
+        input_tokens: int | None = 400_000,
+        output_tokens: int | None = 600_000,
+        cost_usd: float = 0.0,
+        cost_reported: bool = False,
+    ) -> None:
+        self.name = name
+        self._input = input_tokens
+        self._output = output_tokens
+        self._cost = cost_usd
+        self._reported = cost_reported
+
+    async def complete(self, *, model_id: str, **_: object) -> ModelResponse:
+        return ModelResponse(
+            text='{"issue_type": "a", "confidence": 0.1}',
+            provider=self.name,
+            model_id=model_id,
+            input_tokens=self._input,
+            output_tokens=self._output,
+            latency_ms=1,
+            cost_usd=self._cost,
+            cost_reported=self._reported,
+        )
+
+    async def list_models(self) -> list[str]:
+        return ["llama-3.1-8b"]
+
+    async def health_check(self) -> tuple[bool, str]:
+        return True, "priceless"
+
+
+def _priced_gateway(provider: _PricelessProvider, **overrides) -> ModelGateway:
+    route = f"{provider.name}:llama-3.1-8b"
+    config = {
+        "model_route_extraction": route,
+        "model_route_research": route,
+        "model_route_verification": route,
+        "model_route_message": route,
+        "model_route_premium": route,
+    }
+    config.update(overrides)
+    return ModelGateway({provider.name: provider}, settings(**config))
+
+
+async def test_unpriced_call_is_costed_from_its_own_tokens() -> None:
+    gw = _priced_gateway(_PricelessProvider())
+    _, response = await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+
+    # 1M tokens at nvidia's $0.20/M hint.
+    assert response.cost_usd == pytest.approx(0.20)
+    assert response.cost_reported is False
+    assert gw.calls[0]["cost_usd"] == pytest.approx(0.20)
+    assert gw.calls[0]["cost_estimated"] is True
+
+
+async def test_a_provider_reported_price_is_taken_verbatim() -> None:
+    provider = _PricelessProvider(cost_usd=0.0731, cost_reported=True)
+    gw = _priced_gateway(provider)
+    _, response = await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+
+    # Not re-derived from the rate card: the invoice wins over the hint.
+    assert response.cost_usd == pytest.approx(0.0731)
+    assert response.cost_reported is True
+    assert gw.calls[0]["cost_estimated"] is False
+
+
+async def test_unpriced_spend_accumulates_so_the_budget_can_fire() -> None:
+    """The regression that mattered: a cap that never sees spend never fires."""
+    gw = _priced_gateway(_PricelessProvider())
+    gw.budget = BudgetLedger(
+        workspace_limit_usd=0.15, campaign_limit_usd=100.0, lead_limit_usd=100.0
+    )
+
+    # The pre-call reservation is small, so the first call is allowed through
+    # and -- per the documented asymmetry -- recorded in full at what it cost.
+    await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+    assert gw.budget.workspace_spent == pytest.approx(0.20)
+
+    with pytest.raises(BudgetExceededError):
+        await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+
+
+async def test_unpriced_call_without_token_counts_falls_back_to_the_reservation() -> None:
+    """No price and no tokens: record what was reserved, never zero."""
+    provider = _PricelessProvider(input_tokens=None, output_tokens=None)
+    gw = _priced_gateway(provider)
+    _, response = await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+
+    # complete_typed's default max_tokens=1500 at nvidia's $0.20/M.
+    assert response.cost_usd == pytest.approx(1500 / 1_000_000 * 0.20)
+    assert response.cost_usd > 0.0
+    assert gw.calls[0]["cost_estimated"] is True
+
+
+async def test_the_mock_provider_stays_genuinely_free() -> None:
+    """Otherwise every test in the suite accrues phantom spend."""
+    gw, _ = gateway(['{"issue_type": "a", "confidence": 0.1}'])
+    _, response = await gw.complete_typed(ModelTask.EXTRACTION, Finding, bundle())
+
+    assert response.cost_usd == 0.0
+    assert gw.budget.workspace_spent == 0.0
+    assert gw.calls[0]["cost_estimated"] is False

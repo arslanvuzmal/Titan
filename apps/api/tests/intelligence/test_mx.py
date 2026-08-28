@@ -193,3 +193,59 @@ def test_the_detail_record_states_what_mx_does_not_prove() -> None:
 
     assert detail["status"] == MxStatus.PRESENT.value
     assert "never upgrades verification_status" in str(detail["note"])
+
+
+# ==========================================================================
+# NXDOMAIN is asked twice
+# ==========================================================================
+def test_a_single_nxdomain_is_not_believed(monkeypatch) -> None:
+    """Caught on a live bulk pass: 436 addresses, 202 NXDOMAIN verdicts, and
+    every domain spot-checked afterwards resolved perfectly a minute later.
+
+    The resolver had buckled under the burst. NXDOMAIN is the one answer here
+    that condemns every address at a domain permanently, so it has to say so
+    twice.
+    """
+    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    calls: list[str] = []
+
+    def flaky(domain: str):
+        calls.append(domain)
+        if len(calls) == 1:
+            raise DomainDoesNotExist(domain)
+        return ["mx.real-business.test"], True
+
+    check = check_mx("real-business.test", resolver=flaky)
+
+    assert check.status is MxStatus.PRESENT
+    assert not check.is_conclusively_undeliverable
+    assert len(calls) == 2
+
+
+def test_a_domain_that_says_nxdomain_twice_is_believed(monkeypatch) -> None:
+    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    calls: list[str] = []
+
+    def gone(domain: str):
+        calls.append(domain)
+        raise DomainDoesNotExist(domain)
+
+    check = check_mx("not-registered.test", resolver=gone)
+
+    assert check.status is MxStatus.NXDOMAIN
+    assert check.is_conclusively_undeliverable
+    assert len(calls) == 2
+
+
+def test_a_resolving_domain_is_asked_once(monkeypatch) -> None:
+    """The retry costs nothing on the path that matters."""
+    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    calls: list[str] = []
+
+    def fine(domain: str):
+        calls.append(domain)
+        return ["mx.real-business.test"], True
+
+    check_mx("real-business.test", resolver=fine)
+
+    assert len(calls) == 1

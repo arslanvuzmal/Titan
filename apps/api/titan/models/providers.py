@@ -116,6 +116,11 @@ class OpenAICompatibleProvider:
             raise ModelError(f"{self.name}: unexpected response shape") from exc
 
         usage = body.get("usage") or {}
+        # Only OpenRouter puts a price in the usage block; NVIDIA and Cloudflare
+        # send token counts and nothing else. Say which happened rather than
+        # letting a missing key read as a genuine $0.00 -- the gateway prices
+        # the call from its tokens when nobody reported one.
+        reported = usage.get("cost")
         return ModelResponse(
             text=text,
             provider=self.name,
@@ -123,9 +128,8 @@ class OpenAICompatibleProvider:
             input_tokens=usage.get("prompt_tokens"),
             output_tokens=usage.get("completion_tokens"),
             latency_ms=latency_ms,
-            # Most OpenAI-compatible endpoints do not report cost; the gateway's
-            # estimate stands in, and cost_estimated stays true in the ledger.
-            cost_usd=float(usage.get("cost") or 0.0),
+            cost_usd=float(reported or 0.0),
+            cost_reported=reported is not None,
             raw=body,
         )
 
@@ -238,7 +242,9 @@ class GeminiProvider:
             input_tokens=usage.get("promptTokenCount"),
             output_tokens=usage.get("candidatesTokenCount"),
             latency_ms=latency_ms,
+            # Gemini never prices a response; the gateway does it from tokens.
             cost_usd=0.0,
+            cost_reported=False,
             raw=body,
         )
 
@@ -315,7 +321,10 @@ class MockChatProvider:
             input_tokens=len(system) // 4 + len(user) // 4,
             output_tokens=len(text) // 4,
             latency_ms=1,
+            # Genuinely free, and saying so keeps test ledgers at zero instead
+            # of pricing the mock off a rate card.
             cost_usd=0.0,
+            cost_reported=True,
         )
 
     async def list_models(self) -> list[str]:

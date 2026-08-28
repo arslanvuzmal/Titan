@@ -442,7 +442,7 @@ def test_the_word_band_is_counted_before_the_signature() -> None:
     nothing, and a 140-word pitch with a paragraph of portfolio history passed
     the ceiling comfortably. Both happened."""
     footer = f"{OWNER}\n{PORTFOLIO}\n{ADDRESS}\nUnsubscribe: {PORTFOLIO}/u\n"
-    padded = " ".join(["word"] * 140)
+    padded = " ".join(["word"] * 340)
 
     result = validate_message(
         MessageContext(

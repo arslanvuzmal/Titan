@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,6 +90,28 @@ def why_stale(body: str, owner_name: str) -> str:
     if not PITCH_MIN_WORDS <= words <= PITCH_MAX_WORDS:
         return f"outside_the_word_band ({words} words)"
     return ""
+
+
+def _rendered(
+    payload: dict[str, Any] | None, draft: MessageDraft | None
+) -> dict[str, Any]:
+    """The queued payload, with the rewritten words in place of the old ones.
+
+    Only the three fields a rewrite can change. Everything else in there -- the
+    recipient, the sender, the unsubscribe headers -- was resolved against the
+    sender identity and the contact channel when the row was queued, and
+    re-deriving it here would be a second, differently-wrong answer to a
+    question that was already answered correctly.
+    """
+    updated = dict(payload or {})
+    if draft is None:
+        return updated
+    updated["subject"] = draft.subject
+    updated["text_body"] = draft.body_text
+    # Absent rather than empty, matching queue_message: a provider reads None as
+    # "text only", where an empty string is a blank HTML alternative.
+    updated["html_body"] = draft.body_html or None
+    return updated
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,10 +323,23 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
         # A queued row keeps its place and picks up the new words. It cannot
         # send on an approval given for the old ones: the new draft is version
         # one with no approval against it, and the gate refuses that.
+        #
+        # Repointing the foreign key is not enough, and quietly was not. The
+        # outbox carries its own rendered copy of the message -- subject, text
+        # and HTML, snapshotted when the row was queued -- and that copy is what
+        # the worker hands the provider. The send-time gate, meanwhile, re-reads
+        # the *draft*. A row repointed and not re-rendered is therefore gated on
+        # the new words and sends the old ones, which is the one disagreement in
+        # this system that reaches a stranger.
+        replacement = await session.get(MessageDraft, new_id)
         live = (
             (
                 await session.execute(
-                    select(OutboxMessage.id, OutboxMessage.message_id).where(
+                    select(
+                        OutboxMessage.id,
+                        OutboxMessage.message_id,
+                        OutboxMessage.payload,
+                    ).where(
                         OutboxMessage.draft_id == stale.draft_id,
                         OutboxMessage.status.in_(LIVE_OUTBOX),
                     )
@@ -312,14 +348,22 @@ async def redraft_one(workspace_id: uuid.UUID, stale: StaleDraft) -> str:
             .tuples()
             .all()
         )
-        for outbox_id, message_id in live:
+        for outbox_id, message_id, payload in live:
             await session.execute(
                 update(OutboxMessage)
                 .where(OutboxMessage.id == outbox_id)
-                .values(draft_id=new_id)
+                .values(
+                    draft_id=new_id,
+                    payload=_rendered(payload, replacement),
+                )
             )
             await session.execute(
-                update(Message).where(Message.id == message_id).values(draft_id=new_id)
+                update(Message)
+                .where(Message.id == message_id)
+                .values(
+                    draft_id=new_id,
+                    subject=replacement.subject if replacement else None,
+                )
             )
     return outcome
 

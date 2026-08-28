@@ -43,7 +43,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"  # noqa: S105 - the OAuth scheme name, not a secret
+    token_type: str = "bearer"
     expires_in: int
     workspace_id: uuid.UUID
     role: str

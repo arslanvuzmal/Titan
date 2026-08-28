@@ -67,6 +67,9 @@ PROVIDER_IMPORT_ALLOWLIST = {
     "titan/delivery/providers/instantly.py",
     "titan/delivery/providers/smartlead.py",
     "titan/delivery/providers/smtp.py",
+    # Wraps one SmtpProvider per mailbox; it is a provider itself and is
+    # listed in PROVIDER_MODULES below, so the rule still covers it.
+    "titan/delivery/providers/smtp_pool.py",
     "titan/delivery/webhooks.py",  # verification + normalization only
     "titan/workers/outbox.py",  # the outbox worker process entrypoint
     "titan/cli.py",  # health checks and preflight
@@ -78,6 +81,7 @@ PROVIDER_MODULES = (
     "titan.delivery.providers.instantly",
     "titan.delivery.providers.smartlead",
     "titan.delivery.providers.smtp",
+    "titan.delivery.providers.smtp_pool",
 )
 
 

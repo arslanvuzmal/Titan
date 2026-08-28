@@ -7,6 +7,18 @@ holding an email provider client; this one is the only process holding a mailbox
 password, and it never sends -- an automatic reply to a reply is the one thing a
 system like this must not be able to do by accident.
 
+**One poller per mailbox.** The sender pool sends from three addresses; a
+poller reading one of them sees a third of the bounces and a third of the
+unsubscribe requests, and the other two thirds look exactly like silence.
+When ``TITAN_MAILBOX_FILE`` is configured, every mailbox in it that has IMAP
+credentials gets its own collector and they run concurrently; the single
+``TITAN_IMAP_*`` mailbox remains the path when no pool file is set.
+
+One mailbox failing does not stop the others. A password that stopped working
+on ``sales@`` must not take ``outreach@``'s unsubscribe handling down with it,
+so each collector is supervised on its own and its failure is logged and
+reported rather than propagated.
+
 Shuts down the same way the outbox worker does: on SIGTERM it stops starting new
 poll cycles and lets the current one finish, so a deploy cannot interrupt a
 batch between "recorded in Postgres" and "marked read on the server". Even if it
@@ -24,6 +36,7 @@ import uuid
 from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.delivery.mailbox import ImapConfig, ImapMailbox
+from titan.delivery.mailboxes import MailboxConfigError
 from titan.delivery.reply_collector import ReplyCollector
 from titan.observability.logging import configure_logging
 from titan.runtime import configure_event_loop
@@ -31,13 +44,59 @@ from titan.runtime import configure_event_loop
 logger = logging.getLogger("titan.workers.inbound")
 
 
-def build_mailbox() -> tuple[ImapMailbox, str]:
-    """Resolve the configured mailbox, or refuse to start.
+def build_mailboxes() -> list[tuple[ImapMailbox, str]]:
+    """Every mailbox this poller should read, with the address of each.
 
-    Returns the mailbox and the address it reads, which the collector needs in
-    order to recognise Titan's own outbound copies sitting in the folder.
+    The address is returned alongside because the collector needs it to
+    recognise Titan's own outbound copies sitting in the folder.
+
+    The pool file wins when it is set. It is the same file the outbox worker
+    authenticates with, so a mailbox that can send is a mailbox that gets
+    read -- rather than two lists of mailboxes maintained separately, which
+    is how an address comes to send mail nobody is watching for replies to.
     """
     settings = get_settings()
+
+    if settings.mailbox_file:
+        from titan.delivery.mailboxes import load_mailboxes
+
+        registry = load_mailboxes(settings.mailbox_file)
+        pooled: list[tuple[ImapMailbox, str]] = []
+        for account in registry.accounts():
+            imap = account.imap
+            if imap is None:
+                continue
+            pooled.append(
+                (
+                    ImapMailbox(
+                        ImapConfig(
+                            host=imap.host,
+                            port=imap.port,
+                            username=imap.username,
+                            password=imap.password,
+                            security=imap.security,
+                            folder=settings.imap_folder,
+                        )
+                    ),
+                    account.from_email,
+                )
+            )
+        if pooled:
+            unreadable = [
+                account.from_email
+                for account in registry.accounts()
+                if account.imap is None
+            ]
+            if unreadable:
+                # Named, because a sending mailbox nobody reads is where an
+                # unsubscribe request goes to die.
+                logger.warning(
+                    "mailboxes can send but cannot be read; their bounces and "
+                    "unsubscribe requests will not be collected",
+                    extra={"mailboxes": unreadable},
+                )
+            return pooled
+
     blockers = settings.reply_collection_errors()
     if blockers:
         raise RuntimeError("reply poller cannot start: " + "; ".join(blockers))
@@ -54,7 +113,7 @@ def build_mailbox() -> tuple[ImapMailbox, str]:
         security=settings.imap_security,
         folder=settings.imap_folder,
     )
-    return ImapMailbox(config), settings.imap_username
+    return [(ImapMailbox(config), settings.imap_username)]
 
 
 def _default_workspace() -> uuid.UUID | None:
@@ -95,44 +154,86 @@ async def main() -> None:
     #
     # So it exits zero and says why. The log line is the signal; a container
     # that completed is not a container that failed.
-    blockers = get_settings().reply_collection_errors()
-    if blockers:
-        logger.warning(
-            "reply poller not started: IMAP is not configured. Campaign replies "
-            "are still collected from the carrier on the delivery poll; mail "
-            "sent directly to the mailbox is not.",
-            extra={"blockers": blockers},
+    if not settings.mailbox_file:
+        blockers = get_settings().reply_collection_errors()
+        if blockers:
+            logger.warning(
+                "reply poller not started: IMAP is not configured. Campaign "
+                "replies are still collected from the carrier on the delivery "
+                "poll; mail sent directly to the mailbox is not.",
+                extra={"blockers": blockers},
+            )
+            return
+
+    try:
+        mailboxes = build_mailboxes()
+    except MailboxConfigError as exc:
+        # Loud and finished, not a crash loop. This worker runs under a restart
+        # policy, and a file with a placeholder still in it would otherwise
+        # restart every thirty seconds forever -- which is how a healthy stack
+        # came to look like it was falling over, 110 restarts ago. The outbox
+        # worker still refuses to start on the same file, because there the
+        # credential is what puts mail on the wire.
+        logger.error(
+            "reply poller not started: the mailbox file cannot be used",
+            extra={"detail": str(exc)},
         )
         return
-
-    mailbox, address = build_mailbox()
+    if not mailboxes:
+        logger.warning(
+            "reply poller not started: no mailbox has IMAP credentials",
+        )
+        return
     default_workspace = _default_workspace()
 
     # Authenticate before entering the loop. A wrong password otherwise shows up
     # as a poller that runs forever and finds nothing, which reads as "no
     # replies yet" rather than as a fault.
-    ok, detail = await mailbox.health_check()
-    if not ok:
-        raise RuntimeError(f"cannot read mailbox {address}: {detail}")
+    #
+    # One bad mailbox no longer stops the process. It used to raise, which was
+    # right when there was one mailbox and is wrong with three: a stale
+    # password on the least important of them would otherwise stop the other
+    # two from collecting anybody's unsubscribe request.
+    checks = await asyncio.gather(*(mailbox.health_check() for mailbox, _ in mailboxes))
+    usable: list[tuple[ImapMailbox, str]] = []
+    for (mailbox, address), (ok, detail) in zip(mailboxes, checks, strict=True):
+        if ok:
+            usable.append((mailbox, address))
+            continue
+        logger.error(
+            "cannot read mailbox; its replies and bounces will not be collected",
+            extra={"mailbox": address, "detail": detail},
+        )
+    if not usable:
+        raise RuntimeError(
+            "no mailbox could be opened: "
+            + "; ".join(
+                f"{address}: {detail}"
+                for (_, address), (_, detail) in zip(mailboxes, checks, strict=True)
+            )
+        )
 
     logger.info(
         "reply poller starting",
         extra={
-            "mailbox": address,
+            "mailboxes": [address for _, address in usable],
+            "unreadable": len(mailboxes) - len(usable),
             "folder": settings.imap_folder,
             "poll_seconds": settings.imap_poll_seconds,
             "batch_size": settings.imap_batch_size,
             "default_workspace": str(default_workspace) if default_workspace else None,
-            "mailbox_check": detail,
         },
     )
 
-    collector = ReplyCollector(
-        mailbox,
-        mailbox_address=address,
-        default_workspace_id=default_workspace,
-        batch_size=settings.imap_batch_size,
-    )
+    collectors = [
+        ReplyCollector(
+            mailbox,
+            mailbox_address=address,
+            default_workspace_id=default_workspace,
+            batch_size=settings.imap_batch_size,
+        )
+        for mailbox, address in usable
+    ]
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -144,10 +245,27 @@ async def main() -> None:
             signal.signal(sig, lambda *_: stop.set())
 
     try:
-        await collector.run_forever(stop, interval_seconds=settings.imap_poll_seconds)
+        # return_exceptions so one collector dying is reported rather than
+        # cancelling its siblings mid-batch.
+        outcomes = await asyncio.gather(
+            *(
+                collector.run_forever(stop, interval_seconds=settings.imap_poll_seconds)
+                for collector in collectors
+            ),
+            return_exceptions=True,
+        )
+        for (_, address), outcome in zip(usable, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.error(
+                    "reply collector stopped with an error",
+                    extra={"mailbox": address, "error": repr(outcome)},
+                )
     finally:
         await dispose_engine()
-        logger.info("reply poller stopped cleanly", extra={"mailbox": address})
+        logger.info(
+            "reply poller stopped cleanly",
+            extra={"mailboxes": [address for _, address in usable]},
+        )
 
 
 if __name__ == "__main__":

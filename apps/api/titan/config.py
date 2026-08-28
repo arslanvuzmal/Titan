@@ -97,9 +97,25 @@ class Settings(BaseSettings):
     #: email, models, or the database (threat model: browser escape).
     browser_worker_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8800")
     browser_worker_token: SecretStr | None = None
-    crawl_max_pages: int = Field(default=12, ge=1, le=200)
+    #: How many crawls the browser worker will serve at once. Must match the
+    #: worker's own ``BROWSER_WORKER_CONCURRENCY``: this side uses it to stop
+    #: sending more crawls than there are lanes to run them, and a number
+    #: larger than the worker's means asking for 503s on purpose.
+    browser_worker_concurrency: int = Field(default=4, ge=1, le=64)
+    #: Raised from 12 alongside the contact-page paths in
+    #: :data:`titan.intelligence.playbooks.CONTACT_PATHS`, and the two numbers
+    #: have to move together. A playbook now asks for up to eighteen paths --
+    #: its own findings pages plus the pages that carry an address -- and the
+    #: crawler stops at this ceiling however many were requested. Adding the
+    #: paths without raising the budget would not have improved contact yield;
+    #: it would only have traded the evidence pages away for it, which is the
+    #: worse half of the trade for a system that cannot write without evidence.
+    crawl_max_pages: int = Field(default=18, ge=1, le=200)
     crawl_max_depth: int = Field(default=2, ge=0, le=5)
-    crawl_timeout_seconds: int = Field(default=120, ge=5, le=900)
+    #: Moved with the page budget above so the per-page allowance stays sane:
+    #: eighteen pages inside the old 120s left about six seconds each, and a
+    #: slow site would have hit the wall mid-crawl and returned partial evidence.
+    crawl_timeout_seconds: int = Field(default=180, ge=5, le=900)
     crawl_max_response_bytes: int = Field(default=5_000_000, ge=10_000)
     crawl_max_redirects: int = Field(default=5, ge=0, le=20)
     #: Sent to every site Titan crawls, and the one place the system names
@@ -181,7 +197,21 @@ class Settings(BaseSettings):
     #: validator below refuses it in a deployed environment, because an answer
     #: derived from a hash of the address is indistinguishable from a real one
     #: once it is stored on the contact.
-    mailbox_verifier: Literal["null", "deterministic", "instantly"] = "null"
+    mailbox_verifier: Literal["null", "deterministic", "instantly", "smtp_probe"] = "null"
+    #: What the probe introduces itself as, and who a complaint goes to.
+    #:
+    #: Both are required for TITAN_MAILBOX_VERIFIER=smtp_probe and neither
+    #: has a default, deliberately. A probe that invents a HELO name or
+    #: uses a null sender is the behaviour that gets a host blocklisted,
+    #: and a plausible default would make that the easy path. The hostname
+    #: should resolve, and the address should be a mailbox somebody reads.
+    smtp_probe_helo: str | None = None
+    smtp_probe_mail_from: str | None = None
+    smtp_probe_timeout_seconds: int = Field(default=12, ge=3, le=60)
+    #: Domains probed at once. Low on purpose: this is verification during
+    #: discovery, not a race, and every unit of parallelism here is another
+    #: connection somebody else's mail server has to account for.
+    smtp_probe_concurrency: int = Field(default=4, ge=1, le=32)
 
     # ------------------------------------------------------------------ smtp
     #: Used both for a real mailbox and for Mailpit, the local capture server
@@ -230,7 +260,15 @@ class Settings(BaseSettings):
     imap_workspace_id: str | None = None
 
     # ---------------------------------------------------------------- email
-    email_provider: Literal["mock", "resend", "smartlead", "smtp", "instantly"] = "mock"
+    email_provider: Literal[
+        "mock", "resend", "smartlead", "smtp", "smtp_pool", "instantly"
+    ] = "mock"
+    #: Where the per-mailbox credentials live, for "smtp_pool". A file
+    #: rather than more TITAN_SMTP_* variables: the pool holds one
+    #: credential per sending address, and a password in the environment is
+    #: a password in `docker compose config`, in shell history and in every
+    #: screenshot of a terminal. See titan.delivery.mailboxes.
+    mailbox_file: str | None = None
     resend_api_key: SecretStr | None = None
     resend_webhook_secret: SecretStr | None = None
 
@@ -331,6 +369,14 @@ class Settings(BaseSettings):
     min_passcode_length: int = Field(default=6, ge=6, le=128)
 
     # ---------------------------------------------------------------- owner
+    #: The operator's own mailbox, so inbound can tell us from a prospect.
+    #:
+    #: Not a sender identity and that is the point: the damage was done by
+    #: delivery tests sent to a personal Gmail, which threaded back and retired
+    #: a real lead permanently. The pool's own addresses are read from the
+    #: database; this is the human behind it, and nothing else knows it.
+    operator_email: str | None = None
+
     owner_name: str = "Arslan Vuzmal Lone"
     #: Used in message signatures and the portfolio claims a draft may make.
     #: Recovered from the deployed environment along with the smartlead block.
@@ -340,6 +386,69 @@ class Settings(BaseSettings):
     #: stale without anyone noticing.
     owner_years_experience: int = Field(default=2, ge=0, le=80)
     owner_portfolio_url: AnyHttpUrl = AnyHttpUrl("https://arslanvuzmallone.com")
+    # ---- contact discovery of last resort --------------------------------
+    #
+    # The provider credentials for this already exist above -- openrouter_api_key,
+    # cloudflare_api_token and the gateway id feed titan.models.providers, which
+    # is the one place a model client is constructed. Nothing new is declared
+    # here; what is new is the ceiling, because this lane runs per lead rather
+    # than per draft and both accounts are on free tiers with daily caps.
+    #
+    # The lane is used only where the crawler recorded no address at all: on
+    # the live workspace that is 1,120 organisations whose pages carry a
+    # contact form and nothing else. It is never used to improve on an address
+    # that was found -- text the crawler read verbatim is better evidence than
+    # anything a model can say about it.
+    #
+    # Invariant 6 is unchanged and unchangeable here. A model may only point at
+    # text already present in the page evidence; anything it returns that does
+    # not appear verbatim in the crawled text is discarded, because a model
+    # asked for an email address will produce a well-formed one whether or not
+    # the page contained one. That check is the whole safety argument for
+    # letting a model near this at all.
+    #
+    #: Hard ceiling on contact-extraction model calls per day, across providers.
+    contact_model_calls_per_day: int = 200
+
+    #: The route the contact lane will use.
+    #:
+    #: Free tiers move. ``meta-llama/llama-3.3-70b-instruct:free`` was the
+    #: obvious default and OpenRouter now answers it with
+    #: "This model is unavailable for free"; ``google/gemma-4-31b-it:free``
+    #: answers 429 under load. ``minimax/minimax-m3:free`` was verified live on
+    #: this account on 2026-08-27 and carries a 1M context, which matters when
+    #: the input is a page of crawled text. Re-check with
+    #: ``titan validate-models`` rather than trusting this line indefinitely.
+    model_route_contact: str = "openrouter:minimax/minimax-m3:free"
+
+    #: A one-page PDF attached to every message.
+    #:
+    #: Unset attaches nothing, which is the shipped state. An attachment is a
+    #: deliberate act: an unsolicited one from an unknown sender is a strong
+    #: spam signal and some corporate gateways strip document types by policy,
+    #: so this is set knowingly or not at all. ``delivery/deliverability.py``
+    #: bounds what may go out -- one file, PDF, under 400 KB, never executable
+    #: content whatever it is named.
+    one_pager_attachment_path: str | None = None
+
+    #: A one-page summary of the approach, linked from the references block.
+    #:
+    #: A link rather than an attachment, deliberately. An unsolicited PDF from
+    #: an unknown sender is a strong spam signal and corporate gateways strip
+    #: them, so a share of recipients would be told to read something that had
+    #: been removed in transit. A hosted page also produces a click, which is
+    #: the engagement signal this system is otherwise missing entirely.
+    #:
+    #: Unset renders no line at all.
+    one_pager_url: str | None = None
+
+    #: JSON file of real previous projects, cited in the credibility paragraph.
+    #:
+    #: Unset by default and unset is a working state: with no file the message
+    #: keeps the generic credential sentence. There is deliberately no bundled
+    #: default -- see ``titan.intelligence.case_studies`` for why an invented
+    #: case study is the one thing in this system that cannot be walked back.
+    case_studies_path: str | None = None
 
     #: Shared with the unsubscribe endpoint on the portfolio, which verifies it.
     #:
@@ -503,6 +612,16 @@ class Settings(BaseSettings):
                 "TITAN_MAILBOX_VERIFIER='deterministic' is a test fake and must "
                 "not run in a deployed environment; use 'null'"
             )
+        if self.mailbox_verifier == "smtp_probe":
+            # Both, or neither. A probe that cannot introduce itself with a
+            # real hostname and cannot be complained to at a real address is
+            # indistinguishable from the abusive kind, and the cost of that
+            # falls on the mail servers being asked -- not on Titan, which is
+            # why it must not be possible to arrive at by omission.
+            if not (self.smtp_probe_helo or "").strip():
+                missing.append("TITAN_SMTP_PROBE_HELO (a hostname that resolves to us)")
+            if "@" not in (self.smtp_probe_mail_from or ""):
+                missing.append("TITAN_SMTP_PROBE_MAIL_FROM (a mailbox somebody reads)")
         if missing:
             raise ValueError(
                 f"Refusing to start in {self.environment.value} with incomplete "
@@ -544,6 +663,25 @@ class Settings(BaseSettings):
             errors.append("TITAN_RESEND_API_KEY is not set")
         if self.email_provider == "smtp" and self.smtp_host is None:
             errors.append("TITAN_SMTP_HOST is not set")
+        if self.email_provider == "smtp_pool":
+            # Read here, not merely checked for existence. A file that
+            # parses at boot and not at send time is a worker that looks
+            # ready and refuses every message once the queue opens.
+            if not self.mailbox_file:
+                errors.append("TITAN_MAILBOX_FILE is not set")
+            else:
+                from titan.delivery.mailboxes import (
+                    MailboxConfigError,
+                    load_mailboxes,
+                )
+
+                try:
+                    registry = load_mailboxes(self.mailbox_file)
+                except MailboxConfigError as exc:
+                    errors.append(f"TITAN_MAILBOX_FILE is unusable: {exc}")
+                else:
+                    if not registry:
+                        errors.append(f"{self.mailbox_file} lists no enabled mailboxes")
         if self.email_provider == "smartlead":
             if self.smartlead_api_key is None:
                 errors.append("TITAN_SMARTLEAD_API_KEY is not set")

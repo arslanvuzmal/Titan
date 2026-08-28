@@ -278,7 +278,7 @@ async def apply_move(
     for table in MOVED_TABLES:
         result = await session.execute(
             text(
-                f"UPDATE {table} SET campaign_id = :survivor "  # noqa: S608
+                f"UPDATE {table} SET campaign_id = :survivor "
                 "WHERE campaign_id = ANY(:absorbed) AND workspace_id = :ws"
             ),
             {

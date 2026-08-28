@@ -225,7 +225,7 @@ async def outcomes_by(
          GROUP BY 1, 2
          ORDER BY sent DESC
          LIMIT :limit
-    """  # noqa: S608 -- every interpolated fragment is a constant in this module
+    """
 
     params: dict[str, object] = {
         "workspace": session.info.get(WORKSPACE_KEY),

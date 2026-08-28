@@ -9,6 +9,10 @@
     titan set-passcode     # give an existing account a username and passcode
     titan schedules        # install the recurring jobs that close the loop
     titan sequences        # backfill the follow-up sequence on older campaigns
+    titan recover-contacts # resolve contacts from crawls already on disk
+    titan repoint-contacts # move leads onto the best address already crawled
+    titan auth             # audit SPF/DKIM/DMARC and say what is missing
+    titan trickle          # release higher-risk addresses a few a day
 
 ``env-example`` exists so that the documented environment and the code that
 reads it cannot drift: the file is generated, never hand-maintained, which is
@@ -20,13 +24,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import datetime as dt
+import pathlib
 import sys
+import uuid
 from typing import Any
 
 from pydantic_core import PydanticUndefined
 
 from titan import __version__
 from titan.config import Settings, get_settings
+from titan.intelligence import sender_auth
 from titan.runtime import configure_event_loop
 
 #: Fields whose value is a credential; the example file shows them empty.
@@ -35,6 +43,46 @@ SECRET_HINT = ("key", "secret", "token", "password", "credential")
 
 def _is_secret(name: str) -> bool:
     return any(hint in name.lower() for hint in SECRET_HINT)
+
+
+#: What `titan mailbox init` writes. Every password is a placeholder that
+#: :mod:`titan.delivery.mailboxes` refuses, so a file that was created and
+#: never filled in fails at the command line rather than at a provider.
+MAILBOX_TEMPLATE = """{
+  "_comment": [
+    "One block per sending mailbox. Titan authenticates as the mailbox it puts",
+    "in the From header, which is what keeps SPF and DKIM aligned.",
+    "",
+    "Put the app password -- not the account password -- where the placeholder",
+    "is. Nothing in Titan prints these back. Keep this file out of git.",
+    "",
+    "Remove the imap block only if the mailbox genuinely cannot be read. A",
+    "mailbox nobody reads is a mailbox whose bounces and unsubscribe requests",
+    "are never collected."
+  ],
+  "mailboxes": [
+    {
+      "from_email": "outreach@example.com",
+      "label": "cold outreach",
+      "enabled": true,
+      "smtp": {
+        "host": "smtp.example.com",
+        "port": 465,
+        "security": "ssl",
+        "username": "outreach@example.com",
+        "password": "PASTE_APP_PASSWORD_HERE"
+      },
+      "imap": {
+        "host": "imap.example.com",
+        "port": 993,
+        "security": "ssl",
+        "username": "outreach@example.com",
+        "password": "PASTE_APP_PASSWORD_HERE"
+      }
+    }
+  ]
+}
+"""
 
 
 def cmd_preflight(_: argparse.Namespace) -> int:
@@ -204,6 +252,91 @@ def cmd_redraft(args: argparse.Namespace) -> int:
             "Rewritten drafts await approval again. A queued row keeps its "
             "place and picks up the new words, and cannot send on an approval "
             "given for the old ones."
+        )
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
+def cmd_backfill_costs(args: argparse.Namespace) -> int:
+    """Reprice the model calls the old adapters recorded at $0.00.
+
+    Prints what it would do and changes nothing unless ``--apply`` is given.
+
+    The ledger is append-only, so this corrects it the way a ledger is
+    corrected: by appending an adjustment entry per underpriced call, not by
+    rewriting history. Nothing that already carries a provider-reported price
+    is touched, and nothing without token counts is priced -- there would be
+    nothing to price it from, and a ledger figure nobody can derive is worse
+    than an absent one.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Workspace
+    from titan.db.session import get_sessionmaker
+    from titan.models.backfill import reprice, survey
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id, Workspace.slug).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            row = (await session.execute(query)).first()
+        if row is None:
+            print(f"no workspace matched {args.workspace!r}")
+            return 1
+        workspace_id, slug = row
+
+        report = await (reprice if args.apply else survey)(workspace_id)
+
+        print(f"Model calls recorded at $0.00, in {slug}")
+        print()
+        if not report.providers:
+            print("  none -- every model call in the ledger carries a price.")
+            return 0
+
+        for entry in report.providers:
+            print(f"  {entry.line()}")
+        print()
+        print(
+            f"  {report.rows} call(s) underpriced by ${report.cost_usd:.6f} at "
+            f"the gateway's rate card, to be recorded as estimated."
+        )
+        if report.unpriceable:
+            print(
+                f"  {report.unpriceable} of them have no token counts and stay "
+                f"at $0.00. There is nothing to price them from."
+            )
+        if report.reported_rows:
+            print(
+                f"  {report.reported_rows} call(s) already carry a "
+                f"provider-reported price and are left alone."
+            )
+        print()
+        if not report.applied:
+            print(
+                "The ledger is append-only, so nothing is rewritten: each "
+                "underpriced call gets an adjustment entry carrying the "
+                "difference, dated to the original call."
+            )
+            print("Dry run. Re-run with --apply to carry it out.")
+            return 0
+
+        print(f"{report.written} adjustment entry/entries appended.")
+        if report.written < report.rows - report.unpriceable:
+            print(
+                "  The remainder were already adjusted by an earlier run and "
+                "were not written twice."
+            )
+        print(
+            "The originals are unchanged and still say what was recorded at "
+            "the time. model_runs is append-only too and keeps its $0.00; "
+            "usage_ledger is the authoritative cost record."
         )
         return 0
 
@@ -890,6 +1023,1156 @@ def cmd_sequences(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def cmd_mailbox(args: argparse.Namespace) -> int:
+    """Inspect and prove the sending pool, without ever printing a password.
+
+    Four things an operator needs and had no way to get: a file to fill in, a
+    view of what is in it, proof that each credential actually opens its
+    mailbox, and proof that a message sent as one of them arrives. The last
+    two are separate on purpose -- a mailbox can authenticate perfectly and
+    still have its mail refused at the far end.
+    """
+    from titan.delivery.mailboxes import MailboxConfigError, load_mailboxes
+
+    settings = get_settings()
+
+    if args.mailbox_command == "init":
+        target = pathlib.Path(args.path)
+        if target.exists() and not args.force:
+            print(f"{target} already exists. Pass --force to overwrite it.")
+            return 1
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(MAILBOX_TEMPLATE, encoding="utf-8")
+        try:
+            # Best effort: on Windows this is a no-op, and the file is on the
+            # operator's own machine either way. Worth doing where it works.
+            target.chmod(0o600)
+        except OSError:
+            pass
+        print(f"Wrote {target}.")
+        print()
+        print("Fill in one block per mailbox and put the app password where the")
+        print("placeholder is. Nothing in Titan will print it back. Then:")
+        print()
+        print(f"  TITAN_MAILBOX_FILE={target}")
+        print("  TITAN_EMAIL_PROVIDER=smtp_pool")
+        print()
+        print("and run `titan mailbox check` to prove each one opens.")
+        return 0
+
+    path = args.path or settings.mailbox_file
+    if not path:
+        print("No mailbox file. Set TITAN_MAILBOX_FILE or pass --path.")
+        print("`titan mailbox init --path secrets/mailboxes.json` writes one.")
+        return 1
+
+    try:
+        registry = load_mailboxes(path)
+    except MailboxConfigError as exc:
+        print(f"{path} cannot be used: {exc}")
+        return 1
+
+    if not registry:
+        print(f"{path} lists no enabled mailboxes.")
+        return 1
+
+    if args.mailbox_command == "list":
+        print(f"Mailboxes in {path}")
+        print()
+        for account in registry.accounts():
+            smtp = account.smtp
+            print(f"  {account.from_email}")
+            if account.label:
+                print(f"      {account.label}")
+            print(
+                f"      smtp  {smtp.username}@{smtp.host}:{smtp.port} "
+                f"({smtp.security}), password set"
+            )
+            if account.imap:
+                imap = account.imap
+                print(
+                    f"      imap  {imap.username}@{imap.host}:{imap.port} "
+                    f"({imap.security}), password set"
+                )
+            else:
+                print("      imap  NOT CONFIGURED -- bounces and unsubscribe")
+                print("            requests to this address will not be collected")
+        print()
+        print(f"{len(registry)} mailbox(es), {len(registry.readable())} readable.")
+        return 0
+
+    async def run() -> int:
+        from titan.delivery.mailbox import ImapConfig, ImapMailbox
+        from titan.delivery.providers.smtp_pool import SmtpPoolProvider
+
+        failures = 0
+
+        if args.mailbox_command == "check":
+            provider = SmtpPoolProvider(
+                registry, timeout_seconds=float(settings.smtp_timeout_seconds)
+            )
+            _, detail = await provider.health_check()
+            # The aggregate boolean is "can this pool send at all", which is
+            # not the question here: one broken mailbox out of three must show
+            # as one broken mailbox, so the per-mailbox lines are what is
+            # counted.
+            for line in detail.split("; ")[1:]:
+                print(f"  {line}")
+                failures += 1 if "FAILED" in line else 0
+            print()
+
+            for account in registry.readable():
+                imap = account.imap
+                assert imap is not None
+                mailbox = ImapMailbox(
+                    ImapConfig(
+                        host=imap.host,
+                        port=imap.port,
+                        username=imap.username,
+                        password=imap.password,
+                        security=imap.security,
+                        folder=settings.imap_folder,
+                    )
+                )
+                imap_ok, imap_detail = await mailbox.health_check()
+                label = "ok" if imap_ok else "FAILED"
+                print(f"  {account.from_email} imap: {label} -- {imap_detail}")
+                failures += 0 if imap_ok else 1
+
+            unreadable = [a.from_email for a in registry.accounts() if a.imap is None]
+            if unreadable:
+                print()
+                print("  Not readable, so nobody will see their bounces:")
+                for address in unreadable:
+                    print(f"    {address}")
+            return 1 if failures else 0
+
+        # -------------------------------------------------------------- test
+        # A real message, to an address the operator named on the command line.
+        # Not to a lead, and not from the queue: this proves the transport, and
+        # a transport proved against a stranger is a stranger who got a test.
+        from titan.delivery.providers.base import OutboundEmail
+
+        provider = SmtpPoolProvider(
+            registry, timeout_seconds=float(settings.smtp_timeout_seconds)
+        )
+        sources = [args.mailbox] if args.mailbox else registry.addresses()
+        for address in sources:
+            if registry.get(address) is None:
+                print(f"  {address}: not in {path}")
+                failures += 1
+                continue
+            stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d %H:%M:%SZ")
+            result = await provider.send(
+                OutboundEmail(
+                    to_email=args.to,
+                    from_email=address,
+                    from_name="Titan",
+                    reply_to=address,
+                    subject=f"Titan delivery test from {address}",
+                    text_body=(
+                        f"This is a delivery test sent by Titan at {stamp}.\n\n"
+                        f"It was sent from {address}, authenticated as that "
+                        f"mailbox.\n\nIf it reached the inbox rather than spam, "
+                        f"this mailbox is ready to send.\n"
+                    ),
+                    idempotency_key=f"mailbox-test:{address}:{stamp}",
+                )
+            )
+            if result.accepted:
+                print(f"  {address}: sent -- {result.provider_message_id}")
+            else:
+                print(
+                    f"  {address}: FAILED -- {result.error_kind}: {result.error_detail}"
+                )
+                failures += 1
+        print()
+        print(f"Check {args.to}, including its spam folder.")
+        return 1 if failures else 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
+#: How many addresses one transaction covers. Small enough that a long run
+#: does not hold row locks the discovery pipeline needs.
+VERIFY_BATCH = 40
+
+
+def cmd_verify_contacts(args: argparse.Namespace) -> int:
+    """Re-check addresses stored before there was a verifier configured.
+
+    Verification runs at discovery, so every address found while
+    TITAN_MAILBOX_VERIFIER was 'null' carries the answer available then, which
+    was none. This is the catch-up pass, through the same verifier and the same
+    resolution the discovery path uses.
+
+    Prints what it would change and changes nothing, unless --apply.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Workspace
+    from titan.db.session import dispose_engine, get_sessionmaker, workspace_unit_of_work
+    from titan.intelligence.reverification import reverify
+    from titan.intelligence.verifier import build_verifier
+
+    settings = get_settings()
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            workspace_id = (await session.execute(query)).scalar_one_or_none()
+        if workspace_id is None:
+            print(f"no workspace matching {args.workspace!r}")
+            return 1
+
+        verifier = build_verifier(settings.mailbox_verifier, settings)
+        if verifier.name == "null":
+            # Not an error, but running it would examine everything, learn
+            # nothing and report a clean sweep -- which is worse than saying so.
+            print(
+                f"TITAN_MAILBOX_VERIFIER is {settings.mailbox_verifier!r}, which "
+                f"resolves to the null verifier. It answers UNKNOWN for every "
+                f"address, so this pass would check nothing."
+            )
+            return 1
+
+        ok, detail = await verifier.health_check()
+        print(f"verifier: {verifier.name} - {detail}")
+        if not ok:
+            return 1
+        print()
+
+        # In committed batches, not one long transaction. 604 addresses at two
+        # seconds a domain is half an hour, and half an hour of open
+        # transaction holds row locks on contact_channels that the discovery
+        # pipeline is writing to at the same time.
+        from titan.intelligence.reverification import ReverifyReport
+
+        report = ReverifyReport()
+        offset = 0
+        while report.examined < args.limit:
+            batch_size = min(VERIFY_BATCH, args.limit - report.examined)
+            async with workspace_unit_of_work(workspace_id) as session:
+                batch = await reverify(
+                    session,
+                    workspace_id=workspace_id,
+                    verifier=verifier,
+                    limit=batch_size,
+                    offset=offset,
+                    apply=args.apply,
+                )
+            if batch.examined == 0:
+                break
+            report.examined += batch.examined
+            report.checked += batch.checked
+            report.changed += batch.changed
+            report.downgraded.extend(batch.downgraded)
+            for status, count in batch.outcomes.items():
+                report.outcomes[status] = report.outcomes.get(status, 0) + count
+            # A dry run writes nothing, so every row it looked at is still in
+            # the result set and the window has not moved under it.
+            offset += batch.examined if not args.apply else batch.remained
+            print(
+                f"  ...{report.examined} checked, {report.changed} changed",
+                flush=True,
+            )
+        print()
+
+        print(f"examined  {report.examined}")
+        print(f"checked   {report.checked}")
+        print(f"changed   {report.changed}")
+        for status, count in sorted(report.outcomes.items(), key=lambda kv: -kv[1]):
+            print(f"            {count:>5}  {status}")
+        if report.downgraded:
+            print()
+            print("no longer sendable -- each one a hard bounce that will not happen:")
+            for line in report.downgraded[:25]:
+                print(f"  {line}")
+            if len(report.downgraded) > 25:
+                print(f"  ... and {len(report.downgraded) - 25} more")
+        # Asked again after the run: the probe counts how many servers refused
+        # the probe itself, and that is one fact about this host rather than
+        # many facts about other people's mailboxes.
+        _, after = await verifier.health_check()
+        if "refused the probe itself" in after:
+            print()
+            print(f"note: {after.split('; ', 2)[-1]}")
+
+        if not args.apply:
+            print()
+            print("Dry run. Re-run with --apply to record these.")
+        await dispose_engine()
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
+async def _warmup_days(workspace_id: uuid.UUID) -> dict[str, int]:
+    """Each sending mailbox's position on its ramp, by address.
+
+    Read from the sender identities rather than from the credential file: the
+    file says how to log in, the identity carries the send history, and warm-up
+    volume is a property of the history.
+    """
+    from sqlalchemy import func, select
+
+    from titan.db.models import Message, SenderIdentity
+    from titan.db.session import workspace_session
+    from titan.delivery.deliverability import warmup_day
+
+    now = dt.datetime.now(dt.UTC)
+    days: dict[str, int] = {}
+    async with workspace_session(workspace_id) as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SenderIdentity).where(SenderIdentity.is_active.is_(True))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for identity in rows:
+            first = await session.scalar(
+                select(func.min(Message.sent_at)).where(
+                    Message.sender_identity_id == identity.id,
+                    Message.state == "sent",
+                )
+            )
+            # The earlier of the two wins, so a mailbox warmed elsewhere before
+            # Titan saw it is not put back on day zero.
+            started = min(
+                [d for d in (first, identity.warmup_started_at) if d], default=None
+            )
+            days[identity.from_email.lower()] = warmup_day(started, now)
+    return days
+
+
+def cmd_recover_contacts(args: argparse.Namespace) -> int:
+    """Resolve contacts for leads whose research already crawled the address.
+
+    Until the ``capture-contact-below-threshold`` patch, a lead that scored
+    under its campaign's bar returned BELOW_THRESHOLD *before* the contact
+    stage ran. The crawl had already happened, the address was already sitting
+    in the page evidence, and it was dropped along with the lead. The patch
+    fixed the path; it cannot reach backwards, because these leads will not be
+    researched again.
+
+    On the live workspace that is 1,939 organisations whose stored pages carry
+    a published address and which have no contact row -- every one of them
+    already paid for in crawl time.
+
+    This does not crawl, guess or construct anything. It re-reads pages already
+    in the database and runs the same ``resolve_contact`` activity the pipeline
+    runs, so provenance, eligibility, MX and verification are applied exactly
+    as they would have been at the time. Invariant 6 holds for the same reason
+    it holds in the pipeline: the only addresses considered are ones the
+    crawler recorded verbatim from the site.
+
+    Prints what it would create and creates nothing, unless --apply.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import cast, func, select
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    from titan.contracts.evidence import PageEvidence
+    from titan.db.models import (
+        Contact,
+        CrawlRun,
+        Lead,
+        Organization,
+        Page,
+        ResearchRun,
+        Workspace,
+    )
+    from titan.db.session import dispose_engine, get_sessionmaker
+    from titan.intelligence.contacts import extract_contacts_from_pages
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            workspace_id = (
+                await session.execute(
+                    select(Workspace.id).where(
+                        Workspace.id == _uuid.UUID(args.workspace)
+                        if _looks_like_uuid(args.workspace)
+                        else Workspace.slug == args.workspace
+                    )
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                print(f"no workspace matching {args.workspace!r}")
+                return 1
+
+            # The most recent completed run per lead, for leads whose
+            # organisation has no contact at all. One run, not all of them:
+            # re-reading five historical crawls of the same site would find the
+            # same address five times.
+            latest = (
+                select(
+                    ResearchRun.lead_id,
+                    func.max(ResearchRun.created_at).label("newest"),
+                )
+                .where(
+                    ResearchRun.workspace_id == workspace_id,
+                    ResearchRun.status == "completed",
+                )
+                .group_by(ResearchRun.lead_id)
+                .subquery()
+            )
+            # Only leads whose crawl actually recorded an address.
+            #
+            # Without this the query returns the same first N contactless leads
+            # on every call -- nothing in it orders differently between runs --
+            # so a batch that finds nothing finds the identical nothing next
+            # time, and a loop over batches makes no progress at all. Measured:
+            # 150 examined, 0 found, repeatedly.
+            #
+            # Restricting to pages carrying a visible_emails entry selects the
+            # population that can actually produce a contact (1,939 orgs), and
+            # a lead drops out of it the moment one is stored -- so the batches
+            # drain. It is also far faster: the previous query spent its whole
+            # budget parsing page evidence for sites that published no address.
+            has_published_address = (
+                select(Page.id)
+                .join(CrawlRun, CrawlRun.id == Page.crawl_run_id)
+                .where(
+                    CrawlRun.research_run_id == ResearchRun.id,
+                    func.jsonb_array_length(
+                        func.coalesce(
+                            Page.observations["visible_emails"],
+                            cast("[]", JSONB),
+                        )
+                    )
+                    > 0,
+                )
+                .exists()
+            )
+            candidates = (
+                (
+                    await session.execute(
+                        select(
+                            ResearchRun.id,
+                            Lead.id,
+                            Lead.campaign_id,
+                            Organization.id,
+                            Organization.canonical_domain,
+                        )
+                        .join(latest, latest.c.lead_id == ResearchRun.lead_id)
+                        .where(ResearchRun.created_at == latest.c.newest)
+                        .join(Lead, Lead.id == ResearchRun.lead_id)
+                        .join(Organization, Organization.id == Lead.organization_id)
+                        .where(
+                            ~select(Contact.id)
+                            .where(Contact.organization_id == Organization.id)
+                            .exists(),
+                            has_published_address,
+                        )
+                        .limit(args.limit)
+                    )
+                )
+                .tuples()
+                .all()
+            )
+
+            planned: list[tuple[str, str]] = []
+            nothing_published: list[str] = []
+            for run_id, lead_id, campaign_id, org_id, domain in candidates:
+                crawls = (
+                    (
+                        await session.execute(
+                            select(CrawlRun.id).where(
+                                CrawlRun.research_run_id == run_id
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                pages: list[PageEvidence] = []
+                for crawl_id in crawls:
+                    rows = (
+                        (
+                            await session.execute(
+                                select(Page.observations).where(
+                                    Page.crawl_run_id == crawl_id
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    for observations in rows:
+                        try:
+                            pages.append(PageEvidence.model_validate(observations))
+                        except Exception:
+                            # A page whose evidence will not parse is one this
+                            # pass skips, not one it fails on. The pipeline
+                            # would have had the same trouble with it.
+                            continue
+                usable = [
+                    candidate
+                    for candidate in extract_contacts_from_pages(pages, domain)
+                    if candidate.is_usable
+                ]
+                if usable:
+                    planned.append((domain or str(org_id), usable[0].normalized))
+                else:
+                    nothing_published.append(domain or str(org_id))
+
+        print(
+            f"examined       {len(candidates)} leads whose crawl found an address"
+        )
+        print(f"address found  {len(planned)}")
+        print(f"nothing to use {len(nothing_published)}")
+        for domain, address in planned[:20]:
+            print(f"  {domain:<40} {address}")
+        if len(planned) > 20:
+            print(f"  ... and {len(planned) - 20} more")
+
+        if not args.apply:
+            print()
+            print("dry run. Re-run with --apply to resolve and store these.")
+            return 0
+
+        # The real path, not a reimplementation of it: the activity applies
+        # campaign policy, MX, verification and suppression, and writes the
+        # contact and its channel in one unit of work.
+        from titan.activities.pipeline import resolve_contact
+        from titan.workflows.types import ContactActivityInput
+
+        stored = 0
+        refused = 0
+        for run_id, lead_id, campaign_id, _org_id, domain in candidates:
+            try:
+                result = await resolve_contact(
+                    ContactActivityInput(
+                        workspace_id=str(workspace_id),
+                        lead_id=str(lead_id),
+                        campaign_id=str(campaign_id),
+                        research_run_id=str(run_id),
+                        idempotency_key=f"recover:{lead_id}:contact",
+                    )
+                )
+            except Exception as error:  # one bad lead must not stop the pass
+                print(f"  ! {domain}: {type(error).__name__}: {error}")
+                refused += 1
+                continue
+            if result.eligible_channel_id:
+                stored += 1
+            else:
+                refused += 1
+        print()
+        print(f"stored {stored} contacts, {refused} produced none")
+        return 0
+
+    try:
+        return asyncio.run(run())
+    finally:
+        asyncio.run(dispose_engine())
+
+
+def cmd_repoint_contacts(args: argparse.Namespace) -> int:
+    """Point each lead at the best address its crawl already found.
+
+    Until the ranking fix, ``resolve_contact`` returned on the *first* eligible
+    candidate and iteration order was page-crawl order -- so a firm publishing
+    ``info@`` on its contact page and a partner's mailbox on its people page
+    was written to at whichever page the crawler reached first. It also stored
+    only that one address, so the better alternative was never even recorded.
+
+    The pages are still here. This re-reads them, re-ranks the candidates with
+    today's rules, and repoints the lead when a front desk exists and the
+    current address is not one. On the live workspace that is 154 of 311 leads,
+    including ``careers@faceretreat.com`` (a hiring inbox, now refused outright)
+    and ``adele.nicol@andersonstrathern.co.uk`` (a named partner) both of which
+    had ``info@`` published on the same site all along.
+
+    Nothing is crawled and no address is constructed: every candidate is a
+    string the crawler recorded verbatim. Prints what it would change and
+    changes nothing, unless --apply.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.contracts.evidence import PageEvidence
+    from titan.db.models import (
+        Contact,
+        ContactChannel,
+        CrawlRun,
+        Lead,
+        Organization,
+        Page,
+        ResearchRun,
+        Workspace,
+    )
+    from titan.db.session import (
+        dispose_engine,
+        get_sessionmaker,
+        workspace_unit_of_work,
+    )
+    from titan.intelligence.contacts import (
+        extract_contacts_from_pages,
+        is_never_contact,
+        is_role_address,
+        rank_contacts,
+    )
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            workspace_id = (
+                await session.execute(
+                    select(Workspace.id).where(
+                        Workspace.id == _uuid.UUID(args.workspace)
+                        if _looks_like_uuid(args.workspace)
+                        else Workspace.slug == args.workspace
+                    )
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                print(f"no workspace matching {args.workspace!r}")
+                return 1
+
+            leads = (
+                (
+                    await session.execute(
+                        select(
+                            Lead.id,
+                            Organization.id,
+                            Organization.canonical_domain,
+                            ContactChannel.id,
+                            ContactChannel.normalized_value,
+                        )
+                        .join(Organization, Organization.id == Lead.organization_id)
+                        .join(
+                            ContactChannel,
+                            ContactChannel.id == Lead.primary_contact_channel_id,
+                        )
+                        .where(Lead.workspace_id == workspace_id)
+                    )
+                )
+                .tuples()
+                .all()
+            )
+
+            # Only leads currently pointed at something that is not a front
+            # desk. A lead already on info@ has nothing to gain and re-reading
+            # its pages would cost the same as one that does.
+            candidates = [
+                row
+                for row in leads
+                if not is_role_address(row[4]) or is_never_contact(row[4])
+            ]
+            print(f"leads not on a front-desk address: {len(candidates)}")
+
+            planned: list[tuple[uuid.UUID, uuid.UUID, str, str, str]] = []
+            for lead_id, org_id, domain, channel_id, current in candidates[
+                : args.limit
+            ]:
+                runs = (
+                    (
+                        await session.execute(
+                            select(ResearchRun.id).where(ResearchRun.lead_id == lead_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                pages: list[PageEvidence] = []
+                for run_id in runs:
+                    crawls = (
+                        (
+                            await session.execute(
+                                select(CrawlRun.id).where(
+                                    CrawlRun.research_run_id == run_id
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    for crawl_id in crawls:
+                        for observations in (
+                            (
+                                await session.execute(
+                                    select(Page.observations).where(
+                                        Page.crawl_run_id == crawl_id
+                                    )
+                                )
+                            )
+                            .scalars()
+                            .all()
+                        ):
+                            try:
+                                pages.append(PageEvidence.model_validate(observations))
+                            except Exception:
+                                continue
+                if not pages:
+                    continue
+                ranked = [
+                    c
+                    for c in rank_contacts(
+                        extract_contacts_from_pages(pages, domain)
+                    )
+                    if c.is_usable
+                ]
+                if not ranked:
+                    continue
+                best = ranked[0]
+                # Only ever a move *to* a front desk. A sideways move between
+                # two named mailboxes buys nothing and changes who a stranger
+                # hears from, which is not a change worth making silently.
+                if best.normalized == current or not best.is_generic_role:
+                    continue
+                # `canonical_domain` is nullable; the report prints the org
+                # id when it is absent, so the tuple carries a str either way.
+                planned.append(
+                    (lead_id, org_id, domain or str(org_id), current, best.normalized)
+                )
+
+        print(f"a front desk is available instead:  {len(planned)}")
+        for _, _, domain, current, better in planned[:15]:
+            print(f"  {domain:<34} {current:<36} -> {better}")
+        if len(planned) > 15:
+            print(f"  ... and {len(planned) - 15} more")
+
+        if not args.apply:
+            print()
+            print("dry run. Re-run with --apply to repoint these.")
+            return 0
+
+        moved = 0
+        for lead_id, org_id, _domain, current, better in planned:
+            async with workspace_unit_of_work(workspace_id) as session:
+                contact_id = (
+                    await session.execute(
+                        select(Contact.id).where(Contact.organization_id == org_id)
+                    )
+                ).scalar_one_or_none()
+                if contact_id is None:
+                    continue
+                existing = (
+                    await session.execute(
+                        select(ContactChannel).where(
+                            ContactChannel.contact_id == contact_id,
+                            ContactChannel.normalized_value == better,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is None:
+                    existing = ContactChannel(
+                        workspace_id=workspace_id,
+                        contact_id=contact_id,
+                        channel_type="email",
+                        value=better,
+                        normalized_value=better,
+                        value_domain=better.split("@", 1)[1],
+                        source="first_party_website",
+                        discovered_at=dt.datetime.now(dt.UTC),
+                        verification_status="published_first_party",
+                        confidence=0.8,
+                        is_active=True,
+                    )
+                    session.add(existing)
+                    await session.flush()
+                else:
+                    existing.is_active = True
+                lead = await session.get(Lead, lead_id)
+                if lead is not None:
+                    lead.primary_contact_channel_id = existing.id
+                # The address we are moving off is retired only when today's
+                # rules refuse it outright -- a hiring inbox, a privacy desk.
+                # An ordinary named mailbox stays on file, inactive as a
+                # primary but not erased: it was really published there.
+                if is_never_contact(current):
+                    old = (
+                        await session.execute(
+                            select(ContactChannel).where(
+                                ContactChannel.contact_id == contact_id,
+                                ContactChannel.normalized_value == current,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    if old is not None:
+                        old.is_active = False
+                moved += 1
+
+        print()
+        print(f"repointed {moved} leads onto a front-desk address")
+        return 0
+
+    try:
+        return asyncio.run(run())
+    finally:
+        asyncio.run(dispose_engine())
+
+
+def cmd_auth(args: argparse.Namespace) -> int:
+    """Audit sender authentication and print the records that are missing.
+
+    Everything here is read from public DNS -- nothing is changed, and nothing
+    *can* be changed from here: these are records only the domain owner can
+    publish. The point is to say precisely which ones, in the form they go in.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import SenderIdentity, Workspace
+    from titan.db.session import dispose_engine, get_sessionmaker
+    from titan.delivery import dns_auth
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            workspace_id = (
+                await session.execute(
+                    select(Workspace.id).where(
+                        Workspace.id == _uuid.UUID(args.workspace)
+                        if _looks_like_uuid(args.workspace)
+                        else Workspace.slug == args.workspace
+                    )
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                print(f"no workspace matching {args.workspace!r}")
+                return 1
+            senders = (
+                (
+                    await session.execute(
+                        select(
+                            SenderIdentity.from_email, SenderIdentity.sending_domain
+                        ).where(
+                            SenderIdentity.workspace_id == workspace_id,
+                            SenderIdentity.is_active.is_(True),
+                        )
+                    )
+                )
+                .tuples()
+                .all()
+            )
+
+        if not senders:
+            print("no active sender identities")
+            return 1
+
+        # One report per sending domain, not per mailbox: SPF, DKIM and DMARC
+        # are properties of the domain, and three mailboxes on one domain would
+        # otherwise print the same findings three times.
+        seen: dict[str, str] = {}
+        for from_email, domain in senders:
+            seen.setdefault(domain, from_email)
+
+        failures = 0
+        for domain, from_email in sorted(seen.items()):
+            report = dns_auth.verify_sender_domain(
+                from_email=from_email,
+                sending_domain=domain,
+                dkim_selectors=sender_auth.COMMON_DKIM_SELECTORS,
+            )
+            print(f"\n{domain}")
+            for check in (report.spf, report.dkim, report.dmarc, report.alignment):
+                mark = "ok  " if check.ok else "FAIL"
+                print(f"  {mark} {check.name:<10} {check.detail}")
+            for warning in report.warnings:
+                print(f"  warn {warning}")
+            if not report.ok:
+                failures += 1
+
+            missing = _missing_hardening(domain)
+            if missing:
+                print("\n  Not required to deliver, but this is what separates a")
+                print("  domain that is merely accepted from one that is trusted:")
+                for label, record, value in missing:
+                    print(f"\n    {label}")
+                    print(f"      {record}")
+                    print(f"      {value}")
+
+        print()
+        return 1 if failures else 0
+
+    try:
+        return asyncio.run(run())
+    finally:
+        asyncio.run(dispose_engine())
+
+
+def _missing_hardening(domain: str) -> list[tuple[str, str, str]]:
+    """Records that are absent and worth publishing, with their exact contents.
+
+    Deliberately not "best practice" boilerplate. Each entry is here because it
+    changes how a receiver treats this mail:
+
+    * **MTA-STS** tells a receiver to refuse to deliver to us over an
+      unencrypted connection, which closes a downgrade attack and is one of the
+      signals Google publishes as contributing to sender reputation.
+    * **TLS-RPT** is how you find out it broke.
+
+    DMARC policy is handled by ``check_dmarc`` itself and appears as a warning
+    above rather than being repeated here.
+    """
+    import dns.resolver
+
+    def present(name: str) -> bool:
+        try:
+            dns.resolver.resolve(name, "TXT", lifetime=8)
+            return True
+        except Exception:
+            return False
+
+    out: list[tuple[str, str, str]] = []
+    if not present(f"_mta-sts.{domain}"):
+        out.append(
+            (
+                "MTA-STS -- refuse unencrypted delivery",
+                f"_mta-sts.{domain}  TXT",
+                "v=STSv1; id=20260828T000000Z",
+            )
+        )
+        out.append(
+            (
+                "  ...and the policy it points at, served over HTTPS",
+                f"https://mta-sts.{domain}/.well-known/mta-sts.txt",
+                "version: STSv1 / mode: testing / mx: <your mx> / max_age: 604800",
+            )
+        )
+    if not present(f"_smtp._tls.{domain}"):
+        out.append(
+            (
+                "TLS-RPT -- get told when encrypted delivery fails",
+                f"_smtp._tls.{domain}  TXT",
+                f"v=TLSRPTv1; rua=mailto:admin@{domain}",
+            )
+        )
+    return out
+
+
+def cmd_trickle(args: argparse.Namespace) -> int:
+    """Hold the higher-risk addresses, and release a few each day.
+
+    ``--hold`` deactivates every lead whose only published address is a named
+    or departmental mailbox. Without it, the command *releases* up to
+    ``--limit`` of those held, oldest first, so a scheduled run drips them back
+    into the queue at a rate the bounce rate can absorb.
+
+    A channel released here is an ordinary channel again. Nothing marks it, and
+    a later ``--hold`` will pick it up again if it has still not been written
+    to -- which is what makes running this daily safe.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Contact, ContactChannel, Lead, Workspace
+    from titan.db.session import (
+        dispose_engine,
+        get_sessionmaker,
+        workspace_unit_of_work,
+    )
+    from titan.intelligence.contacts import is_never_contact, is_role_address
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            workspace_id = (
+                await session.execute(
+                    select(Workspace.id).where(
+                        Workspace.id == _uuid.UUID(args.workspace)
+                        if _looks_like_uuid(args.workspace)
+                        else Workspace.slug == args.workspace
+                    )
+                )
+            ).scalar_one_or_none()
+            if workspace_id is None:
+                print(f"no workspace matching {args.workspace!r}")
+                return 1
+
+            rows = (
+                (
+                    await session.execute(
+                        select(
+                            ContactChannel.id,
+                            ContactChannel.normalized_value,
+                            ContactChannel.is_active,
+                            Lead.id,
+                            Lead.last_contacted_at,
+                        )
+                        .join(Contact, Contact.id == ContactChannel.contact_id)
+                        .join(Lead, Lead.primary_contact_channel_id == ContactChannel.id)
+                        .where(ContactChannel.workspace_id == workspace_id)
+                        .order_by(ContactChannel.created_at)
+                    )
+                )
+                .tuples()
+                .all()
+            )
+
+        # Never-contact addresses are not "risky", they are refused. They are
+        # excluded here so a release can never hand one back.
+        risky = [
+            row
+            for row in rows
+            if not is_role_address(row[1])
+            and not is_never_contact(row[1])
+            and row[4] is None
+        ]
+        held = [r for r in risky if not r[2]]
+        live = [r for r in risky if r[2]]
+
+        print(f"leads on a named or departmental mailbox: {len(risky)}")
+        print(f"  currently held back                    {len(held)}")
+        print(f"  currently releasable to the queue      {len(live)}")
+
+        if args.hold:
+            target = live
+            verb = "hold back"
+        else:
+            target = held[: args.limit]
+            verb = "release"
+        print(f"\nwould {verb}: {len(target)}")
+        for row in target[:10]:
+            print(f"  {row[1]}")
+        if len(target) > 10:
+            print(f"  ... and {len(target) - 10} more")
+
+        if not args.apply:
+            print()
+            print("dry run. Re-run with --apply to carry it out.")
+            return 0
+
+        changed = 0
+        async with workspace_unit_of_work(workspace_id) as session:
+            for channel_id, _email, _active, _lead_id, _contacted in target:
+                channel = await session.get(ContactChannel, channel_id)
+                if channel is None:
+                    continue
+                channel.is_active = not args.hold
+                changed += 1
+        print()
+        print(f"{verb}: {changed}")
+        return 0
+
+    try:
+        return asyncio.run(run())
+    finally:
+        asyncio.run(dispose_engine())
+
+
+def cmd_warmup(args: argparse.Namespace) -> int:
+    """Give the mailboxes a history, rather than waiting for one.
+
+    The ramp -- how much a mailbox may send today -- has been running all
+    along. This is the other half: mail that is actually delivered, opened,
+    rescued from the spam folder and replied to, so that the receiving networks
+    have seen the mailbox behave like a person before it writes to a stranger.
+
+    Every recipient is a mailbox in your own credential file. There is no path
+    here to a lead.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Workspace
+    from titan.db.session import dispose_engine, get_sessionmaker
+    from titan.delivery.mailboxes import MailboxConfigError, load_mailboxes
+    from titan.delivery.warmup import (
+        check_recipients_are_participants,
+        describe_pool,
+        participants_from,
+        plan,
+        send_round,
+        tend,
+    )
+
+    settings = get_settings()
+    path = args.path or settings.mailbox_file
+    if not path:
+        print("No mailbox file. Set TITAN_MAILBOX_FILE or pass --path.")
+        return 1
+    try:
+        registry = load_mailboxes(path)
+    except MailboxConfigError as exc:
+        print(f"{path} cannot be used: {exc}")
+        return 1
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            workspace_id = (await session.execute(query)).scalar_one_or_none()
+        if workspace_id is None:
+            print(f"no workspace matching {args.workspace!r}")
+            return 1
+
+        days = await _warmup_days(workspace_id)
+        participants = participants_from(registry, days=days)
+
+        print(describe_pool(participants))
+        print()
+        for participant in participants:
+            print(
+                f"  {participant.address:38} day {participant.day:>2}  "
+                f"sends {participant.volume_today()} warm-up message(s) today"
+            )
+        print()
+
+        if args.warmup_command == "status":
+            await dispose_engine()
+            return 0
+
+        today = plan(participants)
+        check_recipients_are_participants(today, participants)
+        print(f"Today's plan: {len(today)} message(s)")
+        for line in today[:20]:
+            print(f"  {line.describe()}")
+        if len(today) > 20:
+            print(f"  ... and {len(today) - 20} more")
+        print()
+
+        if args.warmup_command == "plan" or not args.apply:
+            print("Nothing sent. Re-run `titan warmup run --apply` to carry it out.")
+            await dispose_engine()
+            return 0
+
+        sent = await send_round(
+            today, timeout_seconds=float(settings.smtp_timeout_seconds)
+        )
+        print(
+            f"sent {sent.sent}, skipped {sent.skipped_already_sent} already "
+            f"delivered, {sent.failed} failed"
+        )
+
+        # The receiving half, in the same run: anything filed as junk is moved
+        # back, everything is read, and a share is answered. Rescuing a message
+        # from spam is the single most valuable signal warm-up produces.
+        tended = await tend(
+            participants, timeout_seconds=float(settings.smtp_timeout_seconds)
+        )
+        print(
+            f"rescued {tended.rescued_from_spam} from spam, read "
+            f"{tended.marked_read}, replied to {tended.replied}"
+        )
+        for problem in (sent.errors + tended.errors)[:10]:
+            print(f"  ! {problem}")
+
+        await dispose_engine()
+        return 1 if (sent.failed or sent.errors or tended.errors) else 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="titan", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -1018,6 +2301,167 @@ def main() -> int:
     )
     consolidate_parser.set_defaults(func=cmd_consolidate)
 
+    mailbox_parser = sub.add_parser(
+        "mailbox",
+        help="the mailboxes Titan sends as, and whether each one works",
+    )
+    mailbox_sub = mailbox_parser.add_subparsers(dest="mailbox_command", required=True)
+
+    mailbox_init = mailbox_sub.add_parser("init", help="write a mailbox file to fill in")
+    mailbox_init.add_argument("--path", default="secrets/mailboxes.json")
+    mailbox_init.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing file, losing the passwords already in it",
+    )
+
+    mailbox_list = mailbox_sub.add_parser(
+        "list", help="what is configured, with the passwords redacted"
+    )
+    mailbox_list.add_argument("--path", default=None)
+
+    mailbox_check = mailbox_sub.add_parser(
+        "check", help="log in to every mailbox, over SMTP and IMAP"
+    )
+    mailbox_check.add_argument("--path", default=None)
+
+    mailbox_test = mailbox_sub.add_parser(
+        "test",
+        help=(
+            "send one real message from each mailbox to an address you name, "
+            "to prove the transport before any lead is written to"
+        ),
+    )
+    mailbox_test.add_argument("--path", default=None)
+    mailbox_test.add_argument(
+        "--to", required=True, help="where the test messages go. Your own address."
+    )
+    mailbox_test.add_argument(
+        "--mailbox",
+        default=None,
+        help="send from only this one, instead of every mailbox in the file",
+    )
+
+    mailbox_parser.set_defaults(func=cmd_mailbox)
+
+    verify_parser = sub.add_parser(
+        "verify-contacts",
+        help="re-check addresses stored before a verifier was configured",
+    )
+    verify_parser.add_argument("--workspace", default="titan")
+    verify_parser.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help=(
+            "how many to check in this pass. Bounded because every one of "
+            "these is a connection to somebody else's mail server."
+        ),
+    )
+    verify_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "record the answers. Without this the command prints what it "
+            "would change and changes nothing."
+        ),
+    )
+    verify_parser.set_defaults(func=cmd_verify_contacts)
+
+    recover_parser = sub.add_parser(
+        "recover-contacts",
+        help="resolve contacts for leads whose crawl already found the address",
+    )
+    recover_parser.add_argument("--workspace", default="titan")
+    recover_parser.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help=(
+            "how many leads to examine in this pass. Bounded because --apply "
+            "runs MX and verification per address."
+        ),
+    )
+    recover_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "resolve and store. Without this the command prints what it would "
+            "create and creates nothing."
+        ),
+    )
+    recover_parser.set_defaults(func=cmd_recover_contacts)
+
+    trickle_parser = sub.add_parser(
+        "trickle",
+        help="hold the higher-risk addresses and release a few each day",
+    )
+    trickle_parser.add_argument("--workspace", default="titan")
+    trickle_parser.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help=(
+            "how many to release in this run. Five a day against a 1.3% base "
+            "rate keeps the blended rate under the 2% that blocks a mailbox."
+        ),
+    )
+    trickle_parser.add_argument(
+        "--hold",
+        action="store_true",
+        help="deactivate them all instead of releasing. Run once, at the start.",
+    )
+    trickle_parser.add_argument("--apply", action="store_true")
+    trickle_parser.set_defaults(func=cmd_trickle)
+
+    auth_parser = sub.add_parser(
+        "auth",
+        help="audit SPF, DKIM, DMARC and print the records that are missing",
+    )
+    auth_parser.add_argument("--workspace", default="titan")
+    auth_parser.set_defaults(func=cmd_auth)
+
+    repoint_parser = sub.add_parser(
+        "repoint-contacts",
+        help="move leads onto the best address their crawl already found",
+    )
+    repoint_parser.add_argument("--workspace", default="titan")
+    repoint_parser.add_argument("--limit", type=int, default=500)
+    repoint_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "carry it out. Without this the command prints what it would "
+            "change and changes nothing."
+        ),
+    )
+    repoint_parser.set_defaults(func=cmd_repoint_contacts)
+
+    warmup_parser = sub.add_parser(
+        "warmup",
+        help="give the mailboxes a history: delivered, read and replied-to mail",
+    )
+    warmup_sub = warmup_parser.add_subparsers(dest="warmup_command", required=True)
+    for name, blurb in (
+        ("status", "the pool, and where each mailbox is on its ramp"),
+        ("plan", "who would write to whom today; sends nothing"),
+        ("run", "carry out today's plan, then tend the mailboxes"),
+    ):
+        sub_parser = warmup_sub.add_parser(name, help=blurb)
+        sub_parser.add_argument("--workspace", default="titan")
+        sub_parser.add_argument("--path", default=None)
+        if name == "run":
+            sub_parser.add_argument(
+                "--apply",
+                action="store_true",
+                help=(
+                    "actually send. Without it the plan is printed and nothing "
+                    "leaves. Recipients are only ever mailboxes in your own "
+                    "credential file."
+                ),
+            )
+    warmup_parser.set_defaults(func=cmd_warmup)
+
     redraft_parser = sub.add_parser(
         "redraft",
         help="rewrite every draft the message rules would now refuse",
@@ -1046,6 +2490,21 @@ def main() -> int:
         ),
     )
     redraft_parser.set_defaults(func=cmd_redraft)
+
+    backfill_parser = sub.add_parser(
+        "backfill-costs",
+        help="reprice model runs that were recorded as free",
+    )
+    backfill_parser.add_argument("--workspace", default="titan")
+    backfill_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "carry it out. Without this the command prints what it would "
+            "reprice and changes nothing."
+        ),
+    )
+    backfill_parser.set_defaults(func=cmd_backfill_costs)
 
     args = parser.parse_args()
     return int(args.func(args))

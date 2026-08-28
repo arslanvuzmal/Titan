@@ -36,11 +36,13 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.config import get_settings
 from titan.db.enums import DraftStatus, ReplyClass, SuppressionReason
+from titan.db.models import SenderIdentity
 from titan.db.models.lead import Lead
 from titan.db.models.messaging import InboundMessage as InboundMessageRow
 from titan.db.models.messaging import MessageDraft
@@ -84,6 +86,12 @@ _SUPPRESSION_REASONS: dict[ReplyKind, SuppressionReason] = {
 #: is the whole answer.
 _REPLY_CLASSES: dict[ReplyKind, ReplyClass] = {
     ReplyKind.AUTO: ReplyClass.AUTOMATED,
+    # No ReplyClass of its own, deliberately: adding one is a Postgres enum
+    # migration for a reporting nicety, and what actually mattered was getting
+    # these out of the *human* bucket. The classification's ``signals`` carry
+    # ``own_address`` or ``warmup_marker:...``, so the real reason is on the
+    # row for anyone who looks.
+    ReplyKind.NOT_A_PROSPECT: ReplyClass.AUTOMATED,
     ReplyKind.BOUNCE: ReplyClass.BOUNCE,
     ReplyKind.UNSUBSCRIBE: ReplyClass.UNSUBSCRIBE,
     ReplyKind.COMPLAINT: ReplyClass.COMPLAINT,
@@ -200,6 +208,37 @@ def _confidence(classification: ReplyClassification) -> float:
     return 0.75
 
 
+async def _own_addresses(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> frozenset[str]:
+    """Every address that is us rather than a recipient.
+
+    Read live rather than configured, so a mailbox added to the pool is covered
+    the moment it exists instead of when somebody remembers to list it here.
+
+    Includes the operator's own address from settings. That is the one that
+    caused the damage: three delivery tests sent to a personal Gmail threaded
+    back onto lead malmin.co.uk and retired it permanently.
+    """
+    rows = (
+        await session.execute(
+            select(SenderIdentity.from_email, SenderIdentity.reply_to_email).where(
+                SenderIdentity.workspace_id == workspace_id
+            )
+        )
+    ).all()
+    own = {
+        value.strip().casefold()
+        for row in rows
+        for value in row
+        if value and value.strip()
+    }
+    operator = (get_settings().operator_email or "").strip().casefold()
+    if operator:
+        own.add(operator)
+    return frozenset(own)
+
+
 async def ingest_inbound(
     session: AsyncSession,
     *,
@@ -240,7 +279,8 @@ async def ingest_inbound(
     """
     moment = now or dt.datetime.now(dt.UTC)
     arrived = received_at or moment
-    classification = classify_reply(message)
+    own = await _own_addresses(session, workspace_id)
+    classification = classify_reply(message, own_addresses=own)
 
     inbound_id, is_new = await _record_message(
         session,

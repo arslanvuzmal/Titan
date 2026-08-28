@@ -13,6 +13,8 @@ from __future__ import annotations
 from titan.db.enums import DraftStatus, OutboxStatus
 from titan.outreach.redraft import LIVE_OUTBOX, REDRAFTABLE, why_stale
 
+from tests.support import sample_message
+
 OWNER = "Arslan Vuzmal Lone"
 PORTFOLIO = "https://arslanvuzmallone.com"
 ADDRESS = "House No. 440, Street 23, Block C, Sector B-17, Islamabad, 44000, Pakistan"
@@ -22,13 +24,11 @@ def body(pitch: str) -> str:
     return f"Hi there,\n\n{pitch}\n\n{OWNER}\n{PORTFOLIO}\n{ADDRESS}\nUnsubscribe: x\n"
 
 
-GOOD = body(
-    "I was looking through example.test and noticed your /book page currently "
-    "returns HTTP 404.\n\nThat is worth fixing because someone clicking through "
-    "there has already moved past browsing treatments and is actively trying to "
-    "book.\n\nI build and repair patient-booking flows, so I can send you the "
-    "exact issue and the simplest way I would correct it.\n\nWant me to send you "
-    "the exact fix?"
+#: The one canonical sendable message. Shared so a band change does not
+#: leave this file disagreeing with the validator suite about what good
+#: looks like -- see tests/support/sample_message.py.
+GOOD = sample_message.body(
+    owner=OWNER, portfolio=PORTFOLIO, address=ADDRESS, unsubscribe="x"
 )
 
 
@@ -49,7 +49,7 @@ def test_the_claim_that_was_actually_sent_is_what_marks_a_draft_stale() -> None:
 
 
 def test_a_message_nobody_will_read_to_the_end_is_stale() -> None:
-    assert "outside_the_word_band" in why_stale(body(" ".join(["word"] * 140)), OWNER)
+    assert "outside_the_word_band" in why_stale(body(" ".join(["word"] * 340)), OWNER)
     assert "outside_the_word_band" in why_stale(body("Too short."), OWNER)
 
 
@@ -61,10 +61,10 @@ def test_a_message_that_still_reads_well_is_left_alone() -> None:
 
 def test_the_reason_names_the_number_that_failed() -> None:
     """An operator reading 580 lines needs to see which way it missed."""
-    reason = why_stale(body(" ".join(["word"] * 140)), OWNER)
+    reason = why_stale(body(" ".join(["word"] * 340)), OWNER)
 
-    # 140 words, plus the two of "Hi there,".
-    assert "142 words" in reason
+    # 340 words, plus the two of "Hi there,".
+    assert "342 words" in reason
 
 
 # ==========================================================================
@@ -100,6 +100,55 @@ def test_an_armed_row_is_repointed_rather_than_dropped() -> None:
         OutboxStatus.LEASED,
         OutboxStatus.DEFERRED,
     }
+
+
+def test_the_queued_copy_is_rewritten_with_the_draft() -> None:
+    """Repointing the foreign key was not enough, and quietly was not.
+
+    The outbox row carries its own rendered copy of the message, and that copy
+    is what the worker hands the provider. The send-time gate re-reads the
+    draft. A row repointed without re-rendering is gated on the new words and
+    sends the old ones -- the one disagreement here that reaches a stranger.
+    """
+    from titan.outreach.redraft import _rendered
+
+    class Replacement:
+        subject = "New subject"
+        body_text = "The rewritten body."
+        body_html = "<p>The rewritten body.</p>"
+
+    payload = _rendered(
+        {
+            "to_email": "sam@fixture-business.test",
+            "from_email": "outreach@arslanvuzmallone.com",
+            "subject": "Old subject",
+            "text_body": "The body nobody approved twice.",
+            "html_body": "<p>Old</p>",
+            "list_unsubscribe": "<https://arslanvuzmallone.com/unsubscribe>",
+        },
+        Replacement(),
+    )
+
+    assert payload["subject"] == "New subject"
+    assert payload["text_body"] == "The rewritten body."
+    assert payload["html_body"] == "<p>The rewritten body.</p>"
+    # Everything else was resolved when the row was queued and is not the
+    # rewrite's business: re-deriving it here would be a second, differently
+    # wrong answer to a question already answered correctly.
+    assert payload["to_email"] == "sam@fixture-business.test"
+    assert payload["list_unsubscribe"] == "<https://arslanvuzmallone.com/unsubscribe>"
+
+
+def test_a_draft_with_no_html_leaves_no_blank_alternative() -> None:
+    """None means 'text only'; an empty string is a blank HTML part."""
+    from titan.outreach.redraft import _rendered
+
+    class Replacement:
+        subject = "s"
+        body_text = "t"
+        body_html = ""
+
+    assert _rendered({"html_body": "<p>Old</p>"}, Replacement())["html_body"] is None
 
 
 # ==========================================================================

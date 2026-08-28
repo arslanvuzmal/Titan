@@ -54,25 +54,54 @@ class FollowUpScheduler:
     def __init__(self, *, now_fn: Callable[[], dt.datetime] | None = None) -> None:
         self._now = now_fn or (lambda: dt.datetime.now(dt.UTC))
 
-    async def scan_workspace(
-        self, session: AsyncSession, workspace_id: uuid.UUID, *, limit: int = 200
+    async def scan(
+        self,
+        session: AsyncSession,
+        workspace_id: uuid.UUID,
+        *,
+        campaign_id: uuid.UUID | None = None,
+        limit: int = 200,
     ) -> list[ScanResult]:
-        """Evaluate every contacted lead in a workspace.
+        """Evaluate the contacted leads this scan is responsible for.
 
         Only leads that have actually been contacted are considered: a
         follow-up follows something, and scanning the whole table would spend
         most of its time re-deciding "never contacted" for discovered leads.
+
+        ``campaign_id`` narrows the scan to one campaign's leads, and every
+        caller in the send path passes it. The reason is ownership, not
+        performance. This method mutates the rows it scans -- it writes
+        ``next_action_at`` and ``status_reason`` -- and the only caller runs
+        *once per campaign*. Unscoped, all 27 active campaigns selected the
+        same 79 contacted leads (ordered by ``last_contacted_at``, so literally
+        the same rows), each dirtied them, and whichever committed second lost
+        the version check: ``UPDATE statement on table 'leads' expected to
+        update 49 row(s); 0 were matched``. That StaleDataError propagated out
+        of ``plan_campaign_cycle`` and killed the whole planning activity, so
+        the campaign did no research and queued no sends for that cycle.
+
+        Scoping by campaign makes the row sets disjoint, because
+        ``leads.campaign_id`` is NOT NULL -- every lead belongs to exactly one
+        campaign, so two campaigns can no longer contend for a row.
+
+        It also fixes a quieter bug in the same place: ``limit`` applied to a
+        workspace-wide select means the oldest-contacted leads crowd out the
+        rest, so a campaign whose leads fall outside the global top-``limit``
+        would never be scanned at all. Per campaign, each gets its own budget.
         """
         now = self._now()
+        scope = [
+            Lead.workspace_id == workspace_id,
+            Lead.last_contacted_at.is_not(None),
+            Lead.replied_at.is_(None),
+        ]
+        if campaign_id is not None:
+            scope.append(Lead.campaign_id == campaign_id)
         leads = (
             (
                 await session.execute(
                     select(Lead)
-                    .where(
-                        Lead.workspace_id == workspace_id,
-                        Lead.last_contacted_at.is_not(None),
-                        Lead.replied_at.is_(None),
-                    )
+                    .where(*scope)
                     .order_by(Lead.last_contacted_at)
                     .limit(limit)
                 )
@@ -105,6 +134,7 @@ class FollowUpScheduler:
             "follow-up scan complete",
             extra={
                 "workspace_id": str(workspace_id),
+                "campaign_id": str(campaign_id) if campaign_id else None,
                 "scanned": len(results),
                 "due": due,
             },

@@ -42,6 +42,8 @@ from titan.db.models import (
     WorkspaceMember,
 )
 
+from tests.support import sample_message
+
 NOW = dt.datetime(2026, 8, 3, 12, 0, tzinfo=dt.UTC)
 
 
@@ -90,6 +92,7 @@ async def build_sendable(
     daily_send_limit: int = 100,
     recipient_domain_daily_limit: int = 50,
     approval_valid_until: dt.datetime | None = None,
+    lead_score: int = 88,
 ) -> SendableFixture:
     tag = suffix or uuid.uuid4().hex[:8]
     address = to_email or f"hello-{tag}@fixture-business.test"
@@ -195,7 +198,7 @@ async def build_sendable(
         campaign_id=campaign.id,
         organization_id=org.id,
         status=LeadStatus.QUALIFIED,
-        latest_score=88,
+        latest_score=lead_score,
     )
     session.add_all([channel, lead])
     await session.flush()
@@ -219,21 +222,11 @@ async def build_sendable(
         # now refuse, and the send gate re-checks the body rather than trusting
         # the stamp it was given. Every delivery test failed at once, which is
         # the check doing its job on a fixture rather than on a stranger.
-        body_text=(
-            "Hi there,\n\n"
-            "I was looking through fixture-business.test and noticed your /book "
-            "page currently returns HTTP 404.\n\n"
-            "That is worth fixing because someone clicking through there has "
-            "already moved past browsing treatments and is actively trying to "
-            "book.\n\n"
-            "I build and repair patient-booking flows, so I can send you the "
-            "exact issue and the simplest way I would correct it.\n\n"
-            "Want me to send you the exact fix?\n\n"
-            "Arslan Vuzmal Lone\n"
-            "https://arslanvuzmallone.dev\n"
-            "12 Fictional Row, Testville, TE1 1ST\n"
-            "Unsubscribe: https://arslanvuzmallone.dev/unsubscribe\n"
-        ),
+        # The address has to be the one this fixture's sender is registered
+        # with: the policy engine checks the body carries the sender's own
+        # mailing address, and a real-looking address in a fixture body is how
+        # every delivery test failed at once on a compliance rule doing its job.
+        body_text=sample_message.body(),
         claim_map=[
             {
                 "sentence": "Your booking button returns a 404.",

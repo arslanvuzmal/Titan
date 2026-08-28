@@ -15,6 +15,7 @@ Two checks bracket the call:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -25,6 +26,49 @@ from titan.contracts.evidence import CrawlResult, ResearchRequest
 from titan.security.url_guard import validate_redirect_chain, validate_url
 
 logger = logging.getLogger(__name__)
+
+
+#: How many times to wait for a free browser lane before giving up.
+#:
+#: The Temporal retry policy above this handles a worker that is down. These
+#: attempts handle one that is merely busy, which is a different condition and
+#: a much commoner one.
+SATURATION_ATTEMPTS = 6
+
+#: Base gap between those attempts, multiplied by the attempt number. Six
+#: attempts therefore span about two minutes, which is longer than any single
+#: crawl takes and so longer than a lane can stay occupied.
+SATURATION_WAIT_SECONDS = 6.0
+
+
+#: One permit per browser lane, shared by every crawl in this process.
+#:
+#: The waiting above treats a 503 gracefully; this stops most of them being
+#: provoked. The Temporal worker runs ``max_concurrent_activities=8`` against a
+#: browser worker serving four crawls at a time, so under load half of every
+#: batch was guaranteed an instant 503 -- the worker's own comment says "an
+#: unbounded worker will happily start more crawls than the browser worker can
+#: serve", which is exactly what 8-against-4 does.
+#:
+#: Lowering the activity limit to four would have fixed it by starving
+#: everything else: most activities here never touch a browser, and throttling
+#: reporting and verification to the crawl budget is the wrong trade. The limit
+#: belongs at the resource, not at the worker, so a crawl waits for a lane and
+#: every other activity keeps its slot.
+#:
+#: Built lazily because the permit count comes from settings, and asyncio
+#: primitives must not be created before there is a loop to bind them to.
+_lane_semaphore: asyncio.Semaphore | None = None
+_lane_permits: int | None = None
+
+
+def _lanes(settings: Settings) -> asyncio.Semaphore:
+    global _lane_semaphore, _lane_permits
+    permits = settings.browser_worker_concurrency
+    if _lane_semaphore is None or _lane_permits != permits:
+        _lane_semaphore = asyncio.Semaphore(permits)
+        _lane_permits = permits
+    return _lane_semaphore
 
 
 class BrowserWorkerError(RuntimeError):
@@ -101,16 +145,51 @@ class BrowserWorkerClient:
             pinned_ips=list(verdict.resolved_ips),
         )
 
-        try:
-            http = await self._http()
-            response = await http.post("/research", json=payload.model_dump(mode="json"))
-        except httpx.HTTPError as exc:
-            raise BrowserWorkerError(
-                f"browser worker unreachable: {type(exc).__name__}: {exc}"
-            ) from exc
+        # A 503 here means "every lane is busy", which is a wait, not a
+        # failure. Raising immediately made it one: the Temporal worker runs
+        # eight activity slots against four browser lanes, so under any real
+        # backlog half of every batch got an instant 503, spent its retries on
+        # backoff, and the lead was thrown away. 358 of 412 research runs in a
+        # day, against a browser worker that was healthy throughout and simply
+        # busy.
+        #
+        # Waiting in-process for a lane costs one idle coroutine and converts
+        # most of those into ordinary successes. The Temporal retry above it is
+        # unchanged and still catches a worker that is genuinely down --
+        # this only stops a *busy* worker being reported as a broken one.
+        # Held across the whole exchange, not just the request: the lane is
+        # occupied until the worker answers, so releasing early would let the
+        # next crawl start against a worker that is still busy -- which is the
+        # oversubscription this exists to prevent.
+        response = None
+        async with _lanes(self._settings):
+            for attempt in range(SATURATION_ATTEMPTS):
+                try:
+                    http = await self._http()
+                    response = await http.post(
+                        "/research", json=payload.model_dump(mode="json")
+                    )
+                except httpx.HTTPError as exc:
+                    raise BrowserWorkerError(
+                        f"browser worker unreachable: {type(exc).__name__}: {exc}"
+                    ) from exc
 
+                if response.status_code != 503:
+                    break
+
+                if attempt + 1 < SATURATION_ATTEMPTS:
+                    # Linear, not exponential. The wait is for a lane to free
+                    # up, and lanes free up at a roughly constant rate --
+                    # backing off exponentially would idle longest exactly when
+                    # the queue is draining fastest.
+                    await asyncio.sleep(SATURATION_WAIT_SECONDS * (attempt + 1))
+
+        assert response is not None  # the loop runs at least once
         if response.status_code == 503:
-            raise BrowserWorkerError("browser worker saturated")
+            raise BrowserWorkerError(
+                f"browser worker saturated after waiting "
+                f"{SATURATION_ATTEMPTS} times for a free lane"
+            )
         if response.status_code != 200:
             raise BrowserWorkerError(
                 f"browser worker HTTP {response.status_code}: {response.text[:300]}"

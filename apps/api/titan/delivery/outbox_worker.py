@@ -27,14 +27,17 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime as dt
 import logging
 import os
+import pathlib
 import random
 import socket
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from html import escape as _html_escape
 from typing import Any
 
 from sqlalchemy import select, text, update
@@ -69,6 +72,7 @@ from titan.db.session import get_sessionmaker
 from titan.delivery import adaptive_limits, deliverability, quotas, sender_health
 from titan.delivery.carrier_routing import carriers_for_workspace, route_for_market
 from titan.delivery.providers.base import (
+    Attachment,
     EmailProvider,
     OutboundEmail,
     SendResult,
@@ -76,6 +80,7 @@ from titan.delivery.providers.base import (
 from titan.delivery.suppression import is_suppressed, suppress
 from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
+from titan.intelligence.greeting import retimed_pair
 from titan.intelligence.message_validator import (
     PITCH_MAX_WORDS,
     PITCH_MIN_WORDS,
@@ -127,6 +132,187 @@ def _local_frame(ctx: SendContext | None, now: dt.datetime) -> dict[str, object]
         "local_sent_weekday": local.weekday(),
         "sent_timezone": timezone,
     }
+
+
+def with_compliant_footer(
+    email: OutboundEmail, mailing_address: str | None
+) -> OutboundEmail:
+    """Ensure the postal address is in the body of the message being sent.
+
+    The composer writes the footer when the *draft* is made, from the sender
+    identity the campaign named. Two things then drift apart. The sender pool
+    chooses the mailbox at send time by remaining headroom, so it need not be
+    the one the footer was written from; and an address added to the identities
+    afterwards does not reach into bodies already composed.
+
+    Either way the send-time check finds a mailing address configured and
+    absent from the text, and blocks -- permanently, because a body is not
+    going to change on its own. That is 101 validated, approved messages
+    cancelled on the live workspace over one setting being filled in late, plus
+    28 more on the unsubscribe header.
+
+    The check itself is right and stays: CAN-SPAM requires the address, and a
+    message without one should never leave. What was wrong is having no way to
+    *fix* it at the only moment the answer is known. So the footer is repaired
+    here against the mailbox actually chosen, immediately before the check runs.
+
+    Absent an address this returns the message untouched, so the block still
+    fires when nothing is configured at all -- the repair closes the drift, not
+    the requirement.
+    """
+    address = (mailing_address or "").strip()
+    if not address or address in email.text_body:
+        return email
+
+    text_body = email.text_body.rstrip("\n") + "\n\n" + address + "\n"
+    html_body = email.html_body
+    if html_body and address not in html_body:
+        block = f'\n    <p style="margin:12px 0 0;font-size:12px;color:#888;">{_html_escape(address)}</p>\n'
+        html_body = (
+            html_body[: html_body.rfind("</div>")] + block + "</div>"
+            if "</div>" in html_body
+            else html_body + block
+        )
+
+    return dataclasses.replace(email, text_body=text_body, html_body=html_body)
+
+
+def with_local_greeting(
+    email: OutboundEmail, local: dt.datetime | None
+) -> OutboundEmail:
+    """Set the salutation to the recipient's time of day, at the wire.
+
+    The third instance of the same drift the two functions around this one
+    exist for: something the draft could only guess at, known for certain at
+    send time. A draft composed on Monday can leave on Thursday, and the send
+    window that releases it spans 08:00 to 17:00 local -- so "Good morning"
+    chosen at compose time is a coin flip, and a message that greets somebody's
+    afternoon as their morning has announced that nobody was there when it was
+    sent.
+
+    Unlike the footer repairs this one is cosmetic, so it fails open in every
+    direction: an unresolvable timezone, an unrecognised opening line, or a
+    salutation that is already correct all return the message untouched. It
+    never blocks a send.
+    """
+    pair = retimed_pair(email.text_body, local)
+    if pair is None:
+        return email
+    existing, replacement = pair
+    text_body = email.text_body.replace(existing, replacement, 1)
+    html_body = email.html_body
+    if html_body:
+        # The HTML opens with markup, so the salutation is substituted by exact
+        # string rather than matched from the front. Escaped on both sides: the
+        # composer writes the greeting through the same escaper, so a name with
+        # an ampersand in it is "&amp;" in the markup and would not match raw.
+        html_body = html_body.replace(
+            _html_escape(existing), _html_escape(replacement), 1
+        )
+    return dataclasses.replace(email, text_body=text_body, html_body=html_body)
+
+
+#: How the attachment is introduced in the body.
+#:
+#: One sentence, and it names the file so a reader whose client hides
+#: attachments knows what to look for. Added by the same function that attaches
+#: the document, so the message cannot claim one that is not there.
+ONE_PAGER_NOTE = (
+    "I have attached a one-page summary of how the assessment works, "
+    "with references."
+)
+
+
+def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
+    """Attach the one-page brief, and mention it in the body.
+
+    Both, or neither. The words are written at compose time and the file is
+    read here, days apart -- so doing them together is what makes "attached"
+    true rather than hopeful.
+
+    Fails open: an unset path, a missing file, or an unreadable one returns the
+    message untouched and unattached. A brief is not worth failing a send over,
+    and a message that goes without it is a working message.
+    """
+    if not path or not email.text_body:
+        return email
+    document = pathlib.Path(path)
+    try:
+        content = document.read_bytes()
+    except OSError as error:
+        logger.warning("one-pager not attached (%s): %s", path, error)
+        return email
+    if not content:
+        logger.warning("one-pager not attached: %s is empty", path)
+        return email
+
+    attachment = Attachment(
+        filename=document.name,
+        content=content,
+        maintype="application",
+        subtype="pdf",
+    )
+    # Above the signature, at the end of the pitch: the reader has finished the
+    # argument and this is the offer of more, which is where a supporting
+    # document belongs. Below the signature it reads as a footer artefact.
+    text_body = _insert_before_signature(
+        email.text_body, ONE_PAGER_NOTE, email.from_name
+    )
+    html_body = email.html_body
+    if html_body:
+        block = (
+            f'\n    <p style="margin:0 0 16px;">{_html_escape(ONE_PAGER_NOTE)}</p>\n'
+        )
+        marker = '<p style="margin:24px 0 0;color:#444;">'
+        html_body = (
+            html_body.replace(marker, block + "    " + marker, 1)
+            if marker in html_body
+            else html_body
+        )
+    return dataclasses.replace(
+        email,
+        text_body=text_body,
+        html_body=html_body,
+        attachments=(*email.attachments, attachment),
+    )
+
+
+def _insert_before_signature(body: str, sentence: str, sender_name: str) -> str:
+    """Put ``sentence`` at the end of the pitch, above the signature.
+
+    The signature starts at the sender's own name on its own line -- the same
+    boundary ``message_validator.pitch_of`` uses to measure the pitch, so the
+    two agree on where the pitch ends by sharing the definition rather than by
+    both guessing.
+    """
+    name = (sender_name or "").strip()
+    index = body.find("\n" + name) if name else -1
+    if index < 0:
+        return body.rstrip("\n") + "\n\n" + sentence + "\n"
+    return body[:index].rstrip("\n") + "\n\n" + sentence + body[index:]
+
+
+def with_one_click_unsubscribe(email: OutboundEmail) -> OutboundEmail:
+    """Add the RFC 8058 header when the message already carries an https target.
+
+    The other half of the same drift, and 28 more cancelled messages. A draft
+    composed before the sender identity was marked as supporting one-click
+    carries a ``List-Unsubscribe`` with no ``List-Unsubscribe-Post`` beside it,
+    and the send-time check refuses it -- correctly, because Gmail and Yahoo's
+    bulk-sender rules make one-click mandatory and a reader who cannot unsubscribe
+    in one click reports spam instead, which is the fastest way to lose a domain.
+
+    Only ever *added*, and only when an ``https`` target is already present:
+    the header is meaningless beside a bare ``mailto:``, and inventing a target
+    would be inventing an unsubscribe endpoint that does not exist. So this
+    cannot manufacture consent to send -- it states a capability the message's
+    own existing link already provides.
+    """
+    if email.list_unsubscribe_post or not email.list_unsubscribe:
+        return email
+    if "https://" not in email.list_unsubscribe:
+        return email
+    return dataclasses.replace(email, list_unsubscribe_post="List-Unsubscribe=One-Click")
 
 
 def worker_identity() -> str:
@@ -184,6 +370,33 @@ def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
 #: re-deriving it here to re-check something that has not changed would invent
 #: failures rather than find them. What is checked is the content: the rhetoric
 #: nothing may contain, and the length a stranger will actually read.
+def _payload_is_the_gated_draft(row: OutboxMessage, draft: MessageDraft) -> bool:
+    """Whether the words about to be sent are the words just checked.
+
+    Every gate in this worker reads the draft. The provider is handed
+    ``row.payload``, a copy rendered when the row was queued. The two are the
+    same thing right up until something rewrites one of them -- and then the
+    gate is reading one message while a different one goes out.
+
+    Fails *closed*, unlike the content check below. A mismatch is not an error
+    that might be a bug in the check; it is two records that definitely
+    disagree, and the safe reading of that is that nobody has approved what is
+    sitting in the payload.
+    """
+    payload = row.payload or {}
+    if payload.get("text_body") == (draft.body_text or ""):
+        return True
+    logger.error(
+        "queued copy does not match the draft it was gated on; not sending",
+        extra={
+            "outbox_id": str(row.id),
+            "draft_id": str(draft.id),
+            "draft_version": draft.version,
+        },
+    )
+    return False
+
+
 def _still_passes_todays_rules(draft: MessageDraft) -> bool:
     """Whether this body would pass the content rules as they stand now.
 
@@ -237,11 +450,35 @@ class OutboxWorker:
 
     # ------------------------------------------------------------- claiming
     async def claim_batch(self, session: AsyncSession, limit: int) -> list[OutboxMessage]:
-        """Atomically claim up to ``limit`` due rows.
+        """Atomically claim up to ``limit`` due rows, best lead first.
 
         SKIP LOCKED is what makes this safe under concurrency: a row already
         locked by another worker is passed over rather than blocking, so
         throughput scales with worker count instead of serialising.
+
+        **Order is by lead score, not arrival.** A mailbox has a daily ceiling,
+        so on any day the queue is longer than the ceiling the order decides
+        which leads get written to and which wait -- and pure FIFO decides that
+        by when discovery happened to crawl them, which is a fact about the
+        crawler rather than about the business. Ordering by
+        ``leads.latest_score`` spends a scarce ceiling on the best prospects
+        first.
+
+        The score is the right and only key to use here.
+        :mod:`titan.intelligence.scoring` already folds ``SEVERITY_WEIGHT`` into
+        it, so a lead whose findings are severe already scores higher; adding
+        severity again on top would count the same evidence twice.
+
+        ``FOR UPDATE OF o`` rather than a bare ``FOR UPDATE``: the join exists
+        only to read a score, and locking the lead row would make two workers
+        contend over a lead neither of them is changing.
+
+        The join names ``workspace_id`` on both sides. This claim is one of the
+        few queries that is legitimately cross-workspace -- one worker drains
+        every tenant, so it cannot filter to a single one -- and that is exactly
+        why the join has to assert the lead belongs to the same tenant as the
+        row. Without it a stale or mistaken ``lead_id`` would read another
+        workspace's score and reorder this one's queue by it.
         """
         now = self._now()
         lease_until = now + dt.timedelta(seconds=self._settings.outbox_lease_seconds)
@@ -249,15 +486,18 @@ class OutboxWorker:
         claim = text(
             """
             WITH claimable AS (
-                SELECT id
-                  FROM outbox_messages
+                SELECT o.id
+                  FROM outbox_messages o
+                  LEFT JOIN leads l
+                         ON l.id = o.lead_id
+                        AND l.workspace_id = o.workspace_id
                  WHERE (
-                        status IN ('pending', 'deferred')
-                        OR (status = 'leased' AND leased_until < :now)
+                        o.status IN ('pending', 'deferred')
+                        OR (o.status = 'leased' AND o.leased_until < :now)
                        )
-                   AND next_attempt_at <= :now
-                 ORDER BY next_attempt_at
-                 FOR UPDATE SKIP LOCKED
+                   AND o.next_attempt_at <= :now
+                 ORDER BY l.latest_score DESC NULLS LAST, o.next_attempt_at
+                 FOR UPDATE OF o SKIP LOCKED
                  LIMIT :limit
             )
             UPDATE outbox_messages o
@@ -442,7 +682,10 @@ class OutboxWorker:
             ),
             campaign_region=campaign.region,
             evidence_count=_evidence_count(draft),
-            validation_passed=_still_passes_todays_rules(draft),
+            validation_passed=(
+                _still_passes_todays_rules(draft)
+                and _payload_is_the_gated_draft(row, draft)
+            ),
             provider_idempotency_key=row.provider_idempotency_key,
             approval_decision=approval.decision if approval else None,
             approval_draft_version=approval.draft_version if approval else None,
@@ -490,6 +733,20 @@ class OutboxWorker:
             return ProcessResult(row.id, "blocked", decision.reason_text())
 
         email = self._render(row, decision, ctx)
+
+        # Repaired against the mailbox the pool actually chose, not the one the
+        # draft was written from. See with_compliant_footer.
+        sender_row = await session.get(SenderIdentity, row.sender_identity_id)
+        email = with_compliant_footer(
+            email, sender_row.mailing_address if sender_row else None
+        )
+        email = with_one_click_unsubscribe(email)
+        # The brief, when one is configured. Before the greeting repair so the
+        # greeting is decided on the body that is actually going out.
+        email = with_one_pager(email, self._settings.one_pager_attachment_path)
+        # Last, and after the footer repairs, so the greeting is decided on the
+        # body that is actually going out.
+        email = with_local_greeting(email, self._recipient_local_time(ctx))
 
         # Deliverability is checked at the send boundary, alongside policy.
         # A message that would be filtered is not "sent with a warning" -- it
@@ -709,6 +966,14 @@ class OutboxWorker:
             dkim_ok=sender.dkim_ok,
             dmarc_ok=sender.dmarc_ok,
             auth_stale=is_stale(sender.last_verified_at),
+            # ``days_since_bounce`` is deliberately left unset here, unlike the
+            # send-time gate in ``_check_deliverability``. The health snapshot
+            # should keep saying BLOCKED: the mailbox really did bounce 5.32% of
+            # its list, and that is the true state of it. Recovery is expressed
+            # as an allowance on top of a blocked mailbox -- adaptive_limits'
+            # probation, five a day -- not by relabelling it healthy. Feeding
+            # this would soften the verdict to WATCH, whose 0.6 factor would
+            # hand a recovering mailbox 30 sends a day instead of five.
             window=deliverability.ReputationWindow(
                 sent=int(stats.sent or 0),
                 delivered=int(stats.delivered or 0),
@@ -750,10 +1015,30 @@ class OutboxWorker:
             ).scalars()
         )
 
+        # How long since this mailbox last hard-bounced. None means never, which
+        # is not the same as "recently" and must not be read as it -- see
+        # adaptive_limits.PROBATION_VOLUME for what this governs.
+        last_bounce = await session.scalar(
+            text(
+                """
+                SELECT max(bounced_at) FROM messages
+                 WHERE workspace_id = :workspace
+                   AND sender_identity_id = :sender
+                   AND bounced_at IS NOT NULL
+                   AND bounce_kind IS DISTINCT FROM 'soft'
+                """
+            ),
+            {"workspace": row.workspace_id, "sender": sender.id},
+        )
+        days_since_bounce = (
+            None if last_bounce is None else max(0, (now - last_bounce).days)
+        )
+
         decision = adaptive_limits.daily_limit(
             sender.daily_send_limit,
             recent=(status, *history),
             warmup_limit=warmup_limit,
+            days_since_bounce=days_since_bounce,
         )
         if decision.reduced:
             logger.info(
@@ -902,6 +1187,27 @@ class OutboxWorker:
             )
         ).one()
 
+        # Deliberately *not* bounded by ``since``. The question this answers is
+        # "has anything bounced lately", and the newest bounce is the newest
+        # bounce whether or not it falls inside the rate window -- clamping it
+        # to the window would report a mailbox as quiet the moment its last
+        # bounce aged out, which is the opposite of the check's purpose.
+        last_bounce = await session.scalar(
+            text(
+                """
+                SELECT max(bounced_at) FROM messages
+                 WHERE workspace_id = :workspace
+                   AND sender_identity_id = :sender
+                   AND bounced_at IS NOT NULL
+                   AND bounce_kind IS DISTINCT FROM 'soft'
+                """
+            ),
+            {"workspace": row.workspace_id, "sender": row.sender_identity_id},
+        )
+        days_since_bounce = (
+            None if last_bounce is None else max(0, (now - last_bounce).days)
+        )
+
         # The same rule ``_capture_sender_health`` uses, and it did not used to
         # be. This read Titan's first send alone while the health snapshot took
         # ``_earliest`` of that and the provider's warm-up start, so the two
@@ -1004,12 +1310,14 @@ class OutboxWorker:
                     delivered=int(stats.delivered or 0),
                     hard_bounced=int(stats.bounced or 0),
                     complained=int(stats.complained or 0),
+                    days_since_bounce=days_since_bounce,
                 ),
                 first_send_at=first_send_at,
                 sent_today=sent_today,
                 recent_peak_sends=recent_peak_sends,
                 now=now,
                 warmup_target=sender.daily_send_limit if sender else 0,
+                attachments=tuple(email.attachments),
             )
         )
 
@@ -1140,6 +1448,12 @@ class OutboxWorker:
             row.sent_at = now
             row.lease_owner = None
             row.leased_until = None
+            # The row got past whatever once held it up, so the reason it was
+            # held has stopped being true. Leaving it behind is how 13 delivered
+            # messages came to carry "outside the campaign's send window" as
+            # their stated outcome -- and how the failure register came to
+            # describe causes that had already been resolved.
+            row.blocked_reason = None
             await session.execute(
                 update(Message)
                 .where(Message.id == row.message_id, Message.state_rank < 20)
@@ -1231,7 +1545,11 @@ class OutboxWorker:
         base = retry_after if retry_after is not None else BACKOFF_SCHEDULE[index]
         # Full jitter: without it, a fleet that failed together retries together
         # and reproduces the original overload.
-        delay = random.uniform(base * 0.5, base * 1.5)  # noqa: S311 - not cryptographic
+        delay = random.uniform(base * 0.5, base * 1.5)
+        # Back to PENDING means nothing is blocking it any more; the live error
+        # is in last_error. A leftover blocked_reason here would outlive the
+        # condition that wrote it and describe a row that is simply waiting.
+        row.blocked_reason = None
         row.status = OutboxStatus.PENDING
         row.next_attempt_at = self._now() + dt.timedelta(seconds=delay)
 
@@ -1251,13 +1569,7 @@ class OutboxWorker:
         """
         if ctx.send_window is None or not ctx.send_window.is_usable:
             return None
-        timezone = resolve_timezone(
-            ctx.recipient_timezone,
-            ctx.campaign_region,
-            recipient_subregion=ctx.recipient_subregion,
-            campaign_subregion=ctx.campaign_subregion,
-        )
-        local = local_time(ctx.now, timezone)
+        local = self._recipient_local_time(ctx)
         if local is None:
             return None
         country = resolve_country(ctx.recipient_country, ctx.campaign_region)
@@ -1274,6 +1586,22 @@ class OutboxWorker:
         if opens is None or opens <= local:
             return None
         return opens.astimezone(dt.UTC)
+
+    @staticmethod
+    def _recipient_local_time(ctx: SendContext) -> dt.datetime | None:
+        """Now, on the recipient's clock, or None when it cannot be resolved.
+
+        The same resolution ``_next_window_open`` does, named once. None is a
+        real answer -- ``resolve_timezone`` refuses rather than guessing, and a
+        greeting is not worth defaulting to UTC for.
+        """
+        timezone = resolve_timezone(
+            ctx.recipient_timezone,
+            ctx.campaign_region,
+            recipient_subregion=ctx.recipient_subregion,
+            campaign_subregion=ctx.campaign_subregion,
+        )
+        return local_time(ctx.now, timezone)
 
     async def _defer(
         self,

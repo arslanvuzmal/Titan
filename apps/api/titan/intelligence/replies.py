@@ -42,6 +42,16 @@ class ReplyKind(StrEnum):
     UNSUBSCRIBE = "unsubscribe_request"
     #: "This is spam." The most serious signal there is.
     COMPLAINT = "complaint"
+    #: Mail that arrived in the outreach mailbox but is not a prospect writing
+    #: back at all -- our own sending identities, the operator's own address,
+    #: or reciprocal warm-up traffic.
+    #:
+    #: A distinct kind rather than AUTO because the two mean opposite things to
+    #: a reader of the data. An auto-reply is a real recipient's mail system
+    #: answering; this is not the recipient in any sense. Folding it into AUTO
+    #: would hide it, and hiding it is how fourteen "human replies" came to be
+    #: reported on a workspace that has never had one.
+    NOT_A_PROSPECT = "not_a_prospect"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,10 +211,26 @@ _HARD_BOUNCE_BODY = (
     ),
 )
 
+#: An explicit request never to be written to again.
+#:
+#: Widened once the message began promising "reply and I will take you off the
+#: list". Three things were missing and all three are how people actually
+#: write it: the contraction (``don't`` as well as ``do not``), the plural
+#: (a receptionist answers for the practice -- "take **us** off"), and the
+#: bare imperative ("stop sending", "no further emails").
+#:
+#: What is deliberately absent is "not interested" and "no thanks". Those are
+#: declines, not opt-out requests; they already stop the sequence through
+#: ``stops_the_sequence``, and suppressing a business permanently on "no
+#: thanks" is an irreversible cost paid on an ambiguous signal.
 _UNSUBSCRIBE = (
     re.compile(
-        r"\b(unsubscribe|remove me|take me off|opt[- ]?out|stop (emailing|contacting|"
-        r"messaging) me|do not (contact|email) me( again)?|"
+        r"\b(unsubscribe|opt[- ]?out|"
+        r"(remove|take) (me|us|our (name|details|address)|my (name|details|address))"
+        r"( off| from)?|"
+        r"stop (emailing|contacting|messaging|writing to|sending (me|us))|"
+        r"(do not|don'?t) (contact|email|message|write to) (me|us)( again)?|"
+        r"no (further|more) (emails?|messages?|contact|correspondence)|"
         r"delete my (data|details|information))\b",
         re.I,
     ),
@@ -220,7 +246,41 @@ _COMPLAINT = (
 )
 
 
-def classify_reply(message: InboundMessage) -> ReplyClassification:
+#: Fragments that mark reciprocal warm-up traffic rather than a real reply.
+#:
+#: Warm-up networks send mail between member mailboxes so a new sender
+#: accumulates history that looks like conversation. Smartlead builds those
+#: bodies from spintax, and the tokens survive into the text: six of the
+#: fourteen "human replies" on the live workspace carry ``flame-smile`` or
+#: ``model-using`` in the middle of an otherwise plausible sentence.
+#:
+#: Textual, and therefore a heuristic -- said plainly because the tokens are
+#: randomly drawn and this list cannot be complete. It is worth having anyway:
+#: every one of these it catches is a reply-rate figure that stops being wrong,
+#: and the cost of a miss is a warm-up mail recorded as human, which is exactly
+#: what happens today for all of them.
+WARMUP_MARKERS: tuple[str, ...] = (
+    "flame-smile",
+    "model-using",
+)
+
+
+def is_own_address(address: str, own: frozenset[str]) -> bool:
+    """Whether this arrived from us rather than from a recipient."""
+    return (address or "").strip().casefold() in own
+
+
+def _warmup_marker(haystack: str) -> str | None:
+    lowered = haystack.casefold()
+    for marker in WARMUP_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
+
+
+def classify_reply(
+    message: InboundMessage, *, own_addresses: frozenset[str] = frozenset()
+) -> ReplyClassification:
     """Decide what an inbound message means.
 
     Order is deliberate and is the substance of this function:
@@ -238,6 +298,35 @@ def classify_reply(message: InboundMessage) -> ReplyClassification:
     subject = message.subject or ""
     body = message.body_text or ""
     haystack = f"{subject}\n{body}"
+
+    # ---- 0. not a prospect at all ------------------------------------------
+    #
+    # Ahead of every other rule, including complaint, because the later rules
+    # all answer "what did the recipient mean" and this one answers "was there
+    # a recipient". Running them first on our own mail produces a confident
+    # reading of a sentence nobody outside this system wrote.
+    #
+    # The case that forced it: three delivery tests sent to a personal Gmail
+    # were threaded back to lead malmin.co.uk, classified HUMAN, and retired a
+    # real dental practice permanently -- REPLIED is terminal, so nothing will
+    # ever write to them again. The machinery was correct; it was handed input
+    # it had no way to recognise.
+    if is_own_address(message.from_email, own_addresses):
+        signals.append("own_address")
+        return ReplyClassification(
+            ReplyKind.NOT_A_PROSPECT,
+            tuple(signals),
+            "sent from one of our own addresses; not a reply from a recipient",
+        )
+
+    warmup = _warmup_marker(haystack)
+    if warmup is not None:
+        signals.append(f"warmup_marker:{warmup}")
+        return ReplyClassification(
+            ReplyKind.NOT_A_PROSPECT,
+            tuple(signals),
+            "reciprocal warm-up traffic, not a reply from a recipient",
+        )
 
     # ---- 1. complaint ------------------------------------------------------
     if _any(_COMPLAINT, haystack):

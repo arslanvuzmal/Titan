@@ -40,3 +40,4 @@ htmlcov/
 # addresses of businesses that never opted in -- and must never be committed.
 backups/
 *.sql.gz
+secrets/

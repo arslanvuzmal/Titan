@@ -147,10 +147,12 @@ async def record_calls(
                 input_tokens=call.get("input_tokens"),
                 output_tokens=call.get("output_tokens"),
                 cost_usd=float(call.get("cost_usd") or 0.0),
-                # The gateway prices from a table, not from a provider invoice.
-                # Saying so is the difference between a figure somebody can
-                # reconcile and one they will argue with.
-                cost_estimated=True,
+                # The gateway prices from a table, not from a provider invoice,
+                # unless the provider sent a price of its own. Saying which is
+                # the difference between a figure somebody can reconcile and one
+                # they will argue with. Absent means estimated: a caller that
+                # did not set the flag has not proved otherwise.
+                cost_estimated=bool(call.get("cost_estimated", True)),
                 occurred_at=occurred,
             )
             .on_conflict_do_nothing(index_elements=["workspace_id", "idempotency_key"])

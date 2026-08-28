@@ -34,8 +34,14 @@ URL = "/api/v1/delivery/webhooks/resend"
 
 
 @pytest_asyncio.fixture
-async def client(monkeypatch):
+async def client(monkeypatch, database_available: bool):
+    """The real ASGI app. Every accepted event is matched against a stored
+    message, which is a database read -- so gate on the database rather than
+    failing on a connection timeout when it is absent."""
     import os
+
+    if not database_available:
+        pytest.skip("integration database unavailable (set TITAN_TEST_DATABASE_URL)")
 
     os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
     monkeypatch.setenv("TITAN_RESEND_WEBHOOK_SECRET", WEBHOOK_SECRET)

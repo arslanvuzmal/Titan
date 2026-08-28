@@ -69,6 +69,23 @@ def build_provider() -> EmailProvider:
             timeout_seconds=float(settings.smtp_timeout_seconds),
         )
 
+    if settings.email_provider == "smtp_pool":
+        # The pool is the only provider whose credentials are not in
+        # settings, so the failure mode is different: not "the key is
+        # missing" but "this file does not describe mailboxes I can send
+        # as". Either way it is a startup failure, for the same reason.
+        from titan.delivery.mailboxes import load_mailboxes
+        from titan.delivery.providers.smtp_pool import SmtpPoolProvider
+
+        if not settings.mailbox_file:
+            raise RuntimeError(
+                "TITAN_EMAIL_PROVIDER=smtp_pool but TITAN_MAILBOX_FILE is not set"
+            )
+        return SmtpPoolProvider(
+            load_mailboxes(settings.mailbox_file),
+            timeout_seconds=float(settings.smtp_timeout_seconds),
+        )
+
     if settings.email_provider == "instantly":
         if settings.instantly_api_key is None:
             raise RuntimeError(

@@ -268,6 +268,31 @@ export interface Usage {
   model_calls: number;
 }
 
+export interface OutcomeSlice {
+  key: string;
+  label: string;
+  sent: number;
+  delivered: number;
+  bounced: number;
+  complained: number;
+  replied: number;
+  positive_replies: number;
+  meetings: number;
+  /** False below the sample floor. Rates are null and must render as
+   *  "not enough data yet", never as 0%. */
+  has_signal: boolean;
+  bounce_rate: number | null;
+  reply_rate: number | null;
+  positive_reply_rate: number | null;
+}
+
+export interface OutcomeRollup {
+  dimension: string;
+  window_days: number;
+  sample_floor: number;
+  slices: OutcomeSlice[];
+}
+
 export interface CrmStats {
   leads_total: number;
   leads_by_status: Record<string, number>;
@@ -437,6 +462,12 @@ export const api = {
 
   // --- overview ------------------------------------------------------------
   stats: (t: string) => call<CrmStats>('/api/v1/stats', { token: t }),
+
+  outcomes: (t: string, dimension?: string, windowDays = 30) =>
+    call<OutcomeRollup[]>(
+      `/api/v1/analytics/outcomes${query({ dimension, window_days: windowDays })}`,
+      { token: t },
+    ),
 
   // --- campaigns -----------------------------------------------------------
   campaigns: (t: string) => call<Page<Campaign>>('/api/v1/campaigns', { token: t }),

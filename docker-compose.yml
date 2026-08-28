@@ -20,6 +20,10 @@ x-titan-env: &titan-env
   TITAN_TEMPORAL_NAMESPACE: ${TITAN_TEMPORAL_NAMESPACE:-default}
   TITAN_BROWSER_WORKER_URL: http://browser-worker:8800
   TITAN_BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
+  # Same variable, same default as the browser worker's own
+  # BROWSER_WORKER_CONCURRENCY below, so the callers cannot start more crawls
+  # than there are lanes to run them. If you raise one, raise both.
+  TITAN_BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-4}
   TITAN_FRONTEND_URL: ${TITAN_FRONTEND_URL:-http://localhost:3000}
   # --- the global kill switch. Never default this to true. ---
   TITAN_PRODUCTION_SENDING_ENABLED: ${TITAN_PRODUCTION_SENDING_ENABLED:-false}
@@ -49,6 +53,33 @@ x-titan-env: &titan-env
   TITAN_SMARTLEAD_WEBHOOK_SECRET: ${TITAN_SMARTLEAD_WEBHOOK_SECRET:-}
   TITAN_SMARTLEAD_PRODUCTION_ENABLED: ${TITAN_SMARTLEAD_PRODUCTION_ENABLED:-false}
   TITAN_SMARTLEAD_IMPORT_ENABLED: ${TITAN_SMARTLEAD_IMPORT_ENABLED:-false}
+  # --- direct SMTP sending ---
+  # These were defined in config.py and never passed through here, so setting
+  # any of them in .env changed nothing and the smtp provider could not be
+  # reached at all. Same class of gap as the Smartlead env block.
+  TITAN_SMTP_HOST: ${TITAN_SMTP_HOST:-}
+  TITAN_SMTP_PORT: ${TITAN_SMTP_PORT:-587}
+  TITAN_SMTP_USERNAME: ${TITAN_SMTP_USERNAME:-}
+  TITAN_SMTP_PASSWORD: ${TITAN_SMTP_PASSWORD:-}
+  TITAN_SMTP_SECURITY: ${TITAN_SMTP_SECURITY:-ssl}
+  TITAN_SMTP_TIMEOUT_SECONDS: ${TITAN_SMTP_TIMEOUT_SECONDS:-30}
+  # One credential per sending mailbox, for TITAN_EMAIL_PROVIDER=smtp_pool.
+  # A path, not the credentials themselves: the pool holds one password per
+  # address and a password put here would appear in `docker compose config`,
+  # in `docker inspect`, and in every screenshot of either. The file is
+  # mounted read-only into the three services that genuinely need it and
+  # into nothing else. See titan.delivery.mailboxes.
+  TITAN_MAILBOX_FILE: ${TITAN_MAILBOX_FILE:-}
+  # --- mailbox verification ---
+  # Titan's own probe. Same class of gap as the SMTP block above: the
+  # settings existed and nothing passed them in, so a container read the
+  # default 'null' and reported a clean sweep over addresses it had never
+  # checked. See titan/intelligence/smtp_probe.py.
+  TITAN_MAILBOX_VERIFIER: ${TITAN_MAILBOX_VERIFIER:-null}
+  TITAN_SMTP_PROBE_HELO: ${TITAN_SMTP_PROBE_HELO:-}
+  TITAN_SMTP_PROBE_MAIL_FROM: ${TITAN_SMTP_PROBE_MAIL_FROM:-}
+  TITAN_SMTP_PROBE_TIMEOUT_SECONDS: ${TITAN_SMTP_PROBE_TIMEOUT_SECONDS:-12}
+  TITAN_SMTP_PROBE_CONCURRENCY: ${TITAN_SMTP_PROBE_CONCURRENCY:-4}
   # --- reply collection (inbound-worker) ---
   # No kill switch here, unlike sending. Reading replies is how unsubscribes,
   # complaints and bounces are honoured, so the safe default is *on* wherever
@@ -69,6 +100,15 @@ x-titan-env: &titan-env
   # the tasks table regardless; this only decides whether one also arrives
   # somewhere noisier. Unset degrades the channel, never the record.
   TITAN_OPERATOR_WEBHOOK_URL: ${TITAN_OPERATOR_WEBHOOK_URL:-}
+  # The operator's own address, so mail *from* it is not read as a prospect
+  # reply. A delivery test sent from the operator's Gmail threaded onto a real
+  # lead, classified HUMAN, and retired it -- REPLIED is terminal, so that
+  # dental practice would never have been written to again.
+  #
+  # The same omission as TITAN_MODEL_REWRITES_ENABLED below: the setting was
+  # added to .env and to the code, and this list was not updated, so every
+  # container read the default of None and the guard was half-installed.
+  TITAN_OPERATOR_EMAIL: ${TITAN_OPERATOR_EMAIL:-}
   # --- discovery ---
   TITAN_GOOGLE_PLACES_API_KEY: ${TITAN_GOOGLE_PLACES_API_KEY:-}
   TITAN_AGENT_REACH_API_KEY: ${TITAN_AGENT_REACH_API_KEY:-}
@@ -93,6 +133,21 @@ x-titan-env: &titan-env
   TITAN_MODEL_ROUTE_VERIFICATION: ${TITAN_MODEL_ROUTE_VERIFICATION:-gemini:gemini-3.7-flash}
   TITAN_MODEL_ROUTE_MESSAGE: ${TITAN_MODEL_ROUTE_MESSAGE:-gemini:gemini-3.7-flash}
   TITAN_MODEL_ROUTE_PREMIUM: ${TITAN_MODEL_ROUTE_PREMIUM:-openrouter:anthropic/claude-sonnet-4}
+  # --- message content ---
+  # Real previous projects, cited in the credibility paragraph. Unset is a
+  # working state: the message keeps its generic credential sentence rather
+  # than inventing a client. See titan/intelligence/case_studies.py.
+  TITAN_CASE_STUDIES_PATH: ${TITAN_CASE_STUDIES_PATH:-}
+  # A one-page summary, linked from the references block. A link and not an
+  # attachment: an unsolicited PDF from an unknown sender is a strong spam
+  # signal, corporate gateways strip them, and a hosted page produces a click
+  # -- which is the engagement signal this system otherwise does not have.
+  TITAN_ONE_PAGER_URL: ${TITAN_ONE_PAGER_URL:-}
+  # The one-page brief, attached to every message. Unset attaches nothing.
+  # The file is read at send time from the docs mount below, so regenerating it
+  # takes effect without a rebuild.
+  TITAN_ONE_PAGER_ATTACHMENT_PATH: ${TITAN_ONE_PAGER_ATTACHMENT_PATH:-}
+  TITAN_MODEL_ROUTE_CONTACT: ${TITAN_MODEL_ROUTE_CONTACT:-openrouter:minimax/minimax-m3:free}
   # --- identity ---
   TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}
   TITAN_LOCAL_JWT_SECRET: ${TITAN_LOCAL_JWT_SECRET:-dev-only-not-for-production}
@@ -181,6 +236,31 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # A capture server: accepts every message and delivers none of them. This is
+  # how the real send path -- headers, footers, unsubscribe, the lot -- gets
+  # exercised and read before anything reaches a stranger, which is what
+  # titan/delivery/providers/smtp.py was written for.
+  #
+  # Opt-in, so `docker compose up -d` does not start it by accident:
+  #     docker compose --profile rehearsal up -d mailpit
+  # Inbox at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: [rehearsal]
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: "5000"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   migrate:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
@@ -194,6 +274,11 @@ services:
     environment: *titan-env
     command: ["uvicorn", "titan.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["${API_HOST_PORT:-8000}:8000"]
+    volumes:
+      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # worker to authenticate as each mailbox, the inbound worker to read
+      # each one. The browser worker and the web app never see it.
+      - ./secrets:/run/secrets:ro
     depends_on:
       postgres: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}
@@ -217,6 +302,12 @@ services:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
     command: ["python", "-m", "titan.workers.temporal_worker"]
+    volumes:
+      # The composer reads case_studies.json from here. This worker is where
+      # drafts are written, so it is the one service that needs it -- the mount
+      # was on api, outbox-worker and inbound-worker and not on the worker that
+      # actually composes.
+      - ./secrets:/run/secrets:ro
     healthcheck:
       # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
       # would be permanently unhealthy and restart-looped. This checks the one
@@ -242,6 +333,12 @@ services:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
     command: ["python", "-m", "titan.workers.outbox"]
+    volumes:
+      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # worker to authenticate as each mailbox, the inbound worker to read
+      # each one. The browser worker and the web app never see it.
+      - ./docs/one-pager:/run/one-pager:ro
+      - ./secrets:/run/secrets:ro
     healthcheck:
       # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
       # would be permanently unhealthy and restart-looped. This checks the one
@@ -266,12 +363,21 @@ services:
   # this one holds a mailbox password and never sends, that one holds a provider
   # client and never reads. Neither can do the other's job by accident.
   #
-  # Starts only when TITAN_IMAP_HOST is set -- it refuses to boot without
-  # credentials rather than idling and looking healthy while reading nothing.
+  # Reads every mailbox in TITAN_MAILBOX_FILE, or the single TITAN_IMAP_*
+  # mailbox when no pool file is set. With three sending addresses and one
+  # poller, two thirds of the bounces and unsubscribe requests looked exactly
+  # like silence.
+  #
+  # Exits zero, saying so, when no mailbox is configured at all.
   inbound-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
     command: ["python", "-m", "titan.workers.inbound"]
+    volumes:
+      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # worker to authenticate as each mailbox, the inbound worker to read
+      # each one. The browser worker and the web app never see it.
+      - ./secrets:/run/secrets:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 30s

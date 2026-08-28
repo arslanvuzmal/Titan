@@ -84,6 +84,10 @@ class ModelResponse:
     output_tokens: int | None
     latency_ms: int
     cost_usd: float
+    #: True when ``cost_usd`` came from the provider's own usage block. False
+    #: means nobody priced this call yet -- the gateway fills it in from
+    #: :data:`_PRICE_HINTS` and the ledger records it as estimated.
+    cost_reported: bool = False
     used_fallback: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -375,8 +379,9 @@ class ModelGateway:
 
             breaker.record_success()
             used_fallback = index > 0
+            cost_usd, cost_estimated = self._settle_cost(response, reserved_usd=estimated)
             self.budget.record(
-                actual_usd=response.cost_usd,
+                actual_usd=cost_usd,
                 campaign_id=campaign_id,
                 lead_id=lead_id,
                 premium=is_premium,
@@ -389,7 +394,8 @@ class ModelGateway:
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
                     "latency_ms": response.latency_ms,
-                    "cost_usd": response.cost_usd,
+                    "cost_usd": cost_usd,
+                    "cost_estimated": cost_estimated,
                     "used_fallback": used_fallback,
                     "campaign_id": campaign_id,
                     "lead_id": lead_id,
@@ -404,7 +410,8 @@ class ModelGateway:
                 input_tokens=response.input_tokens,
                 output_tokens=response.output_tokens,
                 latency_ms=response.latency_ms,
-                cost_usd=response.cost_usd,
+                cost_usd=cost_usd,
+                cost_reported=not cost_estimated,
                 used_fallback=used_fallback,
                 raw=response.raw,
             )
@@ -552,6 +559,31 @@ class ModelGateway:
         per_million = _PRICE_HINTS.get(route.provider, 1.0)
         return (max_tokens / 1_000_000) * per_million
 
+    @staticmethod
+    def _settle_cost(
+        response: ModelResponse, *, reserved_usd: float
+    ) -> tuple[float, bool]:
+        """Decide what this call actually cost, and whether that is a guess.
+
+        Only OpenRouter returns a price with the response; NVIDIA and Gemini
+        return token counts and nothing else. Taking their silence as zero is
+        what left 1,850 of 1,862 runs recorded at $0.00 and the budget caps
+        unable to fire, so an unpriced call is priced here from its own token
+        counts instead. Returns ``(cost_usd, estimated)``.
+        """
+        if response.cost_reported:
+            return response.cost_usd, False
+
+        tokens = (response.input_tokens or 0) + (response.output_tokens or 0)
+        if tokens <= 0:
+            # No price and no token counts. The pre-call reservation is the only
+            # number in the room; recording it keeps spend monotonic rather than
+            # silently free.
+            return reserved_usd, True
+
+        per_million = _PRICE_HINTS.get(response.provider, 1.0)
+        return (tokens / 1_000_000) * per_million, True
+
     # ------------------------------------------------------------ validation
     async def validate_models(self) -> dict[str, Any]:
         """Check every configured route against the provider's live catalogue.
@@ -604,8 +636,11 @@ class ModelGateway:
 
 
 _PRICE_HINTS: dict[str, float] = {
-    # USD per million output tokens. Rough, used only for the pre-call estimate;
-    # actual cost comes from the provider response where it reports one.
+    # USD per million tokens, blended across input and output. Rough by
+    # construction -- this is a rate card, not an invoice, which is why every
+    # figure derived from it is written to the ledger with cost_estimated=True.
+    # Used for the pre-call estimate and, when the provider reports no cost of
+    # its own, to price the call after the fact from its token counts.
     "nvidia": 0.20,
     "gemini": 0.30,
     "openrouter": 3.00,
