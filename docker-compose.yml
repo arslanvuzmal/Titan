@@ -282,6 +282,7 @@ services:
       # Read-only, and only here: the API for `titan mailbox`, the outbox
       # worker to authenticate as each mailbox, the inbound worker to read
       # each one. The browser worker and the web app never see it.
+      - ./docs/one-pager:/run/one-pager:ro
       - ./secrets:/run/secrets:ro
     depends_on:
       postgres: {condition: service_healthy}

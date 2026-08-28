@@ -24,15 +24,19 @@ capability checks and audit writes live.
 from __future__ import annotations
 
 import datetime as dt
+import pathlib
 import uuid
 from collections.abc import Sequence
 from typing import Any
 
+from fastapi.responses import FileResponse
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from titan.delivery.outbox_worker import ONE_PAGER_NOTE
 from titan.api.schemas import (
+    AttachmentOut,
     ContactChannelOut,
     ContactOut,
     CrmStatsOut,
@@ -689,6 +693,85 @@ async def _group_count(session: AsyncSession, column: Any, model: Any) -> dict[s
         key = value.value if hasattr(value, "value") else str(value)
         out[key] = int(count)
     return out
+
+
+@router.get("/attachment", response_model=AttachmentOut)
+async def attachment(
+    principal: Principal = Depends(require("research:read")),
+) -> AttachmentOut:
+    """What will be attached to outgoing messages.
+
+    Read from disk rather than from a stored record, because that is where the
+    outbox worker reads it: the file can be regenerated without a deploy, so
+    anything cached here would eventually describe a document nobody is
+    sending.
+    """
+    settings = get_settings()
+    percent = max(0, min(100, settings.one_pager_sample_percent))
+    path = (settings.one_pager_attachment_path or "").strip()
+    if not path:
+        return AttachmentOut(
+            enabled=False,
+            sample_percent=percent,
+            reason="no attachment is configured",
+        )
+
+    document = pathlib.Path(path)
+    try:
+        size = document.stat().st_size
+    except OSError:
+        return AttachmentOut(
+            enabled=False,
+            sample_percent=percent,
+            filename=document.name,
+            reason="configured, but the file is not readable from the API",
+        )
+    if size <= 0:
+        return AttachmentOut(
+            enabled=False,
+            sample_percent=percent,
+            filename=document.name,
+            reason="the configured file is empty",
+        )
+    if percent == 0:
+        return AttachmentOut(
+            enabled=False,
+            sample_percent=0,
+            filename=document.name,
+            size_bytes=size,
+            reason="configured, but the sample is set to 0%",
+        )
+    return AttachmentOut(
+        enabled=True,
+        filename=document.name,
+        size_bytes=size,
+        sample_percent=percent,
+        body_note=ONE_PAGER_NOTE,
+    )
+
+
+@router.get("/attachment/download")
+async def attachment_download(
+    principal: Principal = Depends(require("research:read")),
+) -> FileResponse:
+    """The attachment itself, so a reviewer can open what a recipient receives.
+
+    The path comes from settings and never from the request, so there is no
+    input here to traverse with -- this serves exactly one configured file or
+    404s.
+    """
+    settings = get_settings()
+    path = (settings.one_pager_attachment_path or "").strip()
+    document = pathlib.Path(path) if path else None
+    if document is None or not document.is_file():
+        raise await _not_found("attachment")
+    return FileResponse(
+        document,
+        media_type="application/pdf",
+        filename=document.name,
+        # inline: the reviewer wants to look at it, not save it.
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/stats", response_model=CrmStatsOut)

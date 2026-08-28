@@ -371,6 +371,28 @@ class DraftOut(BaseModel):
     created_at: dt.datetime
 
 
+class AttachmentOut(BaseModel):
+    """What goes out with every message, if anything does.
+
+    Describes the configured file rather than a stored blob: the attachment is
+    added at send time from disk, so the honest answer to "what will the
+    recipient get" is whatever is on disk right now.
+    """
+
+    #: False when no path is configured, or the file is missing or empty --
+    #: in which case the send simply carries no attachment and still goes.
+    enabled: bool
+    filename: str | None = None
+    size_bytes: int | None = None
+    #: 0-100. What share of messages carry it.
+    sample_percent: int = 0
+    #: The sentence added to the body when the file is attached, so a reviewer
+    #: sees the words the recipient will read.
+    body_note: str | None = None
+    #: Why nothing will be attached, when that is the case.
+    reason: str | None = None
+
+
 class ApprovalDecisionRequest(BaseModel):
     decision: str = Field(pattern=r"^(approved|rejected|changes_requested)$")
     #: The version the reviewer actually looked at. A mismatch is rejected, so

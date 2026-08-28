@@ -28,9 +28,18 @@ import {
   Spinner,
 } from '@/components/crm/ui';
 import { useApi, useSession } from '@/lib/session';
-import { api, type Draft } from '@/lib/titan';
+import { api, type Attachment, type Draft } from '@/lib/titan';
 
-function DraftCard({ draft, onDecided }: { draft: Draft; onDecided: () => void }) {
+function DraftCard({
+  draft,
+  attachment,
+  onDecided,
+}: {
+  draft: Draft;
+  /** What goes out with the message. Undefined while it is still loading. */
+  attachment?: Attachment;
+  onDecided: () => void;
+}) {
   const { token, can } = useSession();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -81,6 +90,42 @@ function DraftCard({ draft, onDecided }: { draft: Draft; onDecided: () => void }
               open the lead
             </Link>
           </p>
+
+          {attachment?.enabled ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Attached to this message
+              </p>
+              <p className="mt-1 flex items-center gap-2 text-sm text-slate-800">
+                <span aria-hidden>&#128206;</span>
+                <a
+                  href="/api/v1/attachment/download"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-indigo-600 hover:underline"
+                >
+                  {attachment.filename}
+                </a>
+                <span className="text-xs text-slate-500">
+                  {attachment.size_bytes
+                    ? `${Math.round(attachment.size_bytes / 1024)} KB`
+                    : null}
+                  {attachment.sample_percent < 100
+                    ? ` · ${attachment.sample_percent}% of messages`
+                    : ' · every message'}
+                </span>
+              </p>
+              {attachment.body_note ? (
+                <p className="mt-1 text-xs italic text-slate-500">
+                  Body adds: &ldquo;{attachment.body_note}&rdquo;
+                </p>
+              ) : null}
+            </div>
+          ) : attachment ? (
+            <p className="mt-3 text-xs text-slate-400">
+              No attachment: {attachment.reason}
+            </p>
+          ) : null}
         </div>
 
         <div>
@@ -172,6 +217,9 @@ function DraftCard({ draft, onDecided }: { draft: Draft; onDecided: () => void }
 }
 
 export default function ApprovalsPage() {
+  // Fetched once for the page rather than per card: it describes the
+  // configuration, not the draft, so every card shows the same answer.
+  const attachmentQuery = useApi((t) => api.attachment(t), []);
   const { data, error, loading, reload } = useApi(
     (t) => api.drafts(t, 'awaiting_approval'),
     [],
@@ -202,7 +250,12 @@ export default function ApprovalsPage() {
             {data.total} draft{data.total === 1 ? '' : 's'} awaiting a decision.
           </p>
           {data.items.map((draft) => (
-            <DraftCard key={draft.id} draft={draft} onDecided={reload} />
+            <DraftCard
+              key={draft.id}
+              draft={draft}
+              attachment={attachmentQuery.data ?? undefined}
+              onDecided={reload}
+            />
           ))}
         </div>
       )}

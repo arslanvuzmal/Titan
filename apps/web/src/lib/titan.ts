@@ -241,6 +241,19 @@ export interface Message {
   one_pager_attached: boolean | null;
 }
 
+/** What goes out attached to every message, if anything does. */
+export interface Attachment {
+  enabled: boolean;
+  filename: string | null;
+  size_bytes: number | null;
+  /** 0-100. What share of messages carry it. */
+  sample_percent: number;
+  /** The sentence added to the body when the file is attached. */
+  body_note: string | null;
+  /** Why nothing will be attached, when that is the case. */
+  reason: string | null;
+}
+
 export interface Suppression {
   id: string;
   scope: string;
@@ -471,6 +484,7 @@ export const api = {
 
   // --- overview ------------------------------------------------------------
   stats: (t: string) => call<CrmStats>('/api/v1/stats', { token: t }),
+  attachment: (t: string) => call<Attachment>('/api/v1/attachment', { token: t }),
 
   outcomes: (t: string, dimension?: string, windowDays = 30) =>
     call<OutcomeRollup[]>(
