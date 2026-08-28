@@ -15,8 +15,8 @@ import asyncio
 import datetime as dt
 import logging
 import uuid
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -61,12 +61,14 @@ from titan.db.models import (
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
+from titan.intelligence import case_studies
 from titan.intelligence.bounce_risk import BounceRisk, assess
-from titan.intelligence.composer import ComposerContext, compose
+from titan.intelligence.composer import ComposerContext, compose, family_for
 from titan.intelligence.contacts import (
     DiscoveredContact,
     check_contact_eligibility,
     extract_contacts_from_pages,
+    rank_contacts,
 )
 from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
 from titan.intelligence.findings import DetectedFinding, detect_findings
@@ -131,6 +133,43 @@ _UNSENT_OUTBOX_STATUSES = (
 # ==========================================================================
 # 1. Crawl
 # ==========================================================================
+#: How often to tell Temporal a crawl is still alive.
+#:
+#: Comfortably inside the workflow's 90s ``heartbeat_timeout`` -- close enough
+#: that several beats can be missed before the activity is declared dead.
+HEARTBEAT_EVERY_SECONDS = 15.0
+
+
+_T = TypeVar("_T")
+
+
+async def _heartbeating(awaitable: Awaitable[_T], *, note: str) -> _T:
+    """Await something slow while telling Temporal it is still alive.
+
+    The crawl used to heartbeat once before dispatch and once after, with
+    nothing in between -- but a crawl may legitimately take longer than the 90s
+    heartbeat timeout (the HTTP client alone allows ``crawl_timeout_seconds +
+    60``, and a crawl also queues for a browser lane). Temporal cannot
+    distinguish a slow crawl from a dead worker without a beat, so it timed
+    them out: sixteen research workflows sat at ``Attempt 8 of 8`` with
+    ``activity Heartbeat timeout``, having crawled nothing.
+
+    Heartbeating on a timer rather than at checkpoints is the point. The wait is
+    inside one ``await`` we do not control, so there is nowhere to put a
+    checkpoint -- the beat has to come from beside the work, not within it.
+    """
+    task = asyncio.ensure_future(awaitable)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_EVERY_SECONDS)
+        if done:
+            return await task
+        # Guarded: this module is also exercised directly by tests and by
+        # operator commands, where there is no activity context and
+        # heartbeating raises.
+        if activity.in_activity():
+            activity.heartbeat(note)
+
+
 @activity.defn(name="crawl_lead_website")
 async def crawl_lead_website(request: CrawlActivityInput) -> CrawlActivityResult:
     """Crawl the lead's site via the isolated worker and store the evidence."""
@@ -190,10 +229,13 @@ async def crawl_lead_website(request: CrawlActivityInput) -> CrawlActivityResult
     try:
         # Heartbeat so a hung crawl is detected long before start_to_close.
         activity.heartbeat("dispatching to browser worker")
-        result: CrawlResult = await client.research(
-            request_id=request.idempotency_key,
-            seed_url=seed,
-            priority_paths=playbook.priority_paths,
+        result: CrawlResult = await _heartbeating(
+            client.research(
+                request_id=request.idempotency_key,
+                seed_url=seed,
+                priority_paths=playbook.crawl_paths,
+            ),
+            note="crawling",
         )
         activity.heartbeat(f"captured {len(result.pages)} pages")
     finally:
@@ -762,7 +804,13 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
         allowed_sources = list(policy.allowed_contact_sources or [])
         require_verified = policy.require_verified_email
 
-    discovered = extract_contacts_from_pages(pages, org_domain)
+    # Best address first, not first-crawled first. Iteration order here used
+    # to be page order, and the loop below returns on the first candidate that
+    # passes -- so a site publishing info@ on its contact page and a named
+    # mailbox on its team page was written to at whichever page the crawler
+    # happened to reach first. See contacts.contact_preference for the measured
+    # bounce rates behind the ordering.
+    discovered = rank_contacts(extract_contacts_from_pages(pages, org_domain))
     allowed = frozenset(ContactSource(s) for s in allowed_sources)
     rejected: list[str] = []
 
@@ -1146,7 +1194,7 @@ async def _rephrase(
             if closer is not None:
                 try:
                     await closer()
-                except Exception:  # noqa: S110
+                except Exception:
                     pass
 
     # The rewriter checks each sentence on its own and allows it to grow by up
@@ -1398,6 +1446,15 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
     offer = offers[0]
 
     portfolio = str(settings.owner_portfolio_url).rstrip("/")
+    # A real previous job to cite, when one matches this reader. None on a
+    # stock install, which keeps the generic credential sentence rather than
+    # inventing a client.
+    case_study = case_studies.select(
+        case_studies.registry(settings.case_studies_path),
+        industry=str(org_industry) if org_industry else None,
+        family=family_for(headline.issue_type),
+        issue_type=headline.issue_type,
+    )
     composed = compose(
         ComposerContext(
             org_domain=org_domain,
@@ -1438,6 +1495,8 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             promoted_variant=(
                 policy.managed_promoted_variant if policy is not None else None
             ),
+            case_study=case_study,
+            one_pager_url=settings.one_pager_url,
         )
     )
     # A model may rephrase what the composer wrote, never what it asserted.
@@ -1455,6 +1514,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         )
 
     subject, body, claim_map = composed.subject, composed.body, composed.claim_map
+    body_html = composed.body_html
 
     report = validate_message(
         MessageContext(
@@ -1483,6 +1543,10 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             ),
             subject=subject,
             body_text=body,
+            # The HTML part, where the evidence and portfolio links are anchors
+            # over a phrase instead of raw URLs in the prose. The text part
+            # stays authoritative -- it is what the validator reads.
+            body_html=body_html,
             claim_map=claim_map,
             validation_report=(
                 {**report.to_json(), "rewrite": rewrite_detail}
@@ -1715,6 +1779,10 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
                 "reply_to": sender.reply_to_email,
                 "subject": draft.subject,
                 "text_body": draft.body_text,
+                # Absent rather than empty when there is no HTML part: the
+                # provider treats None as "send text only", and an empty string
+                # would be a valid-looking blank HTML alternative.
+                "html_body": draft.body_html or None,
                 # Both targets. Gmail renders the one-click button from the
                 # https URL; the mailto is the fallback for clients that do not
                 # implement RFC 8058. `list_unsubscribe_post` is what makes the

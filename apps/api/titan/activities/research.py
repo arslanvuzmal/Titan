@@ -134,14 +134,30 @@ async def close_research_run(request: CloseResearchRunInput) -> None:
 
     async with workspace_unit_of_work(workspace_id) as session:
         run = await session.get(ResearchRun, uuid.UUID(request.research_run_id))
-        if run is None or run.status != "running":
-            return
 
-        run.status = request.outcome
-        run.finished_at = _now()
-        if request.detail:
-            run.failure_reason = request.detail[:500]
+        # Closing an already-closed run is refused -- writing a second outcome
+        # over the first would lose the real one. Advancing the *lead* is not,
+        # and used to sit below this return: on a retry that reached a
+        # committed run, the run was correctly left alone and the lead was
+        # silently left in RESEARCHING.
+        #
+        # RESEARCHING is absent from RESEARCHABLE_STATUSES, so such a lead is
+        # invisible to every later cycle -- never re-planned, never drafted --
+        # and find_stale_runs cannot see it either, because that looks for
+        # leads whose run is still *open* and this one's is closed. Nothing was
+        # watching for the combination: 145 leads on the live workspace,
+        # researched over eight days, every one with a completed run and no
+        # draft.
+        if run is not None and run.status == "running":
+            run.status = request.outcome
+            run.finished_at = _now()
+            if request.detail:
+                run.failure_reason = request.detail[:500]
 
+        # Still conditional on RESEARCHING, which is what protects the more
+        # specific verdicts: scoring writes BELOW_THRESHOLD and contact
+        # resolution writes manual review, and neither should be overwritten by
+        # this general one.
         lead = await session.get(Lead, uuid.UUID(request.lead_id))
         if lead is not None and lead.status is LeadStatus.RESEARCHING:
             if request.outcome in _RETRYABLE_OUTCOMES:

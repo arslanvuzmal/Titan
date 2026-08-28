@@ -30,6 +30,8 @@ with workflow.unsafe.imports_passed_through():
     from titan.workflows.types import (
         CheckVitalsInput,
         CheckVitalsResult,
+        ReleaseHeldInput,
+        ReleaseHeldResult,
         ReopenStaleRunsInput,
         ReopenStaleRunsResult,
         SweepStrandedInput,
@@ -84,6 +86,32 @@ class HousekeepingWorkflow:
             retry_policy=RETRY,
             result_type=SweepStrandedResult,
         )
+
+        # The higher-risk addresses, a few a day. After the sweep because the
+        # sweep is what turns an approved draft into a queued message: releasing
+        # first would put today's allowance behind a queue that has not been
+        # built yet, and it would be tomorrow before any of it moved.
+        #
+        # Failure here is swallowed. This is a volume optimisation on top of a
+        # working pipeline, and a housekeeping pass that repaired stranded
+        # drafts must not be recorded as failed because a throttle could not
+        # take its turn.
+        try:
+            release: ReleaseHeldResult = await workflow.execute_activity(
+                "release_held_contacts",
+                ReleaseHeldInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                retry_policy=RETRY,
+                result_type=ReleaseHeldResult,
+            )
+            workflow.logger.info(
+                "released %s held contacts, %s still held (%s)",
+                release.released,
+                release.held,
+                release.reason,
+            )
+        except Exception as error:
+            workflow.logger.warning("held-contact release skipped: %s", error)
 
         # Last, and deliberately after both repairs: the vitals should describe
         # the pipeline as it stands once this pass has done what it can, not as

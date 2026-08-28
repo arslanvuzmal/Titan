@@ -278,19 +278,34 @@ def score_lead(data: ScoringInput, threshold: int = 70) -> ScoreResult:
             "contact_quality", contact_raw, WEIGHTS["contact_quality"], contact_reason
         )
     )
+    # A *named decision maker* -- somebody Titan can show is the owner or
+    # principal -- is still the best contact there is, and still scores 1.0.
+    #
+    # What changed is everything below that. An anonymous named mailbox used to
+    # score 0.4 against a role address's 0.2, on the reasoning that a person
+    # beats a front desk. The sending history says the opposite: on this
+    # workspace role addresses hard-bounced at 1.30% (2 of 154) and everything
+    # else at 8.11% (6 of 74). A front desk outlives whoever is standing at it,
+    # and an unidentified named mailbox is usually a staff member who may
+    # already have left -- katie@reading-smiles.co.uk bounced for that reason.
+    #
+    # So the two swap: a published role address is now the better *unqualified*
+    # contact, and a name we cannot attach to a decision maker is the weaker
+    # one. This is deliberately a reordering and not a refusal; a named mailbox
+    # still scores, it just no longer outranks the front desk.
     components.append(
         Component(
             "decision_maker",
             1.0
             if data.contact_is_decision_maker
-            else (0.4 if not data.contact_is_generic_role else 0.2),
+            else (0.4 if data.contact_is_generic_role else 0.25),
             WEIGHTS["decision_maker"],
             "named decision maker"
             if data.contact_is_decision_maker
             else (
-                "named individual"
-                if not data.contact_is_generic_role
-                else "generic role address"
+                "published role address"
+                if data.contact_is_generic_role
+                else "unidentified named mailbox"
             ),
         )
     )

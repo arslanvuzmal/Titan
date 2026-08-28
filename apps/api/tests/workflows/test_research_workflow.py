@@ -296,6 +296,24 @@ async def test_no_evidence_stops_before_drafting(env) -> None:
 
 @pytest.mark.asyncio
 async def test_score_below_threshold_stops(env) -> None:
+    """The lead is not written to, but the address it published is kept.
+
+    This assertion used to be ``"resolve_contact" not in recorder.calls`` --
+    a below-threshold lead did no further work at all. That was tidy and it
+    threw away something already paid for: the crawl had visited the contact
+    page, the extractor would have accepted the address, and nothing stored it.
+    2,470 leads ended up in manual_review with no way to reach them, and a
+    sample of 400 freshly crawled pages carried 452 eligible addresses that
+    were never recorded.
+
+    The bar is campaign policy, not a permanent verdict -- the autonomy manager
+    moves ``min_lead_score``, and one live campaign already sits at 55 where
+    the rest sit at 70. So the address has to survive the lead being passed
+    over, or the only route back is crawling the entire site again.
+
+    What must *not* happen is the capture turning into an approach, which is
+    what the second half of this test holds down.
+    """
     recorder = Recorder(
         score=ScoreActivityResult(
             total=41, band="reject", passed_threshold=False, threshold=70
@@ -305,7 +323,12 @@ async def test_score_below_threshold_stops(env) -> None:
 
     assert result.outcome == ResearchOutcome.BELOW_THRESHOLD.value
     assert result.score == 41
-    assert "resolve_contact" not in recorder.calls
+    # Captured...
+    assert "resolve_contact" in recorder.calls
+    # ...and never approached.
+    assert "generate_draft" not in recorder.calls
+    assert "queue_message" not in recorder.calls
+    assert "requires_human_approval" not in recorder.calls
 
 
 @pytest.mark.asyncio

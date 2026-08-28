@@ -58,8 +58,120 @@ ROLE_LOCAL_PARTS: frozenset[str] = frozenset(
         "clinic",
         "practice",
         "studio",
+        # --- English front desks the original list missed -----------------
+        # Read off the live workspace rather than imagined: each of these is
+        # an address a real business published as its way in.
+        "ask",
+        "care",
+        "concierge",
+        "customercare",
+        "customerservice",
+        "emergency",
+        "enquire",
+        "feedback",
+        "front",
+        "frontoffice",
+        "membership",
+        "newpatients",
+        "patients",
+        "reservations",
+        "reception2",
+        "service",
+        "smile",
+        "smiles",
+        "welcome",
+        # --- German -------------------------------------------------------
+        # kontakt@ and praxis@ were the two most common non-role local parts
+        # on the live list, seven each, both scored as named individuals.
+        "kontakt",
+        "praxis",
+        "buero",
+        "zentrale",
+        "empfang",
+        "anfrage",
+        "termine",
+        "rezeption",
+        "sekretariat",
+        # --- Spanish / Portuguese ----------------------------------------
+        "contacto",
+        "informacion",
+        "administracion",
+        "oficina",
+        "recepcion",
+        "citas",
+        "consulta",
+        "consultas",
+        "atendimento",
+        "geral",
+        "escritorio",
+        # --- French -------------------------------------------------------
+        "cabinet",
+        "bureau",
+        "accueil",
+        "secretariat",
+        "rendezvous",
+        # --- Dutch --------------------------------------------------------
+        "praktijk",
+        "kantoor",
+        "receptie",
+        "afspraak",
+        "informatie",
+        "balie",
+        # --- Polish -------------------------------------------------------
+        "biuro",
+        "gabinet",
+        "recepcja",
+        # --- Romanian -----------------------------------------------------
+        # "receptie" is Dutch *and* Romanian; it is listed once, above.
+        "birou",
+        "programari",
+        # --- Italian ------------------------------------------------------
+        "segreteria",
+        "ufficio",
+        "informazioni",
+        "accoglienza",
+        "prenotazioni",
     }
 )
+
+
+#: How much Titan wants a given address, when a site published several.
+#:
+#: Lower sorts first. This exists because the resolver used to take the first
+#: eligible candidate it saw, and iteration order is *page-crawl order* -- so a
+#: practice publishing ``katie@`` on its team page and ``info@`` on its contact
+#: page was written to at ``katie@``, decided by which page the crawler reached
+#: first. Nothing was wrong with the address; it was simply the wrong one of
+#: the two to choose.
+#:
+#: The ordering is measured, not assumed. On this workspace's own sending
+#: history, role addresses hard-bounced at **1.30%** (2 of 154) and everything
+#: else at **8.11%** (6 of 74). A front desk outlives whoever is standing at
+#: it; a named mailbox leaves when the person does -- ``katie@reading-smiles``
+#: bounced for exactly that reason.
+PREFERRED = 0
+ACCEPTABLE = 1
+LAST_RESORT = 2
+
+
+def contact_preference(contact: DiscoveredContact) -> tuple[int, str]:
+    """Rank one candidate. Lower is better; ties break on the address itself.
+
+    Deterministic on purpose: the same site must resolve to the same address on
+    a re-run, or a retry silently writes to somebody different.
+    """
+    if contact.is_generic_role:
+        band = PREFERRED
+    elif looks_like_a_guess(contact.normalized):
+        band = LAST_RESORT
+    else:
+        band = ACCEPTABLE
+    return (band, contact.normalized)
+
+
+def rank_contacts(contacts: list[DiscoveredContact]) -> list[DiscoveredContact]:
+    """Best address first. Pure, so the caller can log what it chose and why."""
+    return sorted(contacts, key=contact_preference)
 
 #: Addresses that are never appropriate outreach targets regardless of source.
 #:
@@ -107,12 +219,46 @@ NEVER_CONTACT_LOCAL_PARTS: frozenset[str] = frozenset(
         "delist",
         "donotcontact",
         "do-not-contact",
-        # Functions that exist to receive complaints, not enquiries
+        # Functions that exist to receive complaints, not enquiries.
+        #
+        # Spelled out in every market Titan actually sends to, because the
+        # English-only version let four through on the live workspace --
+        # including dataprotection@ at a law firm. A complaint from one of
+        # these is not a bounce: domain_health returns BLOCKED on the first
+        # one, with no sample-size threshold and no recovery window.
         "privacy",
         "dpo",
         "legal",
         "compliance",
         "gdpr",
+        "dataprotection",
+        "data-protection",
+        "dataprivacy",
+        "data-privacy",
+        # German
+        "datenschutz",
+        "datenschutzbeauftragter",
+        "recht",
+        # Spanish / Portuguese
+        "privacidad",
+        "protecciondatos",
+        "proteccion-datos",
+        "privacidade",
+        "juridico",
+        # French
+        "confidentialite",
+        "rgpd",
+        "juridique",
+        # Dutch
+        "gegevensbescherming",
+        "privacyofficer",
+        # Polish / Romanian
+        "rodo",
+        "protectiadatelor",
+        "juridic",
+        # Italian
+        "privacyufficio",
+        "legale",
         # Hiring. Not a deliverability judgement -- a "who is this" judgement.
         # These addresses exist for job applicants; they are read by whoever
         # handles hiring, are frequently pointed at an applicant-tracking
@@ -248,6 +394,11 @@ def email_domain(email: str) -> str:
     return normalize_email(email).partition("@")[2]
 
 
+#: How a local part divides into words. Dots, hyphens, underscores and plus
+#: signs are separators everywhere they appear in an address; nothing else is.
+_LOCAL_PART_SEGMENTS = re.compile(r"[._+-]+")
+
+
 def is_never_contact(email: str) -> bool:
     """Whether this address must not receive outreach, whoever published it.
 
@@ -261,8 +412,22 @@ def is_never_contact(email: str) -> bool:
     when an address is discovered, when a draft's contact is judged eligible,
     and once more at the moment of sending -- by which time the list may have
     been edited, and on this workspace it had been.
+
+    **Segments, not the whole string.** This used to compare the entire local
+    part, so ``careers.acmedental@`` was not ``careers`` and passed. Splitting
+    on punctuation catches the qualified forms businesses actually publish --
+    ``careers.acme``, ``hr-recruitment``, ``privacy_team`` -- while whole-segment
+    matching keeps ``stopford`` from matching ``stop`` and ``legalise`` from
+    matching ``legal``.
     """
-    return normalize_email(email).partition("@")[0] in NEVER_CONTACT_LOCAL_PARTS
+    local = normalize_email(email).partition("@")[0]
+    if local in NEVER_CONTACT_LOCAL_PARTS:
+        return True
+    return any(
+        segment in NEVER_CONTACT_LOCAL_PARTS
+        for segment in _LOCAL_PART_SEGMENTS.split(local)
+        if segment
+    )
 
 
 def is_role_address(email: str) -> bool:
@@ -310,6 +475,19 @@ def extract_contacts_from_pages(
                 rejection = f"{local}@ is never an outreach target"
             elif domain in THIRD_PARTY_DOMAINS:
                 rejection = f"{domain} is a third-party platform domain, not the business"
+            elif (
+                org_domain
+                and domain in FREE_MAILBOX_DOMAINS
+                and name_is_in_local_part(local, org_domain)
+            ):
+                # A small business running its site on one host and its mail on
+                # Gmail is ordinary, and the local part is the evidence that
+                # the address is theirs: snowymedispa@gmail.com on
+                # snowymedispa.com.au. Narrow on purpose -- a webmail address
+                # that does *not* carry the name stays refused below, and an
+                # address at another business's domain is refused whatever its
+                # local part says.
+                rejection = None
             elif org_domain and not _domains_related(domain, org_domain):
                 rejection = (
                     f"{domain} does not belong to the organization ({org_domain}); "
@@ -367,6 +545,100 @@ def extract_contacts_from_pages(
 #: mailbox, but "3dprint@" is a business. Requiring three keeps the common
 #: legitimate shapes and catches the phone-number case, whose runs are longer.
 DIGIT_RUN_PREFIX = re.compile(r"^[0-9]{3,}[a-z]", re.I)
+
+
+#: Free mailbox providers a small business plausibly runs its own mail on.
+#:
+#: The distinction that matters: an address at one of these is *nobody's* by
+#: virtue of its domain, so the domain says nothing about ownership either way
+#: and the local part has to decide. An address at another *business's* domain
+#: is somebody's -- theirs -- and no local part can override that.
+FREE_MAILBOX_DOMAINS: frozenset[str] = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "outlook.com",
+        "outlook.co.uk",
+        "hotmail.com",
+        "hotmail.co.uk",
+        "hotmail.fr",
+        "hotmail.de",
+        "live.com",
+        "live.co.uk",
+        "msn.com",
+        "yahoo.com",
+        "yahoo.co.uk",
+        "yahoo.fr",
+        "yahoo.de",
+        "ymail.com",
+        "icloud.com",
+        "me.com",
+        "mac.com",
+        "aol.com",
+        "aol.co.uk",
+        "gmx.de",
+        "gmx.net",
+        "gmx.com",
+        "web.de",
+        "t-online.de",
+        "freenet.de",
+        "orange.fr",
+        "wanadoo.fr",
+        "free.fr",
+        "laposte.net",
+        "libero.it",
+        "virgilio.it",
+        "alice.it",
+        "wp.pl",
+        "onet.pl",
+        "interia.pl",
+        "o2.pl",
+        "seznam.cz",
+        "btinternet.com",
+        "sky.com",
+        "virginmedia.com",
+        "bigpond.com",
+        "optusnet.com.au",
+        "protonmail.com",
+        "proton.me",
+        "zoho.com",
+        "yandex.ru",
+        "mail.ru",
+    }
+)
+
+#: How much of the business name has to appear before a webmail address counts
+#: as theirs.
+#:
+#: Four characters. Below that the containment test stops being evidence: a
+#: two-letter stem matches a large share of English local parts by accident,
+#: and "the address contains the letters 'as'" is not a reason to write to a
+#: stranger.
+MIN_NAME_STEM = 4
+
+
+def _alphanumeric(value: str) -> str:
+    """Letters and digits only, lowercased. Punctuation carries no identity:
+    ``snowy-medispa``, ``snowy.medispa`` and ``snowymedispa`` are one name."""
+    return "".join(ch for ch in value.lower() if ch.isalnum())
+
+
+def name_is_in_local_part(local_part: str, organization_domain: str) -> bool:
+    """Whether a local part carries the organisation's own name.
+
+    The test that lets ``snowymedispa@gmail.com`` through for
+    snowymedispa.com.au while keeping ``fhdental.info@gmail.com`` out for
+    fhfd.ca. Containment in either direction, because a business may shorten
+    its name in an address (``elementdental@`` for elementdentalclinics.co.uk)
+    or lengthen it (``enquiry.beightondentalcare@`` for beightondentalcare).
+    """
+    stem = _alphanumeric(organization_domain.split(".", 1)[0])
+    if len(stem) < MIN_NAME_STEM:
+        return False
+    local = _alphanumeric(local_part)
+    if len(local) < MIN_NAME_STEM:
+        return False
+    return stem in local or local in stem
 
 
 def _domains_related(candidate: str, organization: str) -> bool:
@@ -458,17 +730,25 @@ def mx_presence_is_not_verification() -> str:
 
 
 __all__ = [
+    "ACCEPTABLE",
     "COMMON_GUESS_PATTERNS",
+    "FREE_MAILBOX_DOMAINS",
+    "LAST_RESORT",
+    "MIN_NAME_STEM",
     "NEVER_CONTACT_LOCAL_PARTS",
+    "PREFERRED",
     "ROLE_LOCAL_PARTS",
     "DiscoveredContact",
     "EligibilityResult",
     "check_contact_eligibility",
+    "contact_preference",
     "email_domain",
     "extract_contacts_from_pages",
     "is_never_contact",
     "is_role_address",
     "looks_like_a_guess",
+    "name_is_in_local_part",
     "normalize_email",
+    "rank_contacts",
     "suppression_keys",
 ]

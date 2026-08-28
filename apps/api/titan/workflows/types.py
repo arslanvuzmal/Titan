@@ -254,6 +254,27 @@ class ReopenStaleRunsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReleaseHeldInput:
+    """One pass of the higher-risk address release."""
+
+    workspace_id: str
+    #: None takes ``trickle.DAILY_RELEASE_BUDGET``. The budget is per day, not
+    #: per invocation: housekeeping is hourly and this machine sleeps, so the
+    #: activity counts what today has already spent rather than assuming how
+    #: often it ran.
+    daily_budget: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReleaseHeldResult:
+    #: Still held after this pass.
+    held: int
+    released: int
+    #: Why nothing more was released, in words an operator can act on.
+    reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class SweepStrandedInput:
     """One pass over the approved drafts nothing ever queued."""
 

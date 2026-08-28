@@ -234,8 +234,15 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
 
     # The follow-up scan writes next_action_at, so it needs a write session and
     # must run before the selection below reads that column.
+    #
+    # Scoped to this campaign, because this activity runs once per campaign and
+    # the scan mutates every row it reads. Workspace-wide, the 27 active
+    # campaigns all dirtied the same contacted leads and every cycle but the
+    # first died on the version check -- see FollowUpScheduler.scan.
     async with workspace_unit_of_work(workspace_id) as session:
-        scan = await FollowUpScheduler().scan_workspace(session, workspace_id)
+        scan = await FollowUpScheduler().scan(
+            session, workspace_id, campaign_id=campaign_id
+        )
     followups_due = sum(1 for result in scan if result.due)
 
     # Deliberately not bounded by `remaining`. When the day's sends are spent

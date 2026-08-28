@@ -301,6 +301,29 @@ class LeadResearchWorkflow:
         )
 
         if not score.passed_threshold:
+            # Keep the address even though this lead is not being written to.
+            #
+            # Resolving a contact reads evidence that has already been crawled
+            # and paid for, and the extraction itself is pure. Running it only
+            # for leads that clear the bar meant every below-threshold lead
+            # discarded a perfectly good published address along with itself:
+            # 2,470 leads sat in manual_review with no way to reach them, and
+            # a sample of 400 freshly crawled pages carried 452 eligible
+            # addresses that were never stored.
+            #
+            # The bar is not a permanent judgement, which is what makes this
+            # worth doing. ``min_lead_score`` is campaign policy and the
+            # autonomy manager moves it -- one live campaign already sits at 55
+            # where the others sit at 70. A lead scored 65 today becomes
+            # mailable the moment the bar moves, and without this it could only
+            # become mailable by crawling the whole site again.
+            #
+            # Failure is swallowed on purpose: this is opportunistic capture
+            # after the decision not to proceed has already been made, so a DNS
+            # timeout here must not turn a clean BELOW_THRESHOLD outcome into a
+            # failed run.
+            if workflow.patched("capture-contact-below-threshold"):
+                await self._capture_contact(request, research_run_id)
             return await self._finish(
                 request,
                 research_run_id,
@@ -466,6 +489,39 @@ class LeadResearchWorkflow:
             outbox_id=queued.outbox_id,
             finished_at=self._now_iso(),
         )
+
+    async def _capture_contact(
+        self, request: ResearchLeadInput, research_run_id: str
+    ) -> None:
+        """Store whatever address the crawl found, for a lead we are not writing to.
+
+        The same activity the happy path calls, and idempotent on the same key,
+        so a lead that later clears the bar finds its own prior work rather than
+        resolving twice.
+
+        Nothing is returned and nothing is decided. The eligible channel this
+        produces is deliberately ignored here -- a lead below the threshold does
+        not get a draft, and reading the result would invite a future edit that
+        quietly turned a capture into a send.
+        """
+        try:
+            await workflow.execute_activity(
+                "resolve_contact",
+                ContactActivityInput(
+                    workspace_id=request.workspace_id,
+                    lead_id=request.lead_id,
+                    campaign_id=request.campaign_id,
+                    research_run_id=research_run_id,
+                    idempotency_key=f"{request.run_key}:contact",
+                ),
+                start_to_close_timeout=DB_TIMEOUT,
+                retry_policy=DB_RETRY,
+                result_type=ContactActivityResult,
+            )
+        except ActivityError as exc:
+            workflow.logger.info(
+                "contact capture failed for a below-threshold lead: %s", str(exc)[:200]
+            )
 
     # ------------------------------------------------------------- helpers
     async def _wait_for_decision(self) -> bool:
