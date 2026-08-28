@@ -21,7 +21,7 @@ from typing import Any
 
 MAX_SUBJECT_CHARS = 120
 MAX_BODY_CHARS = 2200
-MAX_BODY_WORDS = 320
+MAX_BODY_WORDS = 380
 MIN_BODY_WORDS = 40
 
 #: The band the four lines have to land in, counted before the signature.
@@ -32,8 +32,12 @@ MIN_BODY_WORDS = 40
 #: with a paragraph of portfolio history passed MAX_BODY_WORDS comfortably.
 #: Both happened. What matters is the length of what the recipient actually has
 #: to read before deciding, and that is the pitch.
-PITCH_MIN_WORDS = 55
-PITCH_MAX_WORDS = 90
+# Widened from 55-90 when the message went from four parts to six. Kept in
+# step with titan.intelligence.composer, which has the reasoning; a validator
+# band that disagrees with the composer band refuses everything the composer
+# writes, which is how 628 drafts once failed their own generator's rules.
+PITCH_MIN_WORDS = 180
+PITCH_MAX_WORDS = 320
 
 
 class ViolationCode(StrEnum):
@@ -310,7 +314,19 @@ _ACRONYMS = ("SEO", "CTA", "CRM", "API", "HVAC", "GDPR", "SPF", "DKIM", "DMARC",
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
-def _sentences(text: str) -> list[str]:
+def reads_as_recipient_claim(text: str) -> bool:
+    """Whether ``text`` would be read as asserting something about the recipient.
+
+    The detector behind ``UNSUPPORTED_CLAIM``, exposed so that content built
+    *before* a message exists -- a case study written into a registry by hand --
+    can be held to the same rule at the point a human can still fix it. Sharing
+    the compiled pattern rather than restating it is the point: two copies of a
+    rule this load-bearing would diverge on the first edit.
+    """
+    return any(_CLAIM_MARKERS.search(sentence) for sentence in sentences(text))
+
+
+def sentences(text: str) -> list[str]:
     """Split into sentences, tolerating hard-wrapped lines.
 
     A naive split on ``\\n`` breaks a wrapped sentence into fragments, none of
@@ -572,7 +588,7 @@ def _validate_claims(ctx: MessageContext) -> tuple[list[str], list[Violation]]:
         if sentence:
             mapped[_normalize(sentence)] = entry
 
-    for sentence in _sentences(ctx.body):
+    for sentence in sentences(ctx.body):
         if not _CLAIM_MARKERS.search(sentence):
             continue  # not a factual claim about the recipient
         key = _normalize(sentence)
@@ -651,6 +667,13 @@ __all__ = [
     "Violation",
     "ViolationCode",
     "pitch_of",
+    # Public so content assembled before a message exists -- the case study
+    # registry -- is held to the same rule at a point a human can fix it.
+    "reads_as_recipient_claim",
+    # Public because the composer builds its claim map with it. Two
+    # near-identical splitters is how a claim map comes to disagree with
+    # the validator reading it.
+    "sentences",
     "validate_message",
 ]
 

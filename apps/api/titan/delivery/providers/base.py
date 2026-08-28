@@ -60,6 +60,29 @@ CONFIGURATION_ERROR_KINDS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
+class Attachment:
+    """One document, carried as bytes rather than a path.
+
+    Bytes because the provider is the only thing that should touch the wire and
+    the only thing that should read a file: handing a path across the boundary
+    means the provider decides what to read, and a provider that reads a path
+    can be pointed at any file the process can see.
+    """
+
+    filename: str
+    content: bytes
+    #: The MIME type, as ``("application", "pdf")``. Split because that is the
+    #: shape ``EmailMessage.add_attachment`` wants and joining then re-splitting
+    #: it is how a subtype ends up in the maintype slot.
+    maintype: str = "application"
+    subtype: str = "pdf"
+
+    @property
+    def size_bytes(self) -> int:
+        return len(self.content)
+
+
+@dataclass(frozen=True, slots=True)
 class OutboundEmail:
     """Everything the provider needs. Rendered before the worker leases the row."""
 
@@ -86,6 +109,10 @@ class OutboundEmail:
     #: not, and a value that changes type as it crosses the port is a value
     #: that will eventually arrive as the wrong one.
     carrier_campaign_id: str | None = None
+    #: Documents to send with the message. Empty for every message Titan sent
+    #: before this existed, and empty is the default: an attachment is a
+    #: deliberate act, never a side effect of a template.
+    attachments: tuple[Attachment, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

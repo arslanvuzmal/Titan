@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How the assessment works</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 210mm; height: 297mm;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 8.6pt; line-height: 1.42; color: #1a1a1a;
+    background: #fff;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .sheet { padding: 12mm 13mm 9mm; height: 297mm; display: flex; flex-direction: column; }
+
+  header { border-bottom: 1.6pt solid #1a1a1a; padding-bottom: 3mm; margin-bottom: 4mm; }
+  .name { font-size: 14pt; font-weight: 700; letter-spacing: -0.2pt; }
+  .role { font-size: 8pt; color: #555; margin-top: 0.8mm; }
+  .strap { font-size: 9.6pt; font-weight: 600; margin-top: 2.6mm; line-height: 1.32; }
+
+  h2 {
+    font-size: 7.4pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.9pt; color: #666;
+    margin: 0 0 2.2mm; padding-bottom: 1mm; border-bottom: 0.5pt solid #d4d4d4;
+  }
+  section { margin-bottom: 4mm; }
+  p { margin-bottom: 1.8mm; }
+  .lede { font-size: 8.8pt; }
+
+  /* ---- flowchart ---- */
+  .flow { width: 100%; height: auto; display: block; margin: 1mm 0 0.5mm; }
+
+  /* ---- two columns ---- */
+  .cols { display: flex; gap: 7mm; }
+  .col { flex: 1; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 7.9pt; }
+  th {
+    text-align: left; font-weight: 700; font-size: 6.9pt; text-transform: uppercase;
+    letter-spacing: 0.5pt; color: #666; padding: 0 0 1.1mm; border-bottom: 0.5pt solid #d4d4d4;
+  }
+  td { padding: 1.15mm 0; border-bottom: 0.4pt solid #ededed; vertical-align: top; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; color: #444; white-space: nowrap; padding-left: 3mm; }
+  tr:last-child td { border-bottom: none; }
+
+  .fix { list-style: none; }
+  .fix li { padding-left: 4.6mm; position: relative; margin-bottom: 1.5mm; }
+  .fix li::before {
+    content: ""; position: absolute; left: 0; top: 1.35mm;
+    width: 2mm; height: 2mm; border: 0.7pt solid #1a1a1a; border-radius: 50%;
+  }
+  .fix b { font-weight: 700; }
+
+  .note {
+    background: #f6f6f4; border-left: 1.8pt solid #1a1a1a;
+    padding: 2.4mm 3mm; font-size: 8.1pt; margin-top: 1mm;
+  }
+
+  /* ---- worked example ---- */
+  .worked { display: flex; align-items: stretch; gap: 0; }
+  .worked .step {
+    flex: 1; padding: 2.4mm 3mm 2.4mm 0; font-size: 7.9pt; line-height: 1.38;
+  }
+  .worked .step.last { padding-right: 0; }
+  .worked .lbl {
+    font-size: 6.7pt; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.6pt; color: #888; margin-bottom: 1.2mm;
+  }
+  .worked .step p { margin: 0; }
+  .worked .arrow {
+    align-self: center; color: #bbb; font-size: 11pt; padding: 0 2.6mm 0 0.4mm;
+  }
+
+  .scope .col p { font-size: 7.9pt; margin: 0; }
+
+  footer { margin-top: auto; padding-top: 3.4mm; border-top: 1.6pt solid #1a1a1a; }
+  .refs { font-size: 6.7pt; color: #555; line-height: 1.5; }
+  .refs b { color: #1a1a1a; font-size: 6.9pt; letter-spacing: 0.5pt; text-transform: uppercase; }
+  .refs span { display: inline-block; margin-right: 3.4mm; }
+  .sign { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 2.8mm; }
+  .ask { font-size: 8.6pt; font-weight: 600; max-width: 118mm; line-height: 1.36; }
+  .contact { font-size: 7.7pt; text-align: right; color: #333; line-height: 1.45; white-space: nowrap; }
+  .contact b { display: block; font-size: 8.2pt; color: #1a1a1a; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <header>
+    <div class="name">Arslan Vuzmal Lone</div>
+    <div class="role">AI &amp; Full-Stack Systems Engineer &middot; arslanvuzmallone.com</div>
+    <div class="strap">How I assess a website, and what the findings actually mean</div>
+  </header>
+
+  <section>
+    <p class="lede">The note you received cited one specific fault on one specific page. This explains
+    how it was found, what else the same pass checks, and what repairing it involves — so you can judge
+    the work before spending twenty minutes on a call.</p>
+    <p><b>Nothing here is a guess.</b> Every claim in that message is tied to a page that was opened and
+    a measurement that was recorded. Where there is no evidence, no claim is made.</p>
+  </section>
+
+  <section>
+    <h2>How the assessment runs</h2>
+    <svg class="flow" viewBox="0 0 780 108" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Six stages: open the site, render each page, measure, check evidence, one finding, written up">
+      <defs>
+        <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto">
+          <path d="M0 0 L8 4 L0 8 z" fill="#1a1a1a"/>
+        </marker>
+      </defs>
+      <g font-family="Helvetica, Arial, sans-serif">
+        <!-- boxes -->
+        <g>
+          <rect x="1"   y="20" width="116" height="48" rx="3" fill="#fff" stroke="#1a1a1a" stroke-width="1.3"/>
+          <rect x="134" y="20" width="116" height="48" rx="3" fill="#fff" stroke="#1a1a1a" stroke-width="1.3"/>
+          <rect x="267" y="20" width="116" height="48" rx="3" fill="#fff" stroke="#1a1a1a" stroke-width="1.3"/>
+          <rect x="400" y="20" width="116" height="48" rx="3" fill="#fff" stroke="#1a1a1a" stroke-width="1.3"/>
+          <rect x="533" y="20" width="116" height="48" rx="3" fill="#f6f6f4" stroke="#1a1a1a" stroke-width="1.3"/>
+          <rect x="666" y="20" width="113" height="48" rx="3" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="1.3"/>
+        </g>
+        <!-- step numbers -->
+        <g font-size="8" font-weight="700" fill="#999">
+          <text x="9"   y="33">01</text><text x="142" y="33">02</text><text x="275" y="33">03</text>
+          <text x="408" y="33">04</text><text x="541" y="33">05</text>
+          <text x="674" y="33" fill="#8a8a8a">06</text>
+        </g>
+        <!-- titles -->
+        <g font-size="11.5" font-weight="700" fill="#1a1a1a">
+          <text x="34"  y="34">Open</text>
+          <text x="167" y="34">Render</text>
+          <text x="300" y="34">Measure</text>
+          <text x="433" y="34">Verify</text>
+          <text x="566" y="34">Select</text>
+          <text x="699" y="34" fill="#fff">Write</text>
+        </g>
+        <!-- body -->
+        <g font-size="9.2" fill="#3a3a3a">
+          <text x="9"   y="49">Public pages only,</text>
+          <text x="9"   y="61">robots.txt obeyed</text>
+          <text x="142" y="49">Real browser, so</text>
+          <text x="142" y="61">scripts actually run</text>
+          <text x="275" y="49">Load time, errors,</text>
+          <text x="275" y="61">structure, access</text>
+          <text x="408" y="49">Each fault kept with</text>
+          <text x="408" y="61">the page that shows it</text>
+          <text x="541" y="49">The one worth your</text>
+          <text x="541" y="61">attention, not a list</text>
+          <text x="674" y="49" fill="#e8e8e8">Plain English,</text>
+          <text x="674" y="61" fill="#e8e8e8">with the evidence</text>
+        </g>
+        <!-- arrows -->
+        <g stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#a)">
+          <line x1="117" y1="44" x2="130" y2="44"/>
+          <line x1="250" y1="44" x2="263" y2="44"/>
+          <line x1="383" y1="44" x2="396" y2="44"/>
+          <line x1="516" y1="44" x2="529" y2="44"/>
+          <line x1="649" y1="44" x2="662" y2="44"/>
+        </g>
+        <!-- discard path -->
+        <path d="M458 68 L458 90 L200 90" fill="none" stroke="#9a9a9a" stroke-width="1.1"
+              stroke-dasharray="3.5,3" marker-end="url(#a)"/>
+        <text x="206" y="103" font-size="8.6" fill="#777" font-style="italic">
+          no evidence &rarr; no claim, and no message is sent
+        </text>
+      </g>
+    </svg>
+  </section>
+
+  <div class="cols">
+    <div class="col">
+      <section>
+        <h2>What every pass checks</h2>
+        <table>
+          <thead><tr><th>Category</th><th style="text-align:right">Seen</th></tr></thead>
+          <tbody>
+            <tr><td>Images with no text description</td><td class="n">11,396</td></tr>
+            <tr><td>Scripts failing as the page loads</td><td class="n">8,245</td></tr>
+            <tr><td>Enquiry forms asking too much</td><td class="n">5,515</td></tr>
+            <tr><td>Main content slower than 2.5s</td><td class="n">5,384</td></tr>
+            <tr><td>Links pointing at missing pages</td><td class="n">5,138</td></tr>
+            <tr><td>Contrast and keyboard failures</td><td class="n">4,267</td></tr>
+            <tr><td>Absent security headers</td><td class="n">3,587</td></tr>
+            <tr><td>No structured business data</td><td class="n">3,031</td></tr>
+          </tbody>
+        </table>
+        <p style="font-size:7.4pt;color:#666;margin-top:1.6mm;">
+          Counts observed across sites assessed to date. Yours was measured the same way.
+        </p>
+      </section>
+    </div>
+
+    <div class="col">
+      <section>
+        <h2>What a repair involves</h2>
+        <ul class="fix">
+          <li><b>Find where it breaks.</b> A broken button is usually a page that was renamed while the
+            things pointing at it were left behind.</li>
+          <li><b>Fix it and the pattern.</b> Repoint the link, redirect the old address, then sweep the
+            rest of the site — a rename rarely breaks only one thing.</li>
+          <li><b>Confirm from outside.</b> Re-run the same measurement, on the live site, not on a copy.</li>
+        </ul>
+        <div class="note">
+          Most of what this finds is hours, not weeks. The expensive part is not the repair — it is the
+          months a fault sits there without anyone reporting it, because people who hit it simply leave.
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <section>
+    <h2>One finding, carried the whole way</h2>
+    <div class="worked">
+      <div class="step">
+        <div class="lbl">What was seen</div>
+        <p>A visitor clicks <b>Book&nbsp;online</b>. The address behind the button no
+        longer exists, so the server answers with a not-found page instead of the form.</p>
+      </div>
+      <div class="arrow">&rarr;</div>
+      <div class="step">
+        <div class="lbl">Why it happens</div>
+        <p>Almost always a page that was renamed or moved, while the things pointing
+        at it were left as they were. Nothing looks broken from the inside.</p>
+      </div>
+      <div class="arrow">&rarr;</div>
+      <div class="step">
+        <div class="lbl">What it costs</div>
+        <p>The people who reach it had already decided. They do not ring to report it —
+        they go back to the results and pick whoever is next.</p>
+      </div>
+      <div class="arrow">&rarr;</div>
+      <div class="step last">
+        <div class="lbl">What I would do</div>
+        <p>Repoint the button, redirect the old address so nothing else breaks, then
+        sweep the site for the same pattern. Usually an afternoon.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="scope">
+    <h2>What this is not</h2>
+    <div class="cols">
+      <div class="col">
+        <p><b>Not a scan report.</b> An automated tool will hand you two hundred
+        warnings sorted by severity. That list is why nobody acts on it. You were
+        sent one fault because one is what a person can act on this week.</p>
+      </div>
+      <div class="col">
+        <p><b>Nothing private was touched.</b> Public pages only, robots.txt obeyed,
+        no logins, no forms submitted, nothing stored beyond the pages themselves.
+        Everything above is visible to anyone who visits your site.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="refs">
+      <b>References</b><br>
+      <span>Core Web Vitals &amp; LCP — Google web.dev &middot; web.dev/articles/lcp</span>
+      <span>WCAG 2.2 — W3C &middot; w3.org/WAI/WCAG22/quickref</span><br>
+      <span>Local business structured data — Google Search Central &middot; developers.google.com/search</span>
+      <span>Response headers — OWASP &middot; owasp.org/www-project-secure-headers</span>
+    </div>
+    <div class="sign">
+      <div class="ask">
+        Want the full picture for your site? Twenty minutes, and I will go through everything the
+        assessment found — including what I judged not worth mentioning.
+      </div>
+      <div class="contact">
+        <b>Arslan Vuzmal Lone</b>
+        arslanvuzmallone.com<br>
+        arslanvuzmallone@gmail.com
+      </div>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -40,6 +40,42 @@ class Offer:
     estimated_value_usd: float
 
 
+#: Pages that carry a published email address, in every industry alike.
+#:
+#: Each playbook already names the pages that produce *findings* -- the booking
+#: flow, the treatment list, the quote form -- and every one of them ends up on
+#: ``/contact`` too. What none of them names is the second family of pages: the
+#: ones that exist to carry an address rather than to sell anything. That gap
+#: is the largest single constraint on the business. Only 623 addresses came
+#: out of 4,393 completed crawls, a 14% yield against a pipeline designed for a
+#: third, and 2,470 well-scored leads are parked with no way to reach them.
+#:
+#: ``/impressum`` is the most valuable entry here and is worth stating plainly:
+#: German and Austrian law (TMG §5) *requires* a commercially operated site to
+#: publish an imprint carrying an email address. It is not a convention that
+#: might be followed -- on a German business site it is close to a guarantee,
+#: and Titan is running campaigns in Berlin, Hamburg, Munich and Warsaw.
+#:
+#: Ordered by expected yield, because the crawler seeds them in order and the
+#: page budget is finite. The legal pages come before ``/team`` for a reason:
+#: an imprint or a privacy notice must name a real contact, whereas a team page
+#: often carries only photographs.
+CONTACT_PATHS: tuple[str, ...] = (
+    "/contact",
+    "/contact-us",
+    "/impressum",
+    "/kontakt",
+    "/legal-notice",
+    "/mentions-legales",
+    "/privacy",
+    "/privacy-policy",
+    "/about",
+    "/about-us",
+    "/team",
+    "/our-team",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class Playbook:
     industry: Industry
@@ -52,6 +88,29 @@ class Playbook:
     prohibited_claims: tuple[str, ...] = field(default=())
     #: Per-category multipliers applied to finding severity when scoring.
     category_emphasis: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def crawl_paths(self) -> tuple[str, ...]:
+        """Where to send the crawler: findings pages first, then contact pages.
+
+        Merged here rather than pasted into all ten playbooks, so adding a
+        locale's imprint page is one edit instead of ten and cannot drift
+        between industries.
+
+        **The industry's own paths keep their order and go first.** They are
+        what produce the evidence, and without evidence there is no truthful
+        message to send -- an address on its own is worth nothing to a system
+        that refuses to write unsupported sentences. Contact pages follow, and
+        the deduplication is order-preserving so a path a playbook already
+        names keeps its earlier, higher-priority position.
+        """
+        seen: set[str] = set()
+        merged: list[str] = []
+        for path in (*self.priority_paths, *CONTACT_PATHS):
+            if path not in seen:
+                seen.add(path)
+                merged.append(path)
+        return tuple(merged)
 
     def selectable_offers(self, evidenced_issue_types: set[str]) -> list[Offer]:
         """Offers justified by what was actually found on this site.
