@@ -147,6 +147,10 @@ x-titan-env: &titan-env
   # The file is read at send time from the docs mount below, so regenerating it
   # takes effect without a rebuild.
   TITAN_ONE_PAGER_ATTACHMENT_PATH: ${TITAN_ONE_PAGER_ATTACHMENT_PATH:-}
+  # What share of messages carry it, 0-100. Zero attaches to nothing, which is
+  # the shipped default: an attachment is a new signal to receivers, so it goes
+  # to a sample first and to everything only once the mailboxes are healthy.
+  TITAN_ONE_PAGER_SAMPLE_PERCENT: ${TITAN_ONE_PAGER_SAMPLE_PERCENT:-0}
   TITAN_MODEL_ROUTE_CONTACT: ${TITAN_MODEL_ROUTE_CONTACT:-openrouter:minimax/minimax-m3:free}
   # --- identity ---
   TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}

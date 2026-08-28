@@ -431,6 +431,18 @@ class Settings(BaseSettings):
     #: content whatever it is named.
     one_pager_attachment_path: str | None = None
 
+    #: What share of messages carry the one-page brief, 0-100.
+    #:
+    #: Zero by default, which is the whole point: an attachment is a new signal
+    #: to receivers, and this went in while two of three mailboxes were
+    #: recovering from bounces. A trial that silently became a launch because
+    #: nobody set a number is the failure this default prevents.
+    #:
+    #: The sample is taken on the outbox row's id, so a message is always in or
+    #: always out -- a retry cannot flip it, and raising the percentage later
+    #: only adds messages to the treated set rather than reshuffling it.
+    one_pager_sample_percent: int = 0
+
     #: A one-page summary of the approach, linked from the references block.
     #:
     #: A link rather than an attachment, deliberately. An unsolicited PDF from

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import hashlib
 import datetime as dt
 import logging
 import os
@@ -221,6 +222,27 @@ ONE_PAGER_NOTE = (
     "I have attached a one-page summary of how the assessment works, "
     "with references."
 )
+
+
+def carries_one_pager(message_id: uuid.UUID, percent: int) -> bool:
+    """Whether this message is in the attachment trial.
+
+    Deterministic on the message's own id. Random sampling would decide again
+    on every retry, so a message that failed carrying the PDF could retry
+    without it -- two different documents under one idempotency key, and a
+    reply-rate comparison measuring the retry path rather than the attachment.
+
+    Hashing the id also makes the cohort stable under a change of percentage:
+    the same message always lands on the same number, so raising 10 to 25 adds
+    messages to the treated set without moving any out of it, and the trial can
+    be widened without discarding what it has already measured.
+    """
+    if percent <= 0:
+        return False
+    if percent >= 100:
+        return True
+    digest = hashlib.sha256(str(message_id).encode()).digest()
+    return (int.from_bytes(digest[:4], "big") % 100) < percent
 
 
 def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
@@ -741,9 +763,11 @@ class OutboxWorker:
             email, sender_row.mailing_address if sender_row else None
         )
         email = with_one_click_unsubscribe(email)
-        # The brief, when one is configured. Before the greeting repair so the
-        # greeting is decided on the body that is actually going out.
-        email = with_one_pager(email, self._settings.one_pager_attachment_path)
+        # The brief, for the share of messages in the trial. Before the
+        # greeting repair so the greeting is decided on the body that is
+        # actually going out.
+        if carries_one_pager(row.id, self._settings.one_pager_sample_percent):
+            email = with_one_pager(email, self._settings.one_pager_attachment_path)
         # Last, and after the footer repairs, so the greeting is decided on the
         # body that is actually going out.
         email = with_local_greeting(email, self._recipient_local_time(ctx))
