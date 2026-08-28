@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -333,6 +334,17 @@ class Message(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     #: The zone the two above were computed in, so a later reader can tell a
     #: London 9am from a Los Angeles one.
     sent_timezone: Mapped[str | None] = mapped_column(String(64))
+    #: Whether this message carried the one-page brief.
+    #:
+    #: The attachment ships to a sample so its effect on reply rate can be read
+    #: against a control group from the same campaigns on the same days. The
+    #: sample is a hash of the *outbox* row id, and outbox rows are pruned --
+    #: so without this the answer would be gone before the replies arrived.
+    #:
+    #: Null means nobody recorded it, which is not the same as False. A default
+    #: of False would enrol every message sent before the trial into the
+    #: control group and bias the comparison this exists to support.
+    one_pager_attached: Mapped[bool | None] = mapped_column(Boolean)
     complained_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     #: Body retained only until the retention window expires.
     body_retained_until: Mapped[dt.datetime | None] = mapped_column(

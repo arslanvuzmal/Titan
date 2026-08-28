@@ -34,6 +34,15 @@ export default function MessagesPage() {
   const complained = byState.complained ?? 0;
   const totalSent = Object.values(byState).reduce((sum, n) => sum + n, 0);
 
+  // The trial's own arithmetic, over what this page has loaded. Messages that
+  // predate the trial carry null and are excluded from both sides -- they were
+  // never part of the comparison, and counting them as "without" would inflate
+  // the control group with a fortnight of unrelated sends.
+  const items = data?.items ?? [];
+  const withBrief = items.filter((m) => m.one_pager_attached === true).length;
+  const withoutBrief = items.filter((m) => m.one_pager_attached === false).length;
+  const inTrial = withBrief + withoutBrief;
+
   return (
     <div className="space-y-5">
       <div>
@@ -62,6 +71,26 @@ export default function MessagesPage() {
         />
       </div>
 
+      {inTrial > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Stat
+            label="Sent with the brief"
+            value={withBrief}
+            hint={`${((withBrief / inTrial) * 100).toFixed(0)}% of the trial`}
+          />
+          <Stat label="Sent without (control)" value={withoutBrief} />
+          <Stat
+            label="In the trial"
+            value={inTrial}
+            hint={
+              items.length > inTrial
+                ? `${items.length - inTrial} sent before the trial began`
+                : undefined
+            }
+          />
+        </div>
+      ) : null}
+
       {error ? (
         <ErrorNote error={error} onRetry={reload} />
       ) : loading && !data ? (
@@ -76,7 +105,7 @@ export default function MessagesPage() {
       ) : (
         <Card>
           <Table
-            head={['Subject', 'Recipient', 'State', 'Sent', 'Delivered', 'Bounced', 'Complaint', 'Lead']}
+            head={['Subject', 'Recipient', 'State', 'Brief', 'Sent', 'Delivered', 'Bounced', 'Complaint', 'Lead']}
           >
             {data.items.map((message) => (
               <tr key={message.id} className="hover:bg-slate-50">
@@ -84,6 +113,17 @@ export default function MessagesPage() {
                 <td className="px-3 py-2 font-mono text-xs">{message.to_email_normalized}</td>
                 <td className="px-3 py-2">
                   <Badge>{message.state}</Badge>
+                </td>
+                <td className="px-3 py-2 text-xs">
+                  {message.one_pager_attached === true ? (
+                    <Badge>attached</Badge>
+                  ) : message.one_pager_attached === false ? (
+                    <span className="text-slate-400">control</span>
+                  ) : (
+                    <span className="text-slate-300" title="sent before the trial">
+                      &mdash;
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-xs">
                   <Time value={message.sent_at} />

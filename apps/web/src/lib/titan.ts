@@ -230,6 +230,15 @@ export interface Message {
   delivered_at: string | null;
   bounced_at: string | null;
   complained_at: string | null;
+  /**
+   * Whether this message carried the one-page brief.
+   *
+   * Three states, not two. `null` means the message was sent before the trial
+   * existed; `false` means it was sent without the brief *while* the trial was
+   * running, which is the control group. Collapsing them would enrol every
+   * historical send into that group.
+   */
+  one_pager_attached: boolean | null;
 }
 
 export interface Suppression {

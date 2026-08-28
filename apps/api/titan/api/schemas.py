@@ -421,6 +421,9 @@ class MessageOut(BaseModel):
     delivered_at: dt.datetime | None
     bounced_at: dt.datetime | None
     complained_at: dt.datetime | None
+    #: None for a message sent before the trial existed -- distinct from False,
+    #: which means it was sent without the brief while the trial was running.
+    one_pager_attached: bool | None = None
 
 
 class ResearchStartRequest(BaseModel):

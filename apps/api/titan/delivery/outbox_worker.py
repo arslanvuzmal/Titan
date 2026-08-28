@@ -820,7 +820,12 @@ class OutboxWorker:
             await self._schedule_retry(session, row, f"{type(exc).__name__}: {exc}")
             return ProcessResult(row.id, "retried", str(exc))
 
-        return await self._record(session, row, result, ctx)
+        # Read from the envelope that actually left, not by re-running the
+        # sampling decision: recomputing would ask today's percentage about a
+        # message already sent, and answer wrong either side of a change.
+        return await self._record(
+            session, row, result, ctx, one_pager_attached=bool(email.attachments)
+        )
 
     async def _recipient_domain_health(
         self, session: AsyncSession, row: OutboxMessage
@@ -1465,6 +1470,8 @@ class OutboxWorker:
         row: OutboxMessage,
         result: SendResult,
         ctx: SendContext | None = None,
+        *,
+        one_pager_attached: bool | None = None,
     ) -> ProcessResult:
         now = self._now()
         if result.accepted:
@@ -1487,6 +1494,11 @@ class OutboxWorker:
                     state_event_at=now,
                     provider_message_id=result.provider_message_id,
                     sent_at=now,
+                    # From the envelope that actually left, not by re-running
+                    # the sampling decision: recomputing would ask today's
+                    # percentage about a message already sent, and answer wrong
+                    # for everything either side of a change.
+                    one_pager_attached=one_pager_attached,
                     **_local_frame(ctx, now),
                 )
             )
