@@ -50,7 +50,7 @@ from titan.db.models import (
 )
 from titan.db.models.compliance import SuppressionEntry
 from titan.db.session import workspace_session, workspace_unit_of_work
-from titan.intelligence import territories
+from titan.intelligence import territories, verticals
 from titan.intelligence.discovery import admit_all, build_query, targeting_blockers
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.subregions import subregion_from_longitude, timezone_for
@@ -138,6 +138,14 @@ async def _exhausted_geographies(
             .where(
                 LeadSource.campaign_id == campaign_id,
                 LeadSource.kind == SOURCE_KIND,
+                # This business type only. Without it the rows of every *other*
+                # vertical this campaign has searched come back too, and since
+                # their labels do not carry this prefix they were stored whole
+                # -- "dentists in aberdeen uk" as a geography. Twenty of those
+                # against a twenty-territory region read as a fully worked-out
+                # vertical, which is how a campaign that had searched one of
+                # its ten reported all ten spent.
+                LeadSource.label.ilike(f"{business_type.strip()} in %"),
             )
             .order_by(LeadSource.created_at.desc())
         )
@@ -149,7 +157,11 @@ async def _exhausted_geographies(
     recent: dict[str, list[tuple[int, int]]] = {}
     for label, returned, deduped in rows:
         key = (label or "").strip().casefold()
-        if not key:
+        # Belt and braces beside the SQL filter: a label that does not carry
+        # this prefix is a different search and says nothing about this one.
+        # Storing it whole is what produced the geographies-that-are-not-
+        # geographies above, so it is dropped rather than kept.
+        if not key or not key.startswith(prefix):
             continue
         window = recent.setdefault(key, [])
         if len(window) < EXHAUSTION_WINDOW_RUNS:
@@ -165,7 +177,36 @@ async def _exhausted_geographies(
             continue
         if admitted / returned > MIN_ADMIT_RATE:
             continue
-        spent.add(key.removeprefix(prefix).strip() if key.startswith(prefix) else key)
+        spent.add(key.removeprefix(prefix).strip())
+    return spent
+
+
+async def _exhausted_verticals(
+    session: AsyncSession,
+    *,
+    campaign_id: uuid.UUID,
+    industry: Industry | None,
+    reachable: int,
+) -> set[str]:
+    """Search terms with no territory left to try.
+
+    A term is spent when the number of territories it has worked out reaches
+    the number this campaign can reach at all. Anything less and there is still
+    somewhere to point it, which is the cheaper move.
+
+    ``reachable`` is passed in rather than recomputed because the caller
+    already knows whether this campaign is bound to its region or spans
+    markets, and that decision belongs in one place.
+    """
+    spent: set[str] = set()
+    if industry is None or reachable <= 0:
+        return spent
+    for term in verticals.verticals_for(industry):
+        worked = await _exhausted_geographies(
+            session, campaign_id=campaign_id, business_type=term
+        )
+        if len(worked) >= reachable:
+            spent.add(term.casefold())
     return spent
 
 
@@ -285,16 +326,97 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
                 )
                 geography = moved_on.query_name
                 country_code = moved_on.country_code
+            else:
+                # The map is out for this search term. Before giving up, ask a
+                # different question about the same ground: a campaign that has
+                # worked twenty cities looking for "dentists" has never asked
+                # any of them about "orthodontists" or "emergency dentists" --
+                # different businesses, same playbook, same offers.
+                #
+                # Territory first and vertical second, because a new city is
+                # the cheaper move: the crawler, the playbook and the
+                # vocabulary all stay where they are.
+                reachable = (
+                    len(territories.all_territories())
+                    if spans_markets
+                    else len(territories.for_region(campaign.region))
+                )
+                spent_terms = await _exhausted_verticals(
+                    session,
+                    campaign_id=campaign_id,
+                    industry=industry,
+                    reachable=reachable,
+                )
+                next_term = verticals.next_vertical(
+                    industry, exhausted=spent_terms, current=business_type
+                )
+                if next_term is not None:
+                    # Back to the top of the map with the new question. The
+                    # territories are spent for the *old* term only, so the
+                    # first one is fresh ground again.
+                    restart = await _exhausted_geographies(
+                        session, campaign_id=campaign_id, business_type=next_term
+                    )
+                    moved_on = (
+                        territories.next_territory_anywhere(exhausted=restart)
+                        if spans_markets
+                        else territories.next_territory(
+                            campaign.region, exhausted=restart, current=""
+                        )
+                    )
+                    if moved_on is not None:
+                        logger.info(
+                            "territories worked out; moving to the next vertical",
+                            extra={
+                                "campaign_id": str(campaign_id),
+                                "from_type": business_type,
+                                "to_type": next_term,
+                                "to_geography": moved_on.query_name,
+                                "verticals_spent": len(spent_terms),
+                            },
+                        )
+                        business_type = next_term
+                        geography = moved_on.query_name
+                        country_code = moved_on.country_code
+                    else:
+                        geography = ""
+                else:
+                    # Every territory *and* every vertical is worked out.
+                    # Falling through here searched the exhausted query anyway:
+                    # 286 runs in seven days returning forty records and
+                    # admitting none, at $0.064 each.
+                    #
+                    # The money was the small part. A campaign in this state
+                    # reported a completed discovery run every hour, so nothing
+                    # ever surfaced that it was finished -- it looked busy right
+                    # up until somebody counted the leads.
+                    logger.info(
+                        "every territory and vertical this campaign can reach "
+                        "is worked out",
+                        extra={
+                            "campaign_id": str(campaign_id),
+                            "business_type": business_type,
+                            "geography": geography or "(none)",
+                            "territories_spent": len(spent),
+                            "verticals_spent": len(spent_terms),
+                            "scope": "all markets"
+                            if spans_markets
+                            else campaign.region.value,
+                        },
+                    )
+                    geography = ""
 
     if not geography.strip():
-        # Only reachable for a campaign that spans markets: every territory the
-        # language gate admits has been worked out. A real answer, and one that
-        # says "widen the business type, or add a language" rather than
+        # Every territory this campaign can reach has been worked out -- either
+        # the language gate's list for a campaign that spans markets, or its
+        # own region's catalogue for one that does not. A real answer, and one
+        # that says "add a vertical to the catalogue, or add a language"
         # "search again" -- so it is reported, not retried.
         return DiscoverActivityResult(
             refused_reason=(
-                "every territory this campaign can write to is worked out; "
-                "widen the business type or add a language"
+                "every territory and vertical this campaign can write to is "
+                "worked out; add a vertical to intelligence/verticals.py or "
+                "add a language"
             )
         )
 
@@ -566,7 +688,7 @@ async def _create_lead(
         canonical_domain=business.canonical_domain,
         google_place_id=business.place_id,
         website_url=business.website_uri,
-        phone_e164=business.phone,
+        phone_e164=_to_e164(business.phone),
         rating=business.rating,
         review_count=business.review_count,
         business_status=business.business_status,
@@ -618,6 +740,37 @@ async def _create_lead(
             status=LeadStatus.DISCOVERED,
         )
     )
+
+
+#: The widest value ``organizations.phone_e164`` can hold.
+PHONE_COLUMN_LIMIT = 20
+
+
+def _to_e164(raw: str | None) -> str | None:
+    """Strip a Places phone number down to what the column is named for.
+
+    Places returns ``nationalPhoneNumber`` *formatted for display* -- Titan has
+    ``(786) 812-8622`` and ``+974 4444 5555`` stored right now -- and it was
+    being written verbatim into a column called ``phone_e164`` that holds
+    twenty characters. Most locales fit. The ones that do not raised
+    ``StringDataRightTruncation`` inside ``_create_lead``, and because the
+    insert happens inside the discovery unit of work, **one over-long phone
+    number failed the whole batch**: ``discover_leads`` died through all three
+    retries and every business in that search was lost, not just the one with
+    the long number.
+
+    Stripping the formatting is what makes the column's name true, and it is
+    also the only fix that is safe. Truncating a phone number does not produce
+    a shorter phone number, it produces a different one -- a wrong number in a
+    CRM is worse than an empty field, because somebody eventually rings it. So
+    anything still too long after normalising is dropped rather than trimmed.
+    """
+    if not raw:
+        return None
+    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
+    if not cleaned or cleaned == "+":
+        return None
+    return cleaned if len(cleaned) <= PHONE_COLUMN_LIMIT else None
 
 
 def _timezone_for(

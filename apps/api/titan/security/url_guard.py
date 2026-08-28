@@ -35,6 +35,8 @@ from enum import StrEnum
 from typing import Protocol
 from urllib.parse import urlsplit
 
+import idna
+
 ALLOWED_SCHEMES: frozenset[str] = frozenset({"http", "https"})
 ALLOWED_PORTS: frozenset[int] = frozenset({80, 443})
 DEFAULT_PORTS: dict[str, int] = {"http": 80, "https": 443}
@@ -194,6 +196,43 @@ def _hostname_is_syntactically_valid(host: str) -> bool:
     return all(_HOSTNAME_LABEL.match(label) for label in labels)
 
 
+def to_ascii_hostname(host: str) -> str | None:
+    """The A-label (punycode) form of a hostname. None when it has none.
+
+    ``_HOSTNAME_LABEL`` is ASCII-only, and correctly so -- that is what DNS
+    carries on the wire. What was missing is the conversion *into* it, so every
+    internationalised domain was refused outright as ``invalid_hostname``:
+    ``strafverteidigungmünchen.de`` never resolved, and neither did any other
+    German, Polish, Dutch or Nordic domain with an accent in it. Those are
+    precisely the markets Titan is pointed at.
+
+    **Encoding happens before every other check, and that ordering is the
+    security-relevant part.** The blocklists, the metadata-host list and the
+    suffix list all match on ASCII. If a Unicode name were screened first and
+    encoded afterwards, a homograph whose A-label form is
+    ``metadata.google.internal`` would pass the screen and then be resolved --
+    the check would be reading a different string from the one the connection
+    used. Converting first means every subsequent test sees exactly the name
+    that will be looked up.
+
+    ``uts46=True`` applies the same mapping browsers do (case folding, width
+    and compatibility normalisation), so two spellings of one name cannot
+    resolve to two different verdicts.
+
+    Pure-ASCII hosts are returned untouched rather than round-tripped. The
+    stdlib and IDNA-2008 codecs disagree with the existing regex at the edges --
+    on underscores, on empty labels, on a trailing dot -- and a hostname that
+    reaches here as ASCII has already been accepted by this guard for its whole
+    life. Only genuinely non-ASCII names take the new path.
+    """
+    if host.isascii():
+        return host
+    try:
+        return idna.encode(host, uts46=True).decode("ascii")
+    except (idna.IDNAError, UnicodeError, ValueError):
+        return None
+
+
 def validate_url(
     raw_url: str,
     *,
@@ -238,7 +277,15 @@ def validate_url(
     if not hostname:
         return UrlVerdict(False, raw_url, BlockReason.MISSING_HOST, "no hostname")
 
-    host = hostname.lower().rstrip(".")
+    # Before the blocklists, never after -- see to_ascii_hostname. Every check
+    # below this line must read the same name the resolver will be given.
+    ascii_host = to_ascii_hostname(hostname.lower().rstrip("."))
+    if ascii_host is None:
+        return UrlVerdict(
+            False, raw_url, BlockReason.INVALID_HOSTNAME, "hostname is not encodable"
+        )
+
+    host = ascii_host
     port = port or DEFAULT_PORTS[scheme]
     if port not in ALLOWED_PORTS:
         return UrlVerdict(False, raw_url, BlockReason.PORT_NOT_ALLOWED, f"port {port}")

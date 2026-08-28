@@ -17,17 +17,72 @@ import hashlib
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CONTRACT_VERSION = "1.0.0"
 
 Confidence = Annotated[float, Field(ge=0.0, le=1.0)]
 
 
+def scrub_surrogates(value: str) -> str:
+    """Drop unpaired UTF-16 surrogates from scraped text.
+
+    A Python ``str`` is a sequence of code points rather than UTF-16 code
+    units, so a *valid* surrogate pair has already been combined into a single
+    character long before it reaches here. Anything still sitting in the
+    U+D800-U+DFFF range is therefore unpaired by construction, carries no
+    meaning, and cannot be encoded as UTF-8 at all.
+
+    It has to go, because the failure it causes is silent and total. Postgres
+    rejects the whole document with ``invalid input syntax for type json:
+    Unicode low surrogate must follow a high surrogate``, which fails the crawl
+    *save* rather than the crawl -- so the page was fetched, the evidence
+    gathered and the money spent, and then the activity dies on every one of
+    its eight retries and the lead is discarded. Measured on the live
+    workspace: 100 crashes in 24 hours, and 6,945 of 14,950 research runs lost
+    to ``Activity task failed``.
+
+    The fast path is the point. Almost every string is clean, and ``encode``
+    settles that in C without touching the characters one at a time; only a
+    string that actually fails is rebuilt.
+    """
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return "".join(ch for ch in value if not ("\ud800" <= ch <= "\udfff"))
+    return value
+
+
+def _scrubbed(value: Any) -> Any:
+    """Recursively scrub every string reachable from a raw payload."""
+    if isinstance(value, str):
+        return scrub_surrogates(value)
+    if isinstance(value, dict):
+        return {key: _scrubbed(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_scrubbed(item) for item in value]
+    return value
+
+
 class StrictModel(BaseModel):
     # Reject unknown fields: a worker sending something we do not model is a
     # version mismatch or a compromise, and either way should fail loudly.
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _scrub_unpaired_surrogates(cls, data: Any) -> Any:
+        """Sanitise on ingest, so no later writer has to remember to.
+
+        Deliberately on the shared base rather than at the one call site that
+        crashed. The browser worker executes a stranger's JavaScript and hands
+        back whatever their page contained; every field here is a place a lone
+        surrogate can arrive, and a fix applied only to ``text_excerpt`` would
+        be waiting to be re-found in ``title`` or a console error. Putting it on
+        ``StrictModel`` means every present and future model in this contract
+        inherits it without anybody deciding to.
+        """
+        return _scrubbed(data)
 
 
 class ResearchRequest(StrictModel):
