@@ -55,6 +55,36 @@ HEALTH_FACTORS: dict[SenderHealth, float] = {
     SenderHealth.UNKNOWN: 1.0,
 }
 
+#: What a blocked mailbox may send while it has stopped bouncing.
+#:
+#: Zero was a deadlock, and it took a live mailbox to make it visible.
+#: ``outreach@`` accumulated five hard bounces over 94 sends -- 5.32%, against
+#: a 2% pause threshold -- every one of them from a fortnight earlier, before
+#: address verification existed. The gate blocked it, correctly. But the rate
+#: is *bounces over sends*, so the only way down is more clean sends, and a
+#: blocked mailbox sends nothing. It could not earn its way out; it could only
+#: wait for the thirty-day window to roll past the bad days.
+#:
+#: This is the same asymmetry the warm-up peak window already reasons about:
+#: "a mailbox quarantined by the reputation gate must not also be throttled to
+#: the floor by its own quarantine, or it could never send its way back out."
+#: That argument was applied to the step-up bound and not to the block itself.
+#:
+#: Five a day, and only on the condition below. Small enough that a mailbox
+#: which really is mailing dead addresses produces its next bounce almost
+#: immediately and returns to zero; large enough that a mailbox whose list has
+#: since been cleaned dilutes a stale rate in a few weeks rather than never.
+PROBATION_VOLUME = 5
+
+#: How long a blocked mailbox must go without a hard bounce before probation.
+#:
+#: The distinction this draws is the whole point: *still bouncing* and *bounced
+#: a while ago and the window has not rolled* are different states that the
+#: rate alone cannot tell apart. A mailbox that bounced yesterday keeps its
+#: zero. One whose most recent bounce is older than this is not currently
+#: harming anybody, and its rate is a fact about history.
+PROBATION_QUIET_DAYS = 7
+
 #: Statuses that count as a dip worth recovering from.
 _DIPPED = frozenset({SenderHealth.BLOCKED, SenderHealth.DEGRADED, SenderHealth.WATCH})
 
@@ -140,12 +170,21 @@ def daily_limit(
     *,
     recent: tuple[SenderHealth, ...],
     warmup_limit: int | None = None,
+    days_since_bounce: int | None = None,
 ) -> LimitDecision:
     """The effective ceiling for this mailbox today.
 
     ``recent`` is the mailbox's health newest-first, today's verdict included,
     as read from ``sender_health_snapshots``. An empty history means no snapshot
     exists yet, which is treated as UNKNOWN and therefore as no adjustment.
+
+    ``days_since_bounce`` is how long since this mailbox last hard-bounced.
+    ``None`` means it never has, or nobody looked, and grants **no** probation:
+    a mailbox blocked without any bounce behind it was blocked for some other
+    reason -- failed authentication, or a complaint rate -- and neither of those
+    is repaired by sending five more. Probation is a remedy for one specific
+    deadlock, not a general floor. It is consulted only when the mailbox is
+    blocked; see :data:`PROBATION_VOLUME` for what that deadlock is.
     """
     health = recent[0] if recent else SenderHealth.UNKNOWN
     factor = HEALTH_FACTORS.get(health, 1.0)
@@ -162,6 +201,18 @@ def daily_limit(
 
     if warmup_limit is not None:
         effective = min(effective, max(warmup_limit, 0))
+
+    # Probation, last: it raises a floor rather than lifting a cap, so it must
+    # not be re-narrowed by the warm-up bound above. A mailbox blocked *and*
+    # mid-warm-up is still allowed its five -- warm-up limits growth, and five
+    # is not growth.
+    if (
+        health is SenderHealth.BLOCKED
+        and configured > 0
+        and days_since_bounce is not None
+        and days_since_bounce >= PROBATION_QUIET_DAYS
+    ):
+        effective = max(effective, min(PROBATION_VOLUME, configured))
 
     return LimitDecision(
         configured=configured,

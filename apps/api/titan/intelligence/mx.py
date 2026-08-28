@@ -15,12 +15,13 @@ The asymmetry is the whole point, and it is easy to get backwards:
   :func:`titan.intelligence.contacts.mx_presence_is_not_verification` already
   documents, and which this module implements rather than contradicts.
 
-What this is **not**: an SMTP ``RCPT TO`` probe. Asking a mail server whether a
-stranger's mailbox exists is unreliable (most large providers accept everything
-and bounce later) and is treated as abuse -- it gets the prober rate-limited or
-blocklisted, damaging the very reputation Titan works to protect. Titan does not
-do it. A mailbox-level answer requires a verification service, which is a
-deliberate purchasing decision, not something to sneak in behind a DNS call.
+What this is **not**: an SMTP ``RCPT TO`` probe. That is a separate decision
+made separately, in :mod:`titan.intelligence.smtp_probe`, and it is switched on
+by ``TITAN_MAILBOX_VERIFIER`` rather than happening behind a DNS call. Nothing
+in this module opens a connection to anybody, and a positive MX result still
+never upgrades ``verification_status`` -- having MX says only that the domain
+can receive mail, which is the question this module answers and the whole of
+it.
 
 RFC 5321 §5.1: a domain with no MX but with an address record is still a valid
 mail destination -- the A record is the implicit fallback. Treating that as
@@ -31,6 +32,7 @@ the population Titan targets.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
@@ -138,8 +140,42 @@ def system_mx_resolver(domain: str) -> tuple[list[str], bool]:
     return [], False
 
 
+#: How long to wait before asking a second time about a domain that came back
+#: NXDOMAIN. Long enough to clear a burst against the resolver, short enough
+#: that a discovery run does not notice.
+NXDOMAIN_CONFIRM_DELAY = 1.0
+
+
+def _resolve_confirming_absence(
+    domain: str, resolver: MxResolver
+) -> tuple[list[str], bool]:
+    """Resolve, and make a resolver say NXDOMAIN twice before believing it."""
+    try:
+        return resolver(domain)
+    except DomainDoesNotExist:
+        logger.info(
+            "domain reported as NXDOMAIN; asking once more before believing it",
+            extra={"domain": domain},
+        )
+        time.sleep(NXDOMAIN_CONFIRM_DELAY)
+        return resolver(domain)
+
+
 def check_mx(domain: str, *, resolver: MxResolver = system_mx_resolver) -> MxCheck:
-    """Whether ``domain`` can receive mail."""
+    """Whether ``domain`` can receive mail.
+
+    An NXDOMAIN is asked a second time before it is believed. It is the one
+    answer here that condemns every address at a domain permanently, and a
+    resolver under load does not always mean it: a bulk pass over 436 addresses
+    came back with 202 NXDOMAIN verdicts, and every domain spot-checked
+    afterwards -- ``thelondondentalcentre.co.uk``, ``bentleyhurst.co.uk``,
+    ``ku64.de`` -- resolved perfectly a minute later. 202 real businesses would
+    have been marked undeliverable and never written to again.
+
+    The retry costs nothing on the path that matters, because it only runs when
+    the answer was already negative. A domain that genuinely does not exist
+    says so twice.
+    """
     normalized = (domain or "").strip().lower().rstrip(".")
     if not normalized or "." not in normalized:
         return MxCheck(
@@ -147,9 +183,9 @@ def check_mx(domain: str, *, resolver: MxResolver = system_mx_resolver) -> MxChe
         )
 
     try:
-        hosts, has_address = resolver(normalized)
+        hosts, has_address = _resolve_confirming_absence(normalized, resolver)
     except DomainDoesNotExist:
-        return MxCheck(MxStatus.NXDOMAIN, normalized, detail="NXDOMAIN")
+        return MxCheck(MxStatus.NXDOMAIN, normalized, detail="NXDOMAIN, confirmed twice")
     except Exception as exc:
         # Never a disqualifier: an unreachable resolver is our problem.
         logger.warning(

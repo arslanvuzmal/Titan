@@ -47,11 +47,19 @@ from titan.delivery.providers.base import (
     SendResult,
     WebhookVerificationError,
 )
+from titan.intelligence.smtp_probe import is_sender_rejection
 
 logger = logging.getLogger(__name__)
 
 #: SMTP reply codes that mean this recipient will never accept mail. Retrying
 #: them damages sender reputation, so they suppress instead.
+#:
+#: **Only when the reply is actually about the recipient.** A 5xx is equally the
+#: shape a server uses to refuse *the caller* -- for being rate limited, for
+#: being on a blocklist, for having no PTR record -- and those say nothing at
+#: all about whether the mailbox exists. Read
+#: :data:`titan.intelligence.smtp_probe.SENDER_REJECTION_MARKERS` before
+#: believing a refusal, exactly as the verifier does.
 PERMANENT_REPLY_CODES = frozenset({550, 551, 553, 554})
 #: Codes that mean "not now" -- greylisting, mailbox full, rate limited.
 TRANSIENT_REPLY_CODES = frozenset({421, 450, 451, 452, 471})
@@ -104,6 +112,20 @@ class SmtpProvider:
         message.set_content(email.text_body)
         if email.html_body:
             message.add_alternative(email.html_body, subtype="html")
+
+        # Attachments last, after both body parts exist. add_attachment on a
+        # message that already carries a text/html alternative promotes it to
+        # multipart/mixed with the alternative intact; doing it before the
+        # alternative is added produces a message whose HTML part is a sibling
+        # of the attachment rather than of the text, and several clients then
+        # render the plain text instead of the HTML.
+        for attachment in email.attachments:
+            message.add_attachment(
+                attachment.content,
+                maintype=attachment.maintype,
+                subtype=attachment.subtype,
+                filename=attachment.filename,
+            )
         return message
 
     def _message_id(self, email: OutboundEmail) -> str:
@@ -160,6 +182,32 @@ class SmtpProvider:
             )
 
         if code in PERMANENT_REPLY_CODES:
+            # The verifier learned this on its first live run and delivery never
+            # inherited it: a 5xx that names *our* rate, *our* IP or *our*
+            # reputation is not a verdict on the mailbox. Titan's own SMTP host
+            # answers a burst with
+            #
+            #     554 5.7.1 <DATA>: Data command rejected:
+            #         Reject: too many messages from sender in last 60 minutes
+            #
+            # and 554 sat in the permanent set, so every message caught by that
+            # throttle was recorded as an invalid recipient and the business was
+            # suppressed for good. Thirty of them on the live workspace -- real
+            # practices, correctly addressed, retired because we sent too fast.
+            #
+            # Rate limited rather than merely transient: the distinction is
+            # already in the taxonomy, it does not suppress, and it says the
+            # true thing about why the send failed.
+            # `detail` is the server's reply text and may be absent.
+            # `is_sender_rejection` reads a string; passing None would have
+            # raised inside `_mentions` on the one path where a permanent
+            # refusal carries no diagnostic.
+            if is_sender_rejection(detail or ""):
+                return SendResult(
+                    accepted=False,
+                    error_kind=SendErrorKind.RATE_LIMITED,
+                    error_detail=detail,
+                )
             return SendResult(
                 accepted=False,
                 error_kind=SendErrorKind.INVALID_RECIPIENT,

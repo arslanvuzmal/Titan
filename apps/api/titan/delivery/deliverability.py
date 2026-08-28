@@ -28,8 +28,10 @@ import datetime as dt
 import math
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 # --------------------------------------------------------------------------
 # Reputation thresholds
@@ -48,6 +50,22 @@ BOUNCE_RATE_WARN = 0.01  # 1%
 #: Below this, rates are noise. Two complaints out of ten sends is 20% but
 #: means nothing; pausing on it would make the system unusable.
 MIN_SAMPLE_FOR_RATES = 50
+
+#: How long without a hard bounce before a bad bounce *rate* is treated as a
+#: fact about the past rather than a reason to keep refusing.
+#:
+#: The rate is bounces over sends, so the only way down is more clean sends --
+#: and a blocked mailbox sends nothing. ``outreach@`` took five hard bounces
+#: over 94 sends (5.32%, against a 2% ceiling), every one of them before address
+#: verification existed. It could not earn its way out; it could only wait for
+#: the window to roll past the bad days, and meanwhile 50 messages sat queued
+#: behind a number describing a fortnight ago.
+#:
+#: This deliberately matches ``adaptive_limits.PROBATION_QUIET_DAYS``. Those two
+#: gates sit in series on the same send: the limit granting five a day is worth
+#: nothing while this one still returns BLOCK, which is exactly what happened --
+#: the probation allowance was live and the queue still did not move.
+BOUNCE_QUIET_DAYS = 7
 
 #: Mailbox warm-up. Day index -> the *fraction* of that mailbox's configured
 #: daily limit it may send that day.
@@ -194,6 +212,128 @@ def build_headers(
         headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
     return headers
+
+
+#: What may be attached to a cold approach.
+#:
+#: An unsolicited attachment from an unknown sender is one of the strongest
+#: spam signals there is, and corporate gateways quarantine or strip several
+#: document types by policy. That is an argument for attaching carefully, not
+#: for pretending the feature does not exist -- so these are the bounds.
+MAX_ATTACHMENTS = 1
+MAX_ATTACHMENT_BYTES = 400 * 1024
+ALLOWED_ATTACHMENT_TYPES: frozenset[tuple[str, str]] = frozenset(
+    {("application", "pdf")}
+)
+
+#: File signatures that are executable or archive content whatever the name
+#: says. Checked on the bytes because the filename is the one part of an
+#: attachment an attacker controls for free.
+_EXECUTABLE_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"MZ", "a Windows executable"),
+    (b"\x7fELF", "a Linux executable"),
+    (b"PK\x03\x04", "a zip archive"),
+    (b"\xca\xfe\xba\xbe", "a Mach-O or Java class file"),
+    (b"#!", "a script"),
+)
+
+#: What a PDF actually starts with. A file claiming to be one and not starting
+#: with this is mislabelled, and mailing it would be mailing something nobody
+#: has identified.
+_PDF_MAGIC = b"%PDF-"
+
+
+def check_attachments(attachments: Sequence[Any]) -> list[Signal]:
+    """Bound what may leave with a cold message.
+
+    Every signal here is BLOCK. An attachment that trips one of these does not
+    make the message slightly worse -- it makes it the kind of message that
+    gets a sending domain filtered, or in the executable case, the kind that
+    should never have been assembled at all.
+    """
+    signals: list[Signal] = []
+    if not attachments:
+        return signals
+
+    if len(attachments) > MAX_ATTACHMENTS:
+        signals.append(
+            Signal(
+                "too_many_attachments",
+                Severity.BLOCK,
+                f"{len(attachments)} attachments; at most {MAX_ATTACHMENTS}",
+                "A cold approach carrying several documents reads as a mailing "
+                "rather than a message, and is filtered like one.",
+            )
+        )
+
+    for attachment in attachments:
+        name = getattr(attachment, "filename", "") or "(unnamed)"
+        content = getattr(attachment, "content", b"") or b""
+        kind = (
+            getattr(attachment, "maintype", ""),
+            getattr(attachment, "subtype", ""),
+        )
+
+        if kind not in ALLOWED_ATTACHMENT_TYPES:
+            signals.append(
+                Signal(
+                    "attachment_type_not_allowed",
+                    Severity.BLOCK,
+                    f"{name} is {kind[0]}/{kind[1]}",
+                    "Only PDF is delivered intact by corporate mail gateways; "
+                    "office formats and archives are quarantined by policy.",
+                )
+            )
+
+        if len(content) > MAX_ATTACHMENT_BYTES:
+            signals.append(
+                Signal(
+                    "attachment_too_large",
+                    Severity.BLOCK,
+                    f"{name} is {len(content) // 1024} KB, over "
+                    f"{MAX_ATTACHMENT_BYTES // 1024} KB",
+                    "Large attachments are scored by receivers, and a one-page "
+                    "brief that does not fit is not a one-page brief.",
+                )
+            )
+
+        if not content:
+            signals.append(
+                Signal(
+                    "attachment_empty",
+                    Severity.BLOCK,
+                    f"{name} is empty",
+                    "An empty attachment tells the reader a document was meant "
+                    "to be here and is not.",
+                )
+            )
+            continue
+
+        for magic, description in _EXECUTABLE_MAGIC:
+            if content.startswith(magic):
+                signals.append(
+                    Signal(
+                        "attachment_is_executable",
+                        Severity.BLOCK,
+                        f"{name} is {description}, whatever it is named",
+                        "Checked on the bytes, not the extension. Nothing in "
+                        "this system should ever assemble one.",
+                    )
+                )
+                break
+        else:
+            if kind == ("application", "pdf") and not content.startswith(_PDF_MAGIC):
+                signals.append(
+                    Signal(
+                        "attachment_not_a_pdf",
+                        Severity.BLOCK,
+                        f"{name} is declared PDF but does not begin %PDF-",
+                        "The file is mislabelled; mailing it would be mailing "
+                        "something nobody has identified.",
+                    )
+                )
+
+    return signals
 
 
 def check_required_headers(headers: dict[str, str]) -> list[Signal]:
@@ -417,6 +557,12 @@ class ReputationWindow:
     hard_bounced: int
     complained: int
 
+    #: Days since the most recent hard bounce, or ``None`` for never bounced /
+    #: nobody looked. A rate cannot tell "bouncing now" from "bounced a
+    #: fortnight ago and the window has not rolled yet", and those are different
+    #: states that deserve different answers -- see :func:`check_reputation`.
+    days_since_bounce: int | None = None
+
     @property
     def complaint_rate(self) -> float:
         return self.complained / self.delivered if self.delivered else 0.0
@@ -428,6 +574,19 @@ class ReputationWindow:
     @property
     def has_signal(self) -> bool:
         return self.sent >= MIN_SAMPLE_FOR_RATES
+
+    @property
+    def bounces_are_historical(self) -> bool:
+        """True when nothing has hard-bounced for long enough to call it quiet.
+
+        Requires *positive* evidence: ``None`` does not qualify. A mailbox with
+        a bad rate and no recorded bounce date is one nobody has measured, and
+        an unmeasured mailbox must not be granted the benefit of the doubt.
+        """
+        return (
+            self.days_since_bounce is not None
+            and self.days_since_bounce >= BOUNCE_QUIET_DAYS
+        )
 
 
 def check_reputation(window: ReputationWindow) -> list[Signal]:
@@ -461,7 +620,28 @@ def check_reputation(window: ReputationWindow) -> list[Signal]:
             )
         )
 
-    if window.bounce_rate >= BOUNCE_RATE_PAUSE:
+    if window.bounce_rate >= BOUNCE_RATE_PAUSE and window.bounces_are_historical:
+        # Over the threshold, but nothing has bounced in BOUNCE_QUIET_DAYS. The
+        # rate is describing a period that has ended -- typically a list mailed
+        # before verification existed -- and holding BLOCK here is what made the
+        # bad rate self-perpetuating: no sends, so no clean sends, so no way for
+        # the rate to fall. WARN keeps it visible and lets the probation
+        # allowance in adaptive_limits actually deliver its five a day.
+        #
+        # Small on purpose. If the list really is bad, the next bounce arrives
+        # within a day or two, days_since_bounce resets, and this returns to
+        # BLOCK on its own.
+        signals.append(
+            Signal(
+                "bounce_rate_historical",
+                Severity.WARN,
+                f"hard-bounce rate {window.bounce_rate:.2%} over {window.sent} "
+                f"sends, but none in the last {window.days_since_bounce} days",
+                "Sending resumes at a reduced volume so the rate can recover. "
+                "It will pause again on the next hard bounce.",
+            )
+        )
+    elif window.bounce_rate >= BOUNCE_RATE_PAUSE:
         signals.append(
             Signal(
                 "bounce_rate_exceeded",
@@ -620,6 +800,10 @@ class DeliverabilityContext:
     #: Largest single-day send count in the recent window. None means nobody
     #: measured, which must not be read as zero.
     recent_peak_sends: int | None = None
+    #: Documents going out with the message. Empty for every message before
+    #: attachments existed, and checked here rather than at assembly so an
+    #: attachment passes the same send boundary as every other property.
+    attachments: tuple[Any, ...] = field(default=())
 
 
 def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
@@ -638,6 +822,7 @@ def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
         )
 
     signals.extend(check_required_headers(ctx.headers))
+    signals.extend(check_attachments(ctx.attachments))
     signals.extend(
         check_message(
             subject=ctx.subject,

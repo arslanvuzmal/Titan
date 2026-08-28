@@ -1,16 +1,19 @@
 """The mailbox verification port.
 
-Only one thing can establish that a specific mailbox exists, and Titan does not
-do it itself. :mod:`titan.intelligence.mx` explains why at length; the short
-version is that asking a stranger's mail server whether a stranger's mailbox
-exists gets a truthful answer from almost nobody and gets the asker
-rate-limited or blocklisted by the rest. Building that prober would damage the
-sending reputation the rest of this package exists to protect.
+Only one thing can establish that a specific mailbox exists: asking the server
+that would receive its mail. This module is the socket that answer plugs into.
+Adding or changing a verifier is an adapter plus a settings value -- never a
+change to the discovery pipeline, the eligibility rules or the send gate, all
+of which depend on this protocol rather than on any implementation.
 
-So the mailbox-level answer is bought, not made, and this module is the socket
-it plugs into. Adding a verification service becomes an adapter plus a settings
-value -- never a change to the discovery pipeline, the eligibility rules or the
-send gate, all of which depend on this protocol rather than on any vendor.
+Two implementations of the real thing exist. A vendor adapter
+(:mod:`titan.intelligence.instantly_verifier`) buys the answer, and
+:mod:`titan.intelligence.smtp_probe` asks for it directly, against the
+minority of domains where asking is both truthful and safe -- it declines to
+open a connection at all to the large providers and filtering front-ends that
+accept every recipient. That module's docstring sets out why probing is
+defensible there and nowhere else; this one only cares that both produce a
+:class:`VerificationResult`.
 
 **The default asserts nothing.** :class:`NullVerifier` returns UNKNOWN for every
 address, which is the honest answer when nobody has been asked. UNKNOWN is not
@@ -204,6 +207,65 @@ def _instantly(settings: Any) -> MailboxVerifier:
     return InstantlyVerifier(InstantlyClient.from_settings(settings))
 
 
+def _smtp_probe(settings: Any) -> MailboxVerifier:
+    """Titan's own probe, or the null one when it cannot identify itself.
+
+    Falling back rather than raising, for the same reason ``_instantly`` does.
+    The difference is what the missing configuration means here: without a real
+    HELO name and a real envelope sender, the probe would be indistinguishable
+    from the abusive kind, so refusing to build it is protecting somebody else
+    rather than protecting Titan.
+    """
+    from titan.intelligence.smtp_probe import ProbeConfigError, SmtpProbeVerifier
+
+    try:
+        return SmtpProbeVerifier(
+            helo_hostname=getattr(settings, "smtp_probe_helo", None) or "",
+            mail_from=getattr(settings, "smtp_probe_mail_from", None) or "",
+            timeout_seconds=float(getattr(settings, "smtp_probe_timeout_seconds", 12)),
+            concurrency=int(getattr(settings, "smtp_probe_concurrency", 4)),
+        )
+    except ProbeConfigError as exc:
+        logger.error(
+            "TITAN_MAILBOX_VERIFIER=smtp_probe but it cannot identify itself; "
+            "falling back to the null verifier, which verifies nothing",
+            extra={"detail": str(exc)},
+        )
+        return NullVerifier()
+
+
+#: One verifier per name, per event loop.
+#:
+#: Rebuilding per address was harmless while every verifier was stateless, and
+#: the eligibility activity does exactly that -- once per candidate address.
+#: :class:`~titan.intelligence.smtp_probe.SmtpProbeVerifier` is not stateless:
+#: its catch-all cache, its per-domain lock and the spacing between connections
+#: are the whole of what stops it opening fifty connections to one small mail
+#: server, and a fresh instance per address has none of them. A vendor adapter
+#: benefits too, keeping one HTTP connection pool instead of one per lead.
+#:
+#: Keyed by event loop as well as by name. The locks inside bind to the loop
+#: they are first awaited on, so an instance reused from a second loop raises
+#: rather than quietly working a little bit wrong -- which is a shape of bug
+#: that would only appear under a second worker.
+_INSTANCES: dict[tuple[str, int], MailboxVerifier] = {}
+
+
+def _loop_key() -> int:
+    """Which event loop is asking, or 0 outside one."""
+    import asyncio
+
+    try:
+        return id(asyncio.get_running_loop())
+    except RuntimeError:
+        return 0
+
+
+def reset_verifier_cache() -> None:
+    """Drop every cached verifier. For tests, and for a settings reload."""
+    _INSTANCES.clear()
+
+
 def build_verifier(name: str | None, settings: Any = None) -> MailboxVerifier:
     """The configured verifier, or the null one.
 
@@ -217,14 +279,24 @@ def build_verifier(name: str | None, settings: Any = None) -> MailboxVerifier:
     constructed with no credentials and failing on the first address.
     """
     key = (name or "").strip().lower()
-    if key == "instantly":
+    cache_key = (key, _loop_key())
+    cached = _INSTANCES.get(cache_key)
+    if cached is not None:
+        return cached
+
+    if key in ("instantly", "smtp_probe"):
         if settings is None:
             from titan.config import get_settings
 
             settings = get_settings()
-        return _instantly(settings)
-    factory = _REGISTRY.get(key, NullVerifier)
-    return factory()
+        built: MailboxVerifier = (
+            _instantly(settings) if key == "instantly" else _smtp_probe(settings)
+        )
+    else:
+        built = _REGISTRY.get(key, NullVerifier)()
+
+    _INSTANCES[cache_key] = built
+    return built
 
 
 __all__ = [
@@ -233,4 +305,5 @@ __all__ = [
     "NullVerifier",
     "VerificationResult",
     "build_verifier",
+    "reset_verifier_cache",
 ]

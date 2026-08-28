@@ -24,7 +24,7 @@ from typing import Protocol
 
 
 class AuthResult(StrEnum):
-    PASS = "pass"  # noqa: S105 - an authentication outcome, not a credential
+    PASS = "pass"
     FAIL = "fail"
     MISSING = "missing"
     MISCONFIGURED = "misconfigured"
@@ -358,7 +358,7 @@ def _organizational_domain(domain: str) -> str:
         extracted = tldextract.extract(domain)
         if extracted.domain and extracted.suffix:
             return f"{extracted.domain}.{extracted.suffix}"
-    except Exception:  # noqa: S110 - tldextract is optional; fall back below
+    except Exception:
         pass
     parts = domain.split(".")
     return ".".join(parts[-2:]) if len(parts) >= 2 else domain
