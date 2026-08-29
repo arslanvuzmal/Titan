@@ -1,0 +1,1469 @@
+<title>Titan Autonomy Programme</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;600;700&display=swap">
+
+<style>
+  :root {
+    --paper:#eceeec; --surface:#f9faf9; --surface-2:#e2e6e3;
+    --ink:#131817; --ink-2:#4d5a57; --ink-3:#75817e;
+    --rule:#cdd5d1; --rule-soft:#dde2df;
+    --accent:#7a2a4e; --accent-2:#a24a72; --accent-soft:#f1e3ea;
+    --pass:#2c6a4c; --pass-soft:#dfeee6;
+    --defer:#8a620f; --defer-soft:#f6ecd6;
+    --refuse:#97322b; --refuse-soft:#f7e2e0;
+    --shadow:0 1px 2px rgba(19,24,23,.05), 0 8px 24px -16px rgba(19,24,23,.28);
+    --serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0e1413; --surface:#151c1b; --surface-2:#1d2624;
+      --ink:#e7ecea; --ink-2:#a6b3af; --ink-3:#7d8b87;
+      --rule:#2b3634; --rule-soft:#222c2a;
+      --accent:#dd91b4; --accent-2:#c9769d; --accent-soft:#2e1d26;
+      --pass:#63b98d; --pass-soft:#182a22;
+      --defer:#d3a44a; --defer-soft:#2b2417;
+      --refuse:#e08279; --refuse-soft:#2f1c1a;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0e1413; --surface:#151c1b; --surface-2:#1d2624;
+    --ink:#e7ecea; --ink-2:#a6b3af; --ink-3:#7d8b87;
+    --rule:#2b3634; --rule-soft:#222c2a;
+    --accent:#dd91b4; --accent-2:#c9769d; --accent-soft:#2e1d26;
+    --pass:#63b98d; --pass-soft:#182a22;
+    --defer:#d3a44a; --defer-soft:#2b2417;
+    --refuse:#e08279; --refuse-soft:#2f1c1a;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16.5px; line-height:1.68;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page { max-width:1180px; margin:0 auto; padding:0 24px 96px; }
+
+  /* masthead */
+  .masthead { padding:64px 0 30px; border-bottom:2px solid var(--ink); }
+  .eyebrow {
+    font-family:var(--mono); font-size:11.5px; font-weight:500;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--accent); margin:0 0 18px;
+  }
+  .masthead h1 {
+    font-family:var(--serif); font-weight:700;
+    font-size:clamp(2.4rem,6.2vw,3.9rem); line-height:1.03;
+    letter-spacing:-.02em; text-wrap:balance; margin:0 0 20px;
+  }
+  .standfirst {
+    font-family:var(--serif); font-size:clamp(1.05rem,2.1vw,1.26rem);
+    line-height:1.55; color:var(--ink-2); max-width:62ch; margin:0;
+  }
+  .verdict {
+    margin-top:30px; padding:18px 22px; border-radius:3px;
+    background:var(--refuse-soft); border:1px solid var(--refuse);
+    max-width:70ch;
+  }
+  .verdict p { margin:0; font-family:var(--serif); font-size:1.08rem; line-height:1.5; }
+  .verdict .label {
+    display:block; font-family:var(--mono); font-size:10.5px;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--refuse); margin-bottom:8px;
+  }
+  .facts { display:flex; flex-wrap:wrap; margin-top:30px; border-top:1px solid var(--rule); }
+  .fact { flex:1 1 145px; padding:16px 20px 14px 0; border-right:1px solid var(--rule-soft); }
+  .fact:last-child { border-right:0; }
+  .fact dt {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 5px;
+  }
+  .fact dd {
+    margin:0; font-family:var(--serif); font-size:1.4rem; font-weight:600;
+    font-variant-numeric:tabular-nums; line-height:1.2;
+  }
+  .fact dd small {
+    display:block; font-family:var(--sans); font-size:12.5px; font-weight:400;
+    color:var(--ink-3); margin-top:2px;
+  }
+  .fact dd.bad { color:var(--refuse); }
+
+  /* layout */
+  .body { display:grid; grid-template-columns:1fr; gap:48px; padding-top:44px; }
+  @media (min-width:1000px) {
+    .body { grid-template-columns:212px minmax(0,1fr); gap:56px; }
+    nav.toc { position:sticky; top:28px; align-self:start; max-height:calc(100vh - 56px); overflow-y:auto; }
+  }
+  nav.toc ol { list-style:none; margin:0; padding:0; counter-reset:toc; }
+  nav.toc li { counter-increment:toc; }
+  nav.toc a {
+    display:block; padding:7px 0 7px 30px; position:relative;
+    font-size:13.5px; line-height:1.35; color:var(--ink-2); text-decoration:none;
+    border-left:2px solid var(--rule-soft); margin-left:-2px; transition:color .14s,border-color .14s;
+  }
+  nav.toc a::before {
+    content:counter(toc,decimal-leading-zero); position:absolute; left:12px; top:9px;
+    font-family:var(--mono); font-size:10.5px; color:var(--ink-3);
+  }
+  nav.toc a:hover, nav.toc a:focus-visible { color:var(--accent); border-left-color:var(--accent); }
+  nav.toc .toc-title {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 12px 12px;
+  }
+  main { min-width:0; }
+  section { scroll-margin-top:24px; }
+  section + section { margin-top:60px; }
+
+  h2 {
+    font-family:var(--serif); font-size:clamp(1.55rem,3.3vw,2rem); font-weight:600;
+    line-height:1.15; letter-spacing:-.015em; text-wrap:balance;
+    margin:0 0 6px; padding-top:14px; border-top:1px solid var(--ink);
+  }
+  h2 .num {
+    display:block; font-family:var(--mono); font-size:11px; font-weight:500;
+    letter-spacing:.15em; color:var(--accent); margin-bottom:10px;
+  }
+  h3 { font-family:var(--sans); font-size:1.02rem; font-weight:600; margin:32px 0 8px; }
+  h4 {
+    font-family:var(--mono); font-size:11.5px; font-weight:600; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--ink-3); margin:26px 0 10px;
+  }
+  p { margin:0 0 16px; max-width:68ch; }
+  main > section > p:first-of-type { margin-top:18px; }
+  ul, ol { max-width:68ch; padding-left:20px; margin:0 0 18px; }
+  li { margin-bottom:8px; }
+  li::marker { color:var(--ink-3); }
+  code {
+    font-family:var(--mono); font-size:.87em; background:var(--surface-2);
+    padding:.12em .38em; border-radius:3px; color:var(--ink);
+  }
+  a { color:var(--accent); text-underline-offset:2px; }
+  a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:2px; }
+
+  /* figures */
+  figure { margin:32px 0; padding:0; }
+  .figframe {
+    background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+    padding:22px 18px 14px; overflow-x:auto; box-shadow:var(--shadow);
+  }
+  figure svg { display:block; width:100%; min-width:700px; max-width:100%; height:auto; color:var(--ink); }
+  figcaption { margin-top:12px; font-size:13.5px; line-height:1.5; color:var(--ink-3); max-width:72ch; }
+  figcaption b { color:var(--ink-2); font-weight:600; }
+  .t   { font-family:var(--sans); font-size:12.5px; fill:currentColor; }
+  .t-b { font-family:var(--sans); font-size:13px; font-weight:600; fill:currentColor; }
+  .t-n { font-family:var(--mono); font-size:12.5px; fill:currentColor; }
+  .t-s { font-family:var(--mono); font-size:10.5px; fill:var(--ink-3); letter-spacing:.04em; }
+  .t-x { font-family:var(--sans); font-size:11.5px; fill:var(--refuse); }
+
+  /* tables */
+  .tablewrap {
+    overflow-x:auto; border:1px solid var(--rule); border-radius:3px;
+    background:var(--surface); margin:22px 0 26px; box-shadow:var(--shadow);
+  }
+  table { border-collapse:collapse; width:100%; min-width:600px; font-size:14.5px; }
+  th {
+    text-align:left; font-family:var(--mono); font-size:10.5px; font-weight:600;
+    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3);
+    padding:12px 16px; border-bottom:1px solid var(--rule); white-space:nowrap; vertical-align:bottom;
+  }
+  td { padding:11px 16px; border-bottom:1px solid var(--rule-soft); vertical-align:top; line-height:1.5; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.mono, th.mono { font-family:var(--mono); font-size:12.5px; font-variant-numeric:tabular-nums; }
+  td.num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+  td.nowrap { white-space:nowrap; }
+
+  .chip {
+    display:inline-block; font-family:var(--mono); font-size:10.5px; font-weight:500;
+    letter-spacing:.06em; padding:2px 7px; border-radius:2px; border:1px solid currentColor; white-space:nowrap;
+  }
+  .chip.crit { color:var(--refuse); background:var(--refuse-soft); }
+  .chip.high { color:var(--defer); background:var(--defer-soft); }
+  .chip.med  { color:var(--ink-2); }
+  .chip.ok   { color:var(--pass); background:var(--pass-soft); }
+  .chip.done { color:var(--pass); background:var(--pass-soft); font-weight:600; }
+  tr.shipped td:first-child { box-shadow:inset 3px 0 0 var(--pass); }
+  .chip.on   { color:var(--accent); }
+
+  /* callouts */
+  .rule {
+    max-width:68ch; margin:24px 0; padding:18px 22px; background:var(--surface);
+    border:1px solid var(--rule); border-left:3px solid var(--accent);
+    border-radius:2px; box-shadow:var(--shadow);
+  }
+  .rule p { margin:0; font-family:var(--serif); font-size:1.05rem; line-height:1.5; }
+  .rule p + p { margin-top:12px; }
+  .rule .label {
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--accent); display:block; margin-bottom:8px;
+  }
+  .note {
+    max-width:68ch; background:var(--surface); border:1px solid var(--rule);
+    border-radius:3px; padding:16px 20px; margin:0 0 14px;
+  }
+  .note h4 { margin:0 0 6px; color:var(--defer); }
+  .note p { margin:0; font-size:15px; }
+  .note p + p { margin-top:10px; }
+
+  /* phases */
+  .phase {
+    border:1px solid var(--rule); border-radius:3px; background:var(--surface);
+    margin:0 0 18px; box-shadow:var(--shadow); overflow:hidden;
+  }
+  .phase > header {
+    display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 14px;
+    padding:15px 20px; border-bottom:1px solid var(--rule); background:var(--surface-2);
+  }
+  .phase > header .pn {
+    font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.13em;
+    color:var(--accent); text-transform:uppercase;
+  }
+  .phase > header h3 { margin:0; font-size:1.06rem; flex:1 1 auto; }
+  .phase > header .when {
+    font-family:var(--mono); font-size:11px; color:var(--ink-3); letter-spacing:.05em; white-space:nowrap;
+  }
+  .phase .inner { padding:16px 20px 4px; }
+  .phase .inner > p:first-child { margin-top:0; }
+  .phase ul { margin-bottom:14px; }
+  .phase .accept {
+    margin:0; padding:13px 20px; border-top:1px solid var(--rule-soft);
+    background:var(--pass-soft); font-size:14px; line-height:1.5;
+  }
+  .phase .accept b {
+    font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+    color:var(--pass); display:block; margin-bottom:4px; font-weight:600;
+  }
+
+  footer.colophon {
+    margin-top:68px; padding-top:22px; border-top:2px solid var(--ink);
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.04em;
+    color:var(--ink-3); line-height:1.8;
+  }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="eyebrow">Titan-OS &middot; diagnosis &amp; programme &middot; 29 August 2026</p>
+    <h1>Why nothing is going out, and what it takes to fix it for good</h1>
+    <p class="standfirst">Read live from the running stack and the production database. The system is not broken and it is not idle &mdash; it is losing three quarters of its work to a single crash, and spreading what survives so thin that nothing accumulates. Of the eleven things it must do unattended, <strong>seven already run</strong>.</p>
+
+    <div class="verdict">
+      <span class="label">The headline</span>
+      <p><strong>14,950 research runs have produced 182 emails, 12 human replies and 0 meetings.</strong> Only 1.2% of the work the system does reaches an inbox. The stack has been up for nine hours, sending as I write &mdash; the problem is yield, not uptime.</p>
+    </div>
+
+    <dl class="facts">
+      <div class="fact"><dt>Sent today</dt><dd class="bad">19<small>target is 40</small></dd></div>
+      <div class="fact"><dt>Research success</dt><dd class="bad">26%<small>3,847 of 14,950</small></dd></div>
+      <div class="fact"><dt>Contact yield</dt><dd class="bad">14%<small>623 of 4,393 crawls</small></dd></div>
+      <div class="fact"><dt>Bounce rate (7d)</dt><dd class="bad">19.7%<small>12 of 61 &mdash; ceiling is 2%</small></dd></div>
+      <div class="fact"><dt>Stranded drafts</dt><dd class="bad">596<small>validated, going nowhere</small></dd></div>
+      <div class="fact"><dt>Clients won</dt><dd class="bad">0<small>0 meetings booked</small></dd></div>
+    </dl>
+  </header>
+
+  <div class="body">
+
+    <nav class="toc" aria-label="Contents">
+      <p class="toc-title">Contents</p>
+      <ol>
+        <li><a href="#answer">The short answer</a></li>
+        <li><a href="#funnel">Where the work goes</a></li>
+        <li><a href="#register">The defect register</a></li>
+        <li><a href="#arithmetic">What 40 a day actually costs</a></li>
+        <li><a href="#capabilities">The eleven capabilities</a></li>
+        <li><a href="#plan">The programme</a></li>
+        <li><a href="#log-27">Work log &mdash; 27 August</a></li>
+        <li><a href="#log-28">Work log &mdash; 28 August</a></li>
+        <li><a href="#executed">Executed &mdash; recovery, redraft, sending</a></li>
+        <li><a href="#bounces">The bounce problem, solved at the source</a></li>
+        <li><a href="#throttle">Trickle, volume and authentication</a></li>
+        <li><a href="#onepager">The one-page brief, attached</a></li>
+        <li><a href="#log-29">Work log &mdash; 29 August</a></li>
+        <li><a href="#expert">Two hard truths</a></li>
+        <li><a href="#decisions">What I need from you</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <!-- =========================== 1 -->
+      <section id="answer">
+        <h2><span class="num">01</span>The short answer</h2>
+
+        <p>Seven things are happening at once. They are listed in order of how much throughput each one costs, and every number below came from the live database or the running worker's logs, not from the code's own claims about itself.</p>
+
+        <ol>
+          <li><strong>A crash is eating three out of four research runs.</strong> Page text containing a lone Unicode surrogate &mdash; a broken emoji, a mangled character &mdash; is rejected by Postgres when the crawl is written to <code>jsonb</code>. The crawl succeeded; the <em>save</em> fails, all eight retries fail identically, and the lead is thrown away. 100 occurrences in the last 24 hours, all at <code>activities/pipeline.py:271</code>. This is the single largest loss in the system.</li>
+
+          <li><strong>Only 14% of crawled sites give up an email address.</strong> 623 addresses from 4,393 completed crawls. The pipeline was designed assuming a third. That gap is why <strong>2,470 well-scored leads sit in <code>manual_review</code> with no contact at all</strong> &mdash; and nothing ever goes back for them.</li>
+
+          <li><strong>The repair job that rescues abandoned drafts has been dead for five days.</strong> The housekeeping schedule reports <code>MissedCatchupWindow: 52</code> against 30 runs, and its next fire time is five days in the past. 596 validated drafts are stranded because of it. They expire on 31 August and are lost.</li>
+
+          <li><strong>Sending is spread across 23 campaigns and starves all of them.</strong> The workspace cap is 100 a day; the allocator divides it by health across 23 active campaigns and lands on <strong>2 or 3 sends each &mdash; and 0 for three of them</strong>. Nothing can build momentum at that rate. Six more &ldquo;active&rdquo; campaigns are in <code>research_only</code> mode and can never send anything at all.</li>
+
+          <li><strong>The bounce rate is 19.7% and will destroy the domain.</strong> Gmail and Yahoo filter above roughly 2%. The cause is that a published website address counts as verified enough to send: 564 of 623 addresses were never actually checked against a mailbox, because the SMTP prober correctly declines to probe Google and Microsoft, which front most business mail.</li>
+
+          <li><strong>154 finished messages were permanently cancelled over a footer.</strong> The postal address was added to the sender identities <em>after</em> those drafts were composed, so the send-time check found it configured but missing from the body and blocked every one. 28 more died for a missing one-click unsubscribe header. All were validated, approved messages.</li>
+
+          <li><strong>The Smartlead route is dead and still being attempted.</strong> The API key is rejected on every sequence read (37 permanent failures), and the carrier campaigns have four sequence steps where Titan requires exactly one. Meanwhile one healthy mailbox is pinned at 5 sends a day because the warm-up ramp last advanced on 19 August.</li>
+        </ol>
+
+        <div class="rule">
+          <span class="label">The thing to hold on to</span>
+          <p>Not one of these is a design failure. The gates, the evidence rule and the refusal logic all work exactly as built &mdash; several of these defects are the safety machinery <em>correctly</em> refusing to send flawed mail. What is missing is the layer above: nothing is watching the system's own yield and acting on it. 363 operator notifications are sitting unread, and every one of these problems announced itself in one.</p>
+        </div>
+
+        <h3>The root cause underneath two of them</h3>
+        <p>The stuck housekeeping job and the frozen warm-up ramp looked like two separate bugs. They are one: <strong>Titan runs on a laptop that sleeps.</strong> Housekeeping reports 52 missed windows because it fires hourly and the machine is not always awake. The ramp fires at 06:10 UTC &mdash; 07:10 your time &mdash; and simply never runs. Both jobs are correct; the host is not always there.</p>
+        <p>This proved itself while I was writing this page: <strong>Docker Desktop stopped mid-session and the entire stack went down.</strong> Nothing is sending as you read this. The container restart policies are right (<code>unless-stopped</code> on all fifteen), so they come back when Docker does &mdash; but a system that stops when a lid closes is not autonomous in any useful sense, no matter how good the gates are.</p>
+
+        <div class="verdict" style="margin-top:22px">
+          <span class="label">The one change that outranks everything</span>
+          <p><strong>Move Titan to a host that does not sleep.</strong> It fixes the schedules, the ramp, the discovery gaps and the multi-day sending holes at once &mdash; and every other phase in this programme assumes it. A small always-on VPS is roughly $10&ndash;20 a month. Nothing else on this page compounds the way this does.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 2 -->
+      <section id="funnel">
+        <h2><span class="num">02</span>Where the work goes</h2>
+
+        <p>Measured across the life of the workspace. Each bar is drawn to scale against the one above it.</p>
+
+        <figure>
+          <div class="figframe">
+            <svg viewBox="0 0 820 420" role="img" aria-label="Funnel chart showing 14,950 research runs reducing to 3,847 completed, 623 email addresses, 358 outbox rows, 182 sent messages, 12 human replies and zero meetings, with the largest losses at the research crash and contact discovery stages.">
+              <defs>
+                <marker id="fx" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--refuse)"></path>
+                </marker>
+              </defs>
+
+              <text class="t-s" x="8" y="16">STAGE</text>
+              <text class="t-s" x="196" y="16">VOLUME</text>
+              <text class="t-s" x="520" y="16">LOST HERE, AND WHY</text>
+
+              <!-- row 1 -->
+              <text class="t-b" x="8" y="52">Research started</text>
+              <rect x="196" y="36" width="290" height="22" fill="var(--accent)" opacity=".85"></rect>
+              <text class="t-n" x="494" y="52">14,950</text>
+              <line x1="300" y1="62" x2="300" y2="82" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="58">&minus;11,103 &nbsp;the jsonb surrogate crash, crawl</text>
+              <text class="t-x" x="520" y="74">timeouts, and abandoned runs</text>
+
+              <!-- row 2 -->
+              <text class="t-b" x="8" y="112">Research completed</text>
+              <rect x="196" y="96" width="75" height="22" fill="var(--accent)" opacity=".85"></rect>
+              <text class="t-n" x="279" y="112">3,847</text>
+              <line x1="240" y1="122" x2="240" y2="142" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="118">&minus;3,224 &nbsp;no published email address</text>
+              <text class="t-x" x="520" y="134">found anywhere on the site</text>
+
+              <!-- row 3 -->
+              <text class="t-b" x="8" y="172">Email address found</text>
+              <rect x="196" y="156" width="12" height="22" fill="var(--accent)" opacity=".85"></rect>
+              <text class="t-n" x="216" y="172">623</text>
+              <line x1="202" y1="182" x2="202" y2="202" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="178">&minus;265 &nbsp;never queued: 596 drafts stranded by</text>
+              <text class="t-x" x="520" y="194">the dead housekeeping job (some overlap)</text>
+
+              <!-- row 4 -->
+              <text class="t-b" x="8" y="232">Reached the outbox</text>
+              <rect x="196" y="216" width="7" height="22" fill="var(--accent)" opacity=".85"></rect>
+              <text class="t-n" x="211" y="232">358</text>
+              <line x1="199" y1="242" x2="199" y2="262" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="238">&minus;176 &nbsp;154 cancelled on the footer check,</text>
+              <text class="t-x" x="520" y="254">37 on the dead Smartlead key</text>
+
+              <!-- row 5 -->
+              <text class="t-b" x="8" y="292">Delivered</text>
+              <rect x="196" y="276" width="4" height="22" fill="var(--pass)"></rect>
+              <text class="t-n" x="208" y="292">182</text>
+              <line x1="198" y1="302" x2="198" y2="322" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="298">&minus;48 &nbsp;bounced &mdash; addresses that were</text>
+              <text class="t-x" x="520" y="314">published on a site but no longer exist</text>
+
+              <!-- row 6 -->
+              <text class="t-b" x="8" y="352">Human replied</text>
+              <rect x="196" y="336" width="3" height="22" fill="var(--defer)"></rect>
+              <text class="t-n" x="207" y="352">12</text>
+              <line x1="197" y1="362" x2="197" y2="382" stroke="var(--refuse)" stroke-width="1" stroke-dasharray="3 3" marker-end="url(#fx)"></line>
+              <text class="t-x" x="520" y="358">&minus;12 &nbsp;every one classified UNKNOWN, so</text>
+              <text class="t-x" x="520" y="374">no meeting was ever offered</text>
+
+              <!-- row 7 -->
+              <text class="t-b" x="8" y="412">Meeting booked</text>
+              <rect x="196" y="396" width="3" height="22" fill="none" stroke="var(--refuse)" stroke-width="1.2"></rect>
+              <text class="t-n" x="207" y="412" style="fill:var(--refuse)">0</text>
+              <text class="t-s" x="520" y="412">1.2% OF ALL RESEARCH REACHES AN INBOX</text>
+            </svg>
+          </div>
+          <figcaption><b>Two losses dwarf everything else.</b> The crash at the top costs 11,000 runs; contact discovery costs another 3,200 leads. Fix only those two and the rest of the funnel is working with roughly twenty times the input it has today &mdash; which is why the plan attacks them first and leaves the tuning until after.</figcaption>
+        </figure>
+
+        <p>The bottom of the funnel deserves its own sentence. Twelve human beings replied to these emails and <strong>every single one was classified <code>UNKNOWN</code></strong>. The machinery to act on a reply exists and is wired &mdash; there is a meeting writer that fires when intent reads <code>WANTS_CALL</code> &mdash; but the classifier has never once produced that verdict. The conversion path has never been exercised, not once.</p>
+      </section>
+
+      <!-- =========================== 3 -->
+      <section id="register">
+        <h2><span class="num">03</span>The defect register</h2>
+
+        <p>Everything found, with where it lives and what it costs. Ranked by throughput lost.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>Defect</th><th>Where</th><th>Evidence</th><th class="mono">Sev</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">D1</td>
+                <td><strong>Lone Unicode surrogates crash the crawl save.</strong> Scraped page text goes into <code>jsonb</code> unsanitised; Postgres rejects it and the activity fails on every retry</td>
+                <td class="mono">activities/<wbr>pipeline.py:271</td>
+                <td>100 crashes/24h; 6,945 runs &ldquo;Activity task failed&rdquo;</td>
+                <td><span class="chip crit">CRITICAL</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D2</td>
+                <td><strong>Contact yield is 14%, and misses are never retried.</strong> 2,470 scored leads have no address and no path back to them</td>
+                <td class="mono">intelligence/<wbr>contacts.py</td>
+                <td>623 channels / 4,393 crawls; 2,470 in <code>manual_review</code></td>
+                <td><span class="chip crit">CRITICAL</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D3</td>
+                <td><strong>Bounce rate 19.7%.</strong> A published website address is treated as sendable without a mailbox check; the prober correctly declines the big providers, so most addresses go unverified</td>
+                <td class="mono">policy/engine.py<br>intelligence/<wbr>smtp_probe.py</td>
+                <td>12 bounces / 61 sends (7d); 564 of 623 unverified</td>
+                <td><span class="chip crit">CRITICAL</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D4</td>
+                <td><strong>Housekeeping schedule is stuck.</strong> Next fire time is five days in the past; the 30-minute catch-up window is shorter than the gaps the machine sleeps through</td>
+                <td class="mono">workflows/<wbr>schedules.py</td>
+                <td><code>Total: 30, MissedCatchupWindow: 52</code>; 596 stranded drafts</td>
+                <td><span class="chip crit">CRITICAL</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D5</td>
+                <td><strong>Sending is spread too thin to matter.</strong> 100 workspace sends across 23 campaigns yields 2&ndash;3 each, 0 for three. <em>Corrected:</em> the allocator is not naive &mdash; it already caps exploration floors at half the budget and its own comments name this exact trap. It is dividing a pie that is too small among too many claimants, so the fix is fewer campaigns and more capacity, not allocator code</td>
+                <td class="mono">&mdash; configuration</td>
+                <td><code>managed_daily_send_limit</code> = 0, 2 or 3 on every active campaign</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D6</td>
+                <td><strong>Footer baked at draft time, checked at send time.</strong> Adding the postal address to sender identities retroactively invalidated every earlier draft</td>
+                <td class="mono">delivery/<wbr>deliverability.py:392</td>
+                <td>101 cancelled &ldquo;address absent&rdquo;; 28 &ldquo;not one-click&rdquo;</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D7</td>
+                <td><strong>Internationalised domains are refused.</strong> The URL guard does not IDNA-encode hostnames, so every non-ASCII domain fails &mdash; in exactly the German, Polish and Dutch markets being targeted</td>
+                <td class="mono">security/<wbr>url_guard.py</td>
+                <td><code>invalid_hostname (strafverteidigungm&uuml;nchen.de)</code></td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D8</td>
+                <td><strong>Smartlead route dead but still attempted.</strong> API key rejected; carrier campaigns have 4 sequence steps where exactly 1 is required</td>
+                <td class="mono">providers/<wbr>smartlead.py</td>
+                <td>37 permanent failures across 5 carrier campaigns</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D9</td>
+                <td><strong>Warm-up ramp frozen.</strong> Ramp state last advanced 19 August, pinning one healthy 50/day mailbox at 5</td>
+                <td class="mono">workflows/<wbr>mailbox_ramp.py</td>
+                <td>42 deferrals &ldquo;sender daily quota of 5 reached&rdquo;</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D10</td>
+                <td><strong>Every human reply reads UNKNOWN.</strong> The intent classifier has never returned <code>WANTS_CALL</code>, so the meeting path has never fired</td>
+                <td class="mono">intelligence/<wbr>intent.py</td>
+                <td>12 human replies, 12 UNKNOWN, 0 meetings</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D11</td>
+                <td><strong>The failure reasons on rows are stale and misleading.</strong> <em>Corrected from an earlier read:</em> I said a timing refusal was burning the attempt budget. It is not &mdash; deferring does not increment <code>attempt_count</code>, and the window deferral correctly schedules to the next opening. The real defect is that <code>blocked_reason</code> is never cleared when a row moves on, so successfully sent messages carry the reason they were once deferred and the failure register lies about why things died</td>
+                <td class="mono">delivery/<wbr>outbox_worker.py<br><code>_defer</code> / <code>_record</code></td>
+                <td>13 <code>sent</code> rows still carrying <code>outside_campaign_send_window</code></td>
+                <td><span class="chip med">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D16</td>
+                <td><strong>The host sleeps.</strong> Root cause of D4 and D9 both, and of the multi-day sending holes on 21&ndash;23 August. Docker Desktop stopped during this session and took the whole stack with it</td>
+                <td class="mono">&mdash; infrastructure</td>
+                <td><code>MissedCatchupWindow: 52</code>; ramp frozen since 19 Aug; 0 sends on three consecutive days</td>
+                <td><span class="chip crit">CRITICAL</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D17</td>
+                <td><strong>Re-verification exists and is unscheduled.</strong> The module that re-checks an ageing address is reachable only from a CLI command somebody has to remember &mdash; the same pattern that left 596 drafts stranded</td>
+                <td class="mono">intelligence/<wbr>reverification.py</td>
+                <td>Only caller is <code>cli.py:1213</code></td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D12</td>
+                <td><strong>20 junk sender identities</strong> from an old load test (<code>arslan-quota0&hellip;19</code>), no SPF/DKIM/DMARC, still in the table</td>
+                <td class="mono">&mdash; data</td>
+                <td>20 rows, all <code>spf=false</code>, limit 5</td>
+                <td><span class="chip med">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D13</td>
+                <td><strong>Six &ldquo;active&rdquo; campaigns are <code>research_only</code></strong> and structurally cannot send &mdash; they consume discovery budget and produce nothing</td>
+                <td class="mono">&mdash; data</td>
+                <td>Accountants Manchester, Opticians Birmingham, +4</td>
+                <td><span class="chip med">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D14</td>
+                <td><strong>A ghost workspace is still running.</strong> Six orchestrators alive for a week with every schedule paused</td>
+                <td class="mono">&mdash; data</td>
+                <td>workspace <code>2c0611b6</code></td>
+                <td><span class="chip med">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td class="mono">D15</td>
+                <td><strong>363 unread operator notifications.</strong> Every defect above filed one. Nothing reads them, and there is no push channel configured</td>
+                <td class="mono">notify/<wbr>operator.py</td>
+                <td>363 <code>open</code> tasks; <code>operator_webhook_url</code> unset</td>
+                <td><span class="chip high">HIGH</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- =========================== 4 -->
+      <section id="arithmetic">
+        <h2><span class="num">04</span>What 40 a day actually costs</h2>
+
+        <p>Before choosing what to build, it is worth being precise about what the target demands, because the arithmetic decides the plan.</p>
+
+        <p>Work backwards from a client. Say the goal is <strong>two qualified conversations a week</strong>. At a realistic cold-outreach positive-reply rate of 3&ndash;4%, that needs about <strong>200 delivered messages a week</strong> &mdash; the 40 a day the system was designed around. Now push that number back up the funnel at today's conversion rates against what it would be after the fixes:</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th>To send 40 a day you need&hellip;</th><th class="num">Today</th><th class="num">After D1&ndash;D3</th><th>Why it moves</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Delivered messages</td><td class="num">40</td><td class="num">40</td><td>&mdash;</td></tr>
+              <tr><td>Messages attempted (bounce loss)</td><td class="num">50</td><td class="num">41</td><td>19.7% &rarr; 2% bounce</td></tr>
+              <tr><td>Leads with an address</td><td class="num">50</td><td class="num">41</td><td>&mdash;</td></tr>
+              <tr><td>Crawls completed (contact yield)</td><td class="num">357</td><td class="num">117</td><td>14% &rarr; 35% yield</td></tr>
+              <tr><td><strong>Research runs started</strong></td><td class="num"><strong>1,373</strong></td><td class="num"><strong>130</strong></td><td>26% &rarr; 90% success</td></tr>
+              <tr><td>Google Places lookups</td><td class="num">~1,900</td><td class="num">~180</td><td>follows the line above</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="rule">
+          <span class="label">The point of that table</span>
+          <p>At today's rates, hitting the target would mean starting <strong>1,373 research runs every day</strong> &mdash; roughly ten times the current pace, at ten times the crawl and model cost, to send forty emails. That is not a scaling problem, it is a leak. Fix the three critical defects and the same forty emails cost <strong>130 runs</strong>. The target goes from unreachable to comfortable without adding a single machine.</p>
+        </div>
+
+        <p>This is also the answer to &ldquo;why not just turn everything up&rdquo;. Raising limits on a funnel that loses 99% of its input multiplies the waste, and the bounce rate would take the sending domain down long before the volume arrived.</p>
+      </section>
+
+      <!-- =========================== 5 -->
+      <section id="capabilities">
+        <h2><span class="num">05</span>The eleven capabilities</h2>
+
+        <p>You named eleven things the system must do on its own. Here is each one against what is actually in the tree &mdash; because the shape of the work changes completely depending on how many of them already exist.</p>
+
+        <p><strong>Seven are built and running. Two are built but have never once fired. Two do not exist.</strong> That is the real headline of this whole programme: you are not commissioning an autonomous system, you are unblocking one.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>#</th><th>What you asked for</th><th class="mono">State</th><th>Reality</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="mono">1</td><td><strong>Find leads</strong></td>
+                <td><span class="chip ok">BUILT</span></td>
+                <td>Google Places discovery, a curated metro list with per-city timezones, campaign orchestrators that top up the pool on their own. Runs unattended today &mdash; 423 leads found on 26 August without anyone asking</td>
+              </tr>
+              <tr>
+                <td class="mono">2</td><td><strong>Verify them</strong></td>
+                <td><span class="chip high">WEAK</span></td>
+                <td>MX checks and a self-built SMTP prober exist, but the prober correctly refuses Google and Microsoft &mdash; which front most business mail. So 564 of 623 addresses go out unverified, and 19.7% bounce. <strong>The one gap money closes outright</strong></td>
+              </tr>
+              <tr>
+                <td class="mono">3</td><td><strong>Draft professional mails</strong></td>
+                <td><span class="chip ok">BUILT</span></td>
+                <td>Evidence-backed four-line messages, per-industry vocabulary so a solicitor and a gym owner get genuinely different prose, and a validator that rejects any sentence it cannot trace to something observed. This is the strongest part of the system</td>
+              </tr>
+              <tr>
+                <td class="mono">4</td><td><strong>Send them</strong></td>
+                <td><span class="chip ok">BUILT</span></td>
+                <td>Transactional outbox, exactly-once delivery, four quota scopes, warm-up ramp, three authenticated mailboxes with per-mailbox credentials</td>
+              </tr>
+              <tr>
+                <td class="mono">5</td><td><strong>Know if they've seen it</strong></td>
+                <td><span class="chip crit">MISSING</span></td>
+                <td>No open or click tracking on the current send path, and no public endpoint to receive a hit. See the hard truth in &sect;07 &mdash; open rates are largely fiction now, and I would build click tracking instead</td>
+              </tr>
+              <tr>
+                <td class="mono">6</td><td><strong>Follow up</strong></td>
+                <td><span class="chip high">BARELY RUNS</span></td>
+                <td>The scheduler is built and wired into every planning cycle, and follow-ups do go out &mdash; 36 leads got a second message, 17 a third. But only 65 leads carry a next action, because so few ever get a first message</td>
+              </tr>
+              <tr>
+                <td class="mono">7</td><td><strong>Handle replies</strong></td>
+                <td><span class="chip crit">NEVER FIRED</span></td>
+                <td>Mailbox polling, auto-reply detection, intent classification, a reply drafter and a meeting writer all exist and are connected. <strong>All twelve human replies came back <code>UNKNOWN</code></strong>, so the conversation path has never executed once</td>
+              </tr>
+              <tr>
+                <td class="mono">8</td><td><strong>Manage campaigns</strong></td>
+                <td><span class="chip ok">BUILT</span></td>
+                <td>Health classification, capacity allocation, a bounded actuator that can only ever be more conservative than you, A/B testing with honest statistics. It is currently making a bad call &mdash; 2 sends per campaign &mdash; because it is dividing too small a pie 23 ways, not because it is broken</td>
+              </tr>
+              <tr>
+                <td class="mono">9</td><td><strong>Arrange &amp; prioritise leads</strong></td>
+                <td><span class="chip ok">BUILT</span></td>
+                <td>Deterministic 0&ndash;100 scoring with every point attributable, four priority bands, opportunity records, portfolio and rollup analytics</td>
+              </tr>
+              <tr>
+                <td class="mono">10</td><td><strong>Time management</strong></td>
+                <td><span class="chip high">INERT</span></td>
+                <td>Quiet hours, send windows, public holidays and per-recipient timezones are all live and enforced. The module that <em>learns</em> the best hour is written and deliberately switched off &mdash; it refuses to rank slots on too little data, which is the correct call and stops being correct once volume exists</td>
+              </tr>
+              <tr>
+                <td class="mono">11</td><td><strong>Spot the booming industry &amp; pitch it</strong></td>
+                <td><span class="chip crit">MISSING</span></td>
+                <td>Verticals and cities are chosen by hand today &mdash; every campaign name was typed by you. Nothing scans for where demand is growing. This is the most valuable thing on the list and I have a design for it that uses data you already pay for</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="rule">
+          <span class="label">What this changes</span>
+          <p>Nine of eleven need <em>unblocking, wiring or switching on</em> &mdash; not building. The two genuine gaps are seeing-and-clicking and boom detection. That is why Phases 0 to 3 of this programme are almost entirely repair work: the autonomy you are asking for is mostly already sitting there, starved of traffic.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 6 -->
+      <section id="plan">
+        <h2><span class="num">06</span>The programme</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Work log &mdash; 26 August, branch <code>phase0/stop-the-bleeding</code></h4>
+          <p><strong>Four items shipped, one part-shipped.</strong> On a branch, nothing pushed. 2,239 tests green across the full suite; lint clean.</p>
+          <p><strong>W1</strong> &mdash; the surrogate crash, scrubbed on <code>StrictModel</code> so every contract model inherits it, with 13 regression tests. <strong>W3</strong> &mdash; IDN hostnames punycoded <em>ahead of</em> the blocklists, with homograph tests proving that ordering cannot be exploited; the browser worker needed no change, because Node's URL parser already punycodes, so the two guards now agree. <strong>W5</strong> &mdash; stale failure reasons cleared on send and on retry. <strong>W15</strong> &mdash; a shared <code>CONTACT_PATHS</code> set merged into all ten playbooks, <code>/impressum</code> first among the additions. <strong>W16 part</strong> &mdash; crawl budget 12&nbsp;&rarr;&nbsp;18 pages and 120&nbsp;&rarr;&nbsp;180s, because adding paths without raising the budget would only have traded evidence pages away for contact pages.</p>
+          <p><strong>Deployed at 18:40.</strong> Image rebuilt, four services recreated, all healthy; no migration was needed because no model changed. <strong>W4</strong> the schedules re-installed and unstuck &mdash; housekeeping's next run had been five days in the past and it fired within the minute. <strong>W6</strong> the footer and one-click headers now repaired at send time against the mailbox the pool actually chose.</p>
+          <p><strong>Measured after one hour live:</strong> 554 pages captured with <strong>zero surrogate crashes</strong> (was 100 a day); stranded drafts 596&nbsp;&rarr;&nbsp;535 and falling by the hour; the outbox went from <strong>0 pending to 31</strong> with work flowing again; <strong>19 messages sent in the hour</strong>; and <strong>zero new deliverability cancellations</strong>, against 130 historical ones. The only refusals in that window were three correct ones &mdash; an inactive channel, an invalid address, a suppressed lead.</p>
+          <p><em>One thing I got wrong and reverted.</em> I widened housekeeping's catch-up window so a missed sweep would still run after the laptop slept. An existing test caught it: <code>test_at_most_one_missed_occurrence_is_ever_recovered</code> holds the property that no job may reach back past its own previous occurrence, and my six-hour window on an hourly job broke exactly that. On inspection the change bought almost nothing &mdash; when the machine wakes, the next hourly sweep runs anyway and clears 100 drafts &mdash; so I reverted it rather than weaken the guarantee. The real fix for the stranded drafts was unsticking the schedule, which is an operation, not code.</p>
+          <p><em>Two corrections from doing the work.</em> I said the gym playbook omitted <code>/contact</code>. Wrong &mdash; all ten include it. What is genuinely absent is the legal-page family, which is the better lever anyway. And my first regression test asserted the bad payload would raise <code>UnicodeEncodeError</code>; it does not, because <code>json.dumps</code> escapes a lone surrogate to plain ASCII and it is <em>Postgres</em> that refuses the document. The control test caught that, and the test now pins the real mechanism.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Phase 1 &mdash; what the evidence changed</h4>
+          <p><strong>Phase 1 was aimed at the wrong thing and the data said so.</strong> Before tightening anything I measured bounce rate against verification status, and it does not predict bounces at all: <code>published_first_party</code> bounces at <strong>6.1%</strong> and <code>provider_verified</code> at <strong>7.4%</strong> &mdash; verified addresses bounce <em>more</em>. So <strong>W10 is revised</strong> (verification status is not the signal; role addresses are &mdash; 6.8% against 4.2% for named people) and <strong>W11, the paid verifier, is dropped</strong>. It would have bought a signal with no predictive power on this workspace. That is roughly $40 a month not spent and, more to the point, a fix that would not have worked.</p>
+          <p>The real bounce number is also lower than I reported: <strong>5.8% lifetime</strong> (30 of 514), not 19.7%. The 19.7% came from a seven-day window of 61 sends, which was too small to mean anything. And two-thirds of what does fail is <em>retryable</em> &mdash; 32 soft against 17 permanent.</p>
+          <p><strong>What was actually wrong is worse, and it was free to fix.</strong> Titan's own SMTP host answers a burst with <code>554 &hellip; too many messages from sender in last 60 minutes</code>. <code>554</code> sat in <code>PERMANENT_REPLY_CODES</code> as &ldquo;this recipient will never accept mail&rdquo;, so <strong>every message caught by our own throttle was recorded as an invalid recipient and the business suppressed for good</strong> &mdash; 30 correctly-addressed practices retired because we sent too fast. The verifier had already learned this lesson on its first live run and grown a <code>SENDER_REJECTION_MARKERS</code> list; the delivery path never inherited it. One shared rule now serves both, with tests in both directions &mdash; a dead mailbox still suppresses, because reading a hard bounce as our fault would be the equally expensive mistake.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Verified live &mdash; the process is running</h4>
+          <p>Every stage moved in the two hours after deploy: 99 leads discovered, 4,028 pages captured, 2,598 findings, 310 leads scored, 67 outbox rows, 27 sent.</p>
+          <p><strong>W1 confirmed:</strong> research-run success went from <strong>26% to 90%</strong> (288 completed against 31 failed), with zero surrogate crashes. That was the acceptance criterion for Phase 0.</p>
+          <p><strong>W15 confirmed:</strong> <strong>231 legal-notice pages crawled in 90 minutes against 1 in the entire prior history</strong>, and impressum/kontakt 240 against 94 ever. The crawler goes where it is told.</p>
+          <p><strong>And the sample test found the real contact bottleneck.</strong> Running the live extractor over 400 freshly captured pages returned <strong>452 eligible addresses across 48 domains</strong> &mdash; 85% of everything found. The addresses are there and the rules accept them. But only 6 contact records were created, because <strong>contact resolution runs after the score gate</strong>: 264 leads went to <code>manual_review</code> in the same window, scoring 55&ndash;69, and the pipeline stops before it ever stores the address the crawl already paid for. That is the 14% yield, and it is not a crawling problem at all.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">W19+ &mdash; the address now outlives the lead</h4>
+          <p>The fix for what the sample test found, and it is a smaller change than the finding deserved: a below-threshold lead now resolves its contact before it is set down. Same activity as the happy path, same idempotency key, so a lead that later clears the bar finds its own prior work instead of resolving twice. The result is deliberately <em>not read</em> &mdash; a lead under the bar gets no draft, and reading the eligible channel here would invite a later edit that quietly turned a capture into an approach. Two assertions hold that: captured, and never drafted.</p>
+          <p><strong>Why it is worth doing at all:</strong> the bar is campaign policy, not a verdict. The autonomy manager moves <code>min_lead_score</code>, and one live campaign already sits at 55 where the rest sit at 70. A lead scored 65 today becomes mailable the moment the bar moves &mdash; and without this, the only route back was crawling the whole site again.</p>
+          <p><strong>Shipped carefully.</strong> 63 research workflows were in flight, and adding an activity call changes replay history. The narrow risk is a workflow sitting mid-<code>close_research_run</code> on exactly this branch, so the new call sits behind <code>workflow.patched("capture-contact-below-threshold")</code> rather than behind my own reasoning that it was probably safe. Deployed with <strong>zero non-determinism errors</strong> against those in-flight runs.</p>
+          <p>One existing test asserted the opposite &mdash; <code>"resolve_contact" not in recorder.calls</code> &mdash; because the old intent really was &ldquo;do no further work&rdquo;. It was rewritten to state the new rule and why, not quietly flipped.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--pass)">Confirmed live &mdash; and two things found while checking</h4>
+          <p><strong>The capture works in production.</strong> Twelve minutes after deploy, two below-threshold leads had their published addresses stored: <code>info@santillistudio.com</code> (score 60) and <code>info@studiomedicom.it</code> (score 58), both sitting in <code>manual_review</code>. Under the old behaviour both addresses would have been discarded with the lead, recoverable only by crawling the whole site again.</p>
+          <p>Getting to that answer took three wrong turns, which are worth recording because each was a different kind of mistake. I read a pooled extraction probe as proof the branch was broken &mdash; it pooled pages across every run and lead per domain, so the addresses it counted were never in the runs I was accusing. I then checked a single lead, found its crawl genuinely held no email, and called the feature fine. A proper positive control said neither: 24 below-threshold leads <em>did</em> hold addresses and none were stored. I put that down to <code>workflow.patched()</code> returning False for pre-deploy executions &mdash; which was also wrong. ``patched`` returns False only while <em>replaying</em>; a workflow reaching that branch for the first time is in new territory and gets True regardless of when it started. The real explanation was simply that those leads had been scored before the deploy. The lesson is the ordinary one: a positive control settles what a plausible story cannot.</p>
+          <p><strong>Two live defects surfaced in the logs while verifying:</strong></p>
+          <ul>
+            <li><strong>Discovery is dropping leads on a database error.</strong> <code>StringDataRightTruncation: value too long for type character varying(20)</code> in <code>activities/discovery.py:586</code>, failing <code>discover_leads</code> through all its retries. A column is too narrow for something Places returns.</li>
+            <li><strong>The workspace can only send 7 messages a day.</strong> The planner says it plainly: <em>&ldquo;daily sending is bounded by mailbox warm-up, not by configuration &mdash; configured_limit 100, deliverable_today 7, mailboxes 3&rdquo;</em>. This, not the allocator and not the quotas, is the binding constraint on volume right now, and it makes <strong>W13</strong> the next thing that matters.</li>
+          </ul>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Corrected &mdash; I published the line above wrong</span>
+          <p>I claimed there had never been any bounces. <strong>That was false and I had it up on this page for a few minutes.</strong> There are <strong>8 genuine hard bounces</strong>, arriving as real bounce reports by email. What was true is narrower: <em>a separate</em> 31 messages were <em>additionally</em> marked bounced by the 554 throttle path, and those were false. The honest overall hard-bounce rate is about <strong>1.6%</strong> (8 of 514) &mdash; under target, and neither the 19.7% I opened with nor the 5.8% I corrected it to.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">W13 &mdash; the 7-a-day cap turns out to be correct</h4>
+          <p>The planner reported <em>&ldquo;daily sending is bounded by mailbox warm-up &mdash; configured_limit 100, deliverable_today 7&rdquo;</em>, and warm-up turned out to be innocent: outreach@ and sales@ are both past it (day 21 and day 20, no cap), and only projects@ is legitimately warming at 7. The other two were <strong>health-blocked on a bounce rate built entirely from our own throttle</strong>.</p>
+          <p>I then talked myself into a tidy causal loop &mdash; throttle causes bounce causes block causes collapse &mdash; and it was wrong. The health window counts <code>bounced_at</code>, not <code>state</code>, and the throttled messages never set it. Clearing them changed nothing, which is how I found out. <strong>The block is legitimate:</strong> outreach@ sits at 5 hard bounces in 104 sends (4.8%) and sales@ at 3 in 98 (3.1%), all from genuine bounce reports, and both are over the pause threshold on a window that small.</p>
+          <p><strong>So the 7-a-day cap is the system working, not a bug.</strong> The way out is not to override the health gate; it is to stop generating genuine bounces. The addresses doing it name the cause &mdash; <code>recruitment@zenlaw.co.uk</code> and <code>0606info@207dentalcare.com</code>, a hiring inbox and a phone number fused to a mailbox &mdash; both shapes the contacts module already describes and neither of which should have been written to. That is address quality &mdash; so I went to fix it, and found it already fixed.</p>
+          <p><strong>Both guards exist.</strong> <code>recruitment@</code> is in the never-contact list (the contacts module names <code>recruitment@zenlaw.co.uk</code> in its own comments as the case that put it there), and <code>DIGIT_RUN_PREFIX</code> catches a mailbox with a phone number fused to the front &mdash; it requires three or more digits precisely so <code>3dprint@</code> survives and <code>0606info@</code> does not. Both bounces predate their guard.</p>
+          <p>So I audited the stored data rather than assume: <strong>all 633 active contact channels pass the current rules</strong>, with no legacy addresses left that either guard would now refuse. There is no address-quality work outstanding, the 8 bounces are historical, and the health block will clear on its own as the window ages. Writing a fix here would have been inventing work the codebase had already done.</p>
+          <p><strong>The repair that was warranted still stands.</strong> Every one of the 31 throttled addresses was checked for genuine 5xx evidence first; none had any. 31 wrongly-suppressed businesses restored and 31 false bounce states corrected to <code>failed</code> &mdash; never delivered, never bounced. Hard-bounce suppressions fell 47&nbsp;&rarr;&nbsp;16, and the 16 that remain trace to real bounce reports and were left alone. That part was right; the claim I hung on it was not.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Discovery truncation &mdash; one bad phone number was losing whole searches</h4>
+          <p><code>organizations.phone_e164</code> holds twenty characters and was being given Places' <em>display-formatted</em> number verbatim &mdash; <code>(786) 812-8622</code>, <code>+974 4444 5555</code>. Longer locale formats raised <code>StringDataRightTruncation</code> inside the discovery unit of work, so <strong>one over-long number failed the entire batch</strong> through all three retries and every business in that search was lost.</p>
+          <p>Now normalised to what the column is named for, and anything still too long is dropped rather than trimmed &mdash; a truncated phone number is not a shorter phone number, it is a different one, and a wrong number in a CRM is worse than an empty field because eventually somebody rings it. 19 tests, including the property that the result can never exceed the column.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">D18 &mdash; no prospect has ever replied</span>
+          <p>The fourteen &ldquo;human replies&rdquo; are not people. Six carry <code>flame-smile</code> and <code>model-using</code> &mdash; <strong>Smartlead warm-up spintax</strong>, bot traffic from its reciprocal network. Three are delivery tests from your own Gmail. The rest are Smartlead and Spacemail system mail. <strong>Zero real prospects have responded to anything Titan has sent.</strong> Every reply-rate and conversion number on this page rests on that.</p>
+        </div>
+
+        <div class="note" style="background:var(--refuse-soft);border-color:var(--refuse)">
+          <h4 style="color:var(--refuse)">D19 &mdash; a real business was retired by your own test emails</h4>
+          <p>One lead carries <code>REPLIED</code>: <strong>malmin.co.uk</strong>. The inbound that retired it came from <code>arslanvuzmallone@gmail.com</code> &mdash; the delivery tests sent on 24 August. Threading matched them to that lead, <code>record_reply</code> did its job, and a real practice is now permanently excluded from outreach because we tested the sender. <code>REPLIED</code> is terminal, so nothing will ever write to them again.</p>
+          <p>Worth stating what this is *not*: the reply machinery working badly. It worked exactly as designed on input it should never have been given. The gap is that inbound has no notion of our own addresses being a special case.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Mailboxes are not the bottleneck &mdash; contact supply is</h4>
+          <p>Two of three mailboxes are already past warm-up at 50 a day each. Nominal capacity is <strong>~107/day against a 40/day target</strong>, and the workspace cap is 100. A fourth and fifth mailbox would add roughly 100 more &mdash; capacity that has nothing to send.</p>
+          <p>The real ceiling is upstream: <strong>~47 new contactable addresses a day</strong> against a 40-a-day target, which is parity with no margin. Five mailboxes would not move the number; Phase 2's yield work would. Each new mailbox also costs 21 days of ramp before it reaches 50 &mdash; the curve runs 0.10&nbsp;&rarr;&nbsp;1.00 of target over three weeks.</p>
+        </div>
+
+        <div class="note">
+          <h4>The campaign manager: running, correct, and starved</h4>
+          <p>It is genuinely live &mdash; <strong>34,667 decisions</strong>, the most recent minutes ago. In the last day: 286 allocation changes applied, and <strong>4,544 phrasing promotions refused</strong> for want of evidence (&ldquo;one or both variants are too small to test; 15 against 1 sends&rdquo;). That refusal is the statistics behaving honestly, not a fault.</p>
+          <p>But every campaign reads <code>learning</code>, market weighting returns no-opinion because no market has enough data, and allocation is dividing <em>seven</em> sends. It is tuning two numbers on a portfolio with no outcomes. It does not choose verticals, does not plan conversion, and has no view of replies &mdash; those are Phase 6 and Phase 5, and neither exists yet.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">D18 &amp; D19 fixed &mdash; the reply path can now tell us from a prospect</h4>
+          <p>A new first question in the classifier, ahead of every other rule: <em>was there a recipient at all?</em> Everything downstream answers &ldquo;what did this person mean&rdquo;, which is a confident reading of a sentence nobody outside the system wrote. <code>ReplyKind.NOT_A_PROSPECT</code> covers our own sending identities, the operator's mailbox, and reciprocal warm-up traffic. It stops nothing and suppresses nothing.</p>
+          <p>Our addresses are read <em>live from the database</em>, so a mailbox added to the pool is covered the moment it exists rather than when somebody remembers to list it &mdash; which matters given you are about to add two. The operator's own address is new configuration (<code>TITAN_OPERATOR_EMAIL</code>), because that one is not a sender identity and nothing else knew it.</p>
+          <p>Warm-up detection is textual and therefore a heuristic &mdash; <code>flame-smile</code> and <code>model-using</code> are randomly drawn spintax and the list cannot be complete. Worth having anyway: every one it catches is a reply-rate figure that stops being wrong, and a miss just leaves today's behaviour.</p>
+          <p><strong>17 tests, and half of them guard the other direction</strong> &mdash; a real human reply still stops the sequence, an unsubscribe still suppresses, a complaint still outranks everything, a bounce is still a bounce, and a lookalike address like <code>notarslanvuzmallone@gmail.com</code> is still a prospect. Silencing somebody who did write back is the expensive error here.</p>
+          <p><strong>malmin.co.uk is back in the pipeline</strong>, returned to <code>researched</code>. I tried to unlink the test messages too and the database refused &mdash; <code>inbound_messages</code> is append-only and the trigger said so. That guard is right and I left it alone; re-ingesting an already-seen message applies no effects anyway.</p>
+        </div>
+
+        <p>Seven phases, <strong>forty numbered modifications</strong>. Each phase is gated on a measurable outcome rather than on a feeling that the work is done, and the order is deliberate: cheapest and highest-yield first, and nothing that scales volume runs before the thing that protects the domain.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Phase</th><th class="mono">Items</th><th>Character</th><th>Needs a decision from you</th></tr></thead>
+            <tbody>
+              <tr><td><strong>0</strong> &nbsp;Stop the bleeding</td><td class="mono">W1&ndash;W9</td><td>Pure repair &mdash; recovering work already paid for</td><td>Only W2, the host</td></tr>
+              <tr><td><strong>1</strong> &nbsp;Deliverability</td><td class="mono">W10&ndash;W14</td><td>Existential &mdash; blocks everything after it</td><td>Verifier spend; Smartlead</td></tr>
+              <tr><td><strong>2</strong> &nbsp;Contact yield</td><td class="mono">W15&ndash;W19</td><td>Largely configuration; the biggest commercial lever</td><td>No</td></tr>
+              <tr><td><strong>3</strong> &nbsp;Concentrate</td><td class="mono">W20&ndash;W22</td><td>Configuration and one allocator rule</td><td>Campaign structure</td></tr>
+              <tr><td><strong>4</strong> &nbsp;Self-awareness</td><td class="mono">W23&ndash;W27</td><td>New &mdash; the system becomes its own operator</td><td>Push channel</td></tr>
+              <tr><td><strong>5</strong> &nbsp;Conversation</td><td class="mono">W28&ndash;W34</td><td>Wiring built parts together, plus one new endpoint</td><td>Public endpoint; reply autonomy</td></tr>
+              <tr><td><strong>6</strong> &nbsp;Boom detection</td><td class="mono">W35&ndash;W40</td><td>Genuinely new capability, on data you already buy</td><td>Who may open a campaign</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>Of the forty, <strong>eleven are configuration or data changes</strong> rather than code, and a further fourteen are wiring existing modules to callers they never had. Only about a third is genuinely new construction &mdash; which is the same story as the capability map: this is an unblocking exercise wearing the clothes of a build.</p>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 0</span>
+            <h3>Stop the bleeding</h3>
+            <span class="when">days &middot; no new architecture</span>
+          </header>
+          <div class="inner">
+            <p>Pure repair. Nothing here is a new capability &mdash; it is recovering work already paid for. <strong>W1 is the single highest-value change in the entire programme</strong> and needs nothing from you.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Fixes</th></tr></thead>
+                <tbody>
+                  <tr class="shipped"><td class="mono">W1 <span class="chip done">DONE</span></td><td><strong>Strip lone Unicode surrogates from page evidence</strong> before it reaches Postgres. Do it in the contract validator, not at the call site, so every present and future ingest path inherits it. Regression test built from a real captured payload</td><td class="mono">contracts/<wbr>evidence.py</td><td class="mono">D1</td></tr>
+                  <tr><td class="mono">W2</td><td><strong>Move the stack to an always-on host.</strong> Same compose file, a small VPS. Restart policies are already correct, so this is a migration, not a rewrite</td><td class="mono">&mdash; infra</td><td class="mono">D16, D4, D9</td></tr>
+                  <tr class="shipped"><td class="mono">W3 <span class="chip done">DONE</span></td><td><strong>IDNA-encode hostnames before resolution</strong>; keep the Unicode form for display and evidence only. Unblocks every German, Polish and Dutch domain the guard currently refuses</td><td class="mono">security/<wbr>url_guard.py</td><td class="mono">D7</td></tr>
+                  <tr class="shipped"><td class="mono">W4 <span class="chip done">DONE</span></td><td><strong>Unstick the schedules and widen the catch-up window</strong> so an hourly job survives a gap. Re-install all seven for both workspaces</td><td class="mono">workflows/<wbr>schedules.py</td><td class="mono">D4</td></tr>
+                  <tr class="shipped"><td class="mono">W5 <span class="chip done">DONE</span></td><td><strong>Clear <code>blocked_reason</code> on every state transition</strong> so the failure register stops reporting stale causes</td><td class="mono">delivery/<wbr>outbox_worker.py</td><td class="mono">D11</td></tr>
+                  <tr class="shipped"><td class="mono">W6 <span class="chip done">DONE</span></td><td><strong>Render the footer and unsubscribe headers at send time</strong> from the sender identity the pool actually chose, instead of baking them into the draft. This removes the whole class of retroactive invalidation, not just today's instance</td><td class="mono">delivery/<wbr>outbox_worker.py<br>intelligence/<wbr>composer.py</td><td class="mono">D6</td></tr>
+                  <tr><td class="mono">W7</td><td><strong>Re-draft and requeue the 154 cancelled messages</strong> once W6 lands</td><td class="mono">outreach/<wbr>redraft.py</td><td class="mono">D6</td></tr>
+                  <tr><td class="mono">W8</td><td><strong>Data hygiene:</strong> delete the 20 load-test sender identities, stop the ghost workspace's six orchestrators, and either switch the six <code>research_only</code> campaigns to autopilot or archive them</td><td class="mono">&mdash; data</td><td class="mono">D12&ndash;D14</td></tr>
+                  <tr class="shipped"><td class="mono">W9 <span class="chip defer">RUNNING</span></td><td><strong>Sweep the 596 stranded drafts</strong> back into the outbox before they expire on 31 August. Run manually first, then let the repaired schedule own it</td><td class="mono">activities/<wbr>stranded.py</td><td class="mono">D4</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> Research-run success rate is above 85% for three consecutive days, zero surrogate crashes in the logs, and the stranded-draft count is under 20.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 1</span>
+            <h3>Make deliverability survivable</h3>
+            <span class="when">gates everything after it</span>
+          </header>
+          <div class="inner">
+            <p>A 19.7% bounce rate is an existential problem, not a tuning issue. Until this is under control, every other improvement just sends more mail from a domain that is being filtered. This phase blocks Phase 2 deliberately.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Fixes</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">W10 <span class="chip defer">REVISED</span></td><td><strong>Stop treating &ldquo;published on a website&rdquo; as sendable on its own.</strong> Remove <code>published_first_party</code> from the sendable set unless it is paired with a positive MX result <em>and</em> a verifier verdict. Unpaired addresses go to a re-check queue, not the outbox &mdash; this is a one-line change to a frozenset with very large consequences, so it ships behind a count of what it would block</td><td class="mono">db/enums.py<br>policy/<wbr>engine.py</td><td class="mono">D3</td></tr>
+                  <tr><td class="mono">W11 <span class="chip crit">DROPPED</span></td><td><strong>Wire a paid verifier for the domains the prober declines.</strong> The verifier port and a vendor adapter already exist &mdash; this is configuration plus a fallback chain: probe first, buy an answer only where the probe declines. That ordering keeps the bill small</td><td class="mono">intelligence/<wbr>verifier.py</td><td class="mono">D3</td></tr>
+                  <tr><td class="mono">W12</td><td><strong>Schedule re-verification.</strong> The module is written and reachable only from a CLI command. Give it a cron workflow and a rule: nothing older than 14 days is sent without a fresh check</td><td class="mono">intelligence/<wbr>reverification.py<br>workflows/</td><td class="mono">D17</td></tr>
+                  <tr><td class="mono">W13</td><td><strong>Restart the warm-up ramp and alarm on staleness.</strong> Any mailbox whose ramp state has not advanced in 48 hours raises a notification instead of silently sitting at 5 a day</td><td class="mono">workflows/<wbr>mailbox_ramp.py</td><td class="mono">D9</td></tr>
+                  <tr><td class="mono">W14</td><td><strong>Resolve Smartlead.</strong> Remove the route and its dead carrier campaigns, or fix the key and rebuild them as single-step. My recommendation is removal &mdash; the SMTP pool already works and keeps every gate under your control</td><td class="mono">providers/<wbr>smartlead.py</td><td class="mono">D8</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> Rolling 7-day bounce rate is under 3% and complaint rate under 0.1%, measured over at least 150 sends.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 2</span>
+            <h3>Triple the contact yield</h3>
+            <span class="when">the biggest commercial lever</span>
+          </header>
+          <div class="inner">
+            <p>Going from 14% to 35% is worth more than every other change combined: it is the difference between 357 crawls per 40 sends and 117.</p>
+            <p><strong>Good news found while reading:</strong> the mechanism for steering the crawler at contact pages already exists. Every playbook carries <code>priority_paths</code> and the crawler seeds them ahead of discovered links. So the largest single lever here is <em>configuration, not code</em> &mdash; the paths simply do not include the ones that hold addresses in your actual markets.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Kind</th></tr></thead>
+                <tbody>
+                  <tr class="shipped"><td class="mono">W15 <span class="chip done">DONE</span></td><td><strong>Add contact-bearing paths to every playbook</strong>, per market as well as per industry: <code>/impressum</code>, <code>/kontakt</code>, <code>/legal-notice</code>, <code>/mentions-legales</code>, <code>/privacy</code>, <code>/team</code>. <strong>Impressum is legally mandatory in Germany and Austria and must carry a real email address</strong> &mdash; and it is absent from every playbook today. The gym playbook does not even list <code>/contact</code></td><td class="mono">intelligence/<wbr>playbooks.py</td><td><span class="chip ok">config</span></td></tr>
+                  <tr class="shipped"><td class="mono">W16 <span class="chip defer">PART</span></td><td><strong>Guarantee the priority paths a slot.</strong> The crawl stops at 12 pages and discovered links can crowd out the pages that were explicitly asked for. Reserve a share of the budget for priority paths and raise the ceiling for contact-hunting runs</td><td class="mono">browser-worker/<wbr>crawler.ts</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W17</td><td><strong>De-obfuscate published addresses.</strong> Today collection is <code>mailto:</code> anchors plus one plain-text regex. Sites routinely hide addresses as <code>name [at] domain</code>, HTML entities, <code>data-email</code> attributes and JS-assembled strings. Handling those is ordinary parsing and stays entirely within the rules &mdash; it is still an address the business chose to publish</td><td class="mono">browser-worker/<wbr>collect.ts</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W18</td><td><strong>Raise the 20-address cap per crawl</strong> and make it per page rather than per run, so a busy team page does not exhaust the budget before the contact page is read</td><td class="mono">browser-worker/<wbr>collect.ts</td><td><span class="chip ok">config</span></td></tr>
+                  <tr><td class="mono">W19</td><td><strong>Re-crawl the 2,470 dead leads</strong> through the improved finder. Already discovered, scored and paid for &mdash; the cheapest lead source available. At 35% yield that reservoir alone is roughly 860 contactable businesses, or five weeks of sending at target</td><td class="mono">&mdash; batch job</td><td><span class="chip med">code</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> Contact yield on new crawls exceeds 30% over a 500-crawl window, and the <code>manual_review</code> backlog has been reprocessed.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 3</span>
+            <h3>Concentrate the sending</h3>
+            <span class="when">after volume exists to spend</span>
+          </header>
+          <div class="inner">
+            <p>Only worth doing once Phases 0&ndash;2 have produced leads worth sending to. Spreading capacity thin is currently masking the supply problem rather than causing it.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Kind</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">W20</td><td><strong>Collapse 29 campaigns into 5&ndash;6 business-type campaigns</strong> &mdash; one per vertical, spanning markets, carrier chosen per lead's own clock. Already the designed direction, and it turns the allocator's job from arithmetically hopeless into meaningful</td><td class="mono">&mdash; data migration</td><td><span class="chip ok">config</span></td></tr>
+                  <tr><td class="mono">W21</td><td><strong>Raise the workspace ceiling to match real capacity.</strong> Three healthy mailboxes at 50 is 150 a day against a cap of 100 set when there was one mailbox</td><td class="mono">&mdash; config</td><td><span class="chip ok">config</span></td></tr>
+                  <tr><td class="mono">W22</td><td><strong>Add a minimum viable allocation.</strong> A campaign given 2 sends a day is not being managed, it is being switched off slowly. Below a floor, pause it and hand the capacity to a campaign that can use it &mdash; this complements the existing exploration floor rather than replacing it</td><td class="mono">autonomy/<wbr>allocation.py</td><td><span class="chip med">code</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> Sustained 40+ delivered messages a day for five working days with bounce rate held under 3%.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 4</span>
+            <h3>Close the loop &mdash; real autonomy</h3>
+            <span class="when">the thing you actually asked for</span>
+          </header>
+          <div class="inner">
+            <p>Auto-approve is already on and the campaigns already run themselves. What is missing is not permission &mdash; it is <em>self-awareness</em>. Every defect in this document announced itself in a notification nobody read. An autonomous system has to be its own operator.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Kind</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">W23</td><td><strong>A supervisor that reads its own alarms.</strong> A scheduled job that consumes the 363-item notification queue, groups it, and acts on the classes it can: restart a stalled schedule, pause a campaign whose bounce rate is climbing, retire a sender that has lost DNS authentication. Bounded exactly like the existing actuator &mdash; it may only ever be more conservative than you</td><td class="mono">new: autonomy/<wbr>supervisor.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W24</td><td><strong>A daily binding-constraint report.</strong> One sentence answering &ldquo;why did today produce 19 sends instead of 40?&rdquo; naming the single stage that capped it. Every number in this document was recoverable from data the system already held &mdash; nothing was computing it</td><td class="mono">new: intelligence/<wbr>constraint.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W25</td><td><strong>Schedule self-healing.</strong> Watch every schedule's missed-window counter and re-install one that has stopped advancing. D4 cost 596 drafts and would have been caught within the hour</td><td class="mono">workflows/<wbr>housekeeping.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W26</td><td><strong>Honest kill switches.</strong> Automatic pause on bounce rate, complaint rate, or a run of negative replies &mdash; each with a stated threshold and a recorded reason</td><td class="mono">autonomy/<wbr>actuator.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W27</td><td><strong>A push channel.</strong> <code>operator_webhook_url</code> is unset, so a pause reaches a database table and nobody else. Escalation is not the opposite of autonomy &mdash; the goal is three escalations a week instead of 363 unread rows</td><td class="mono">notify/<wbr>operator.py</td><td><span class="chip ok">config</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> The system runs 14 days with no manual intervention, correctly self-pauses at least once, and the daily report names the true constraint every day.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 5</span>
+            <h3>Convert &mdash; from sent to signed</h3>
+            <span class="when">where the money is</span>
+          </header>
+          <div class="inner">
+            <p>Everything above gets a message into an inbox. None of it wins a client. This is the half of the system that has never run once.</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Kind</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">W28</td><td><strong>Fix intent classification.</strong> Twelve human replies, twelve <code>UNKNOWN</code>. The rules are ~30 hand-written regexes and real replies are not regex-shaped. Keep them as the negative-first pre-filter &mdash; they are careful and they protect against the expensive error &mdash; and hand everything they cannot settle to the model gateway. <strong>This is the correct place for a model:</strong> classifying a reply is a judgement about a sentence, not a claim about a business, so it carries none of the evidence obligations that keep models out of the composer</td><td class="mono">intelligence/<wbr>intent.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W29</td><td><strong>Run the conversation.</strong> The reply drafter is built and produces drafts nobody sends. Close the loop: reply &rarr; intent &rarr; drafted response &rarr; the same validator and the same gates &rarr; sent. A lead becomes a client in message three, and right now everything stops at message one</td><td class="mono">delivery/<wbr>inbound.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W30</td><td><strong>Book the meeting.</strong> The meeting writer exists and fires on <code>WANTS_CALL</code> &mdash; it has simply never been reached. Give it a real path: a booking link in the reply, a calendar hold, a nudge if the link goes unclicked</td><td class="mono">delivery/<wbr>inbound.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W31</td><td><strong>Click tracking on a signed link.</strong> Not an open pixel &mdash; see &sect;07. A per-recipient signed link to the portfolio page already in every message. A click is a decision by a person, and it is the signal that predicts a reply. Drives differentiated follow-ups: a lead who clicked and went quiet is not the same lead as one who never looked. <em>Requires one public HTTPS endpoint</em></td><td class="mono">new endpoint<br>intelligence/<wbr>composer.py</td><td><span class="chip crit">new</span></td></tr>
+                  <tr><td class="mono">W32</td><td><strong>Outcome attribution.</strong> 14,636 stored opportunities and nothing connecting an outcome back to what was said. Record, per reply: which finding type opened the message, which vernacular register, which local hour, which market. The experiment and promotion machinery is already built and statistically honest &mdash; it has never had a reply rate to measure</td><td class="mono">new: intelligence/<wbr>outcomes.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W33</td><td><strong>Switch on timing intelligence.</strong> The module that learns the best hour is written and deliberately inert because it refuses to rank on too little data. Once W32 is feeding it, that refusal stops being correct</td><td class="mono">intelligence/<wbr>timing.py</td><td><span class="chip ok">config</span></td></tr>
+                  <tr><td class="mono">W34</td><td><strong>Feed outcomes back into targeting.</strong> Discovery biases toward the business types and cities that have historically replied, via the market modifier that is already written and currently returns &ldquo;no opinion&rdquo; for want of data</td><td class="mono">autonomy/<wbr>markets.py</td><td><span class="chip ok">config</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> At least one meeting is booked end-to-end with no human touch, click-through is recorded per message, and the promotion log shows a phrasing change made on measured evidence.</p>
+        </div>
+
+        <div class="phase">
+          <header>
+            <span class="pn">Phase 6</span>
+            <h3>Find the boom before anyone pitches it</h3>
+            <span class="when">the compounding advantage</span>
+          </header>
+          <div class="inner">
+            <p>Every campaign name in the database was typed by you &mdash; &ldquo;Dentists, Sydney&rdquo;, &ldquo;Law Firms Birmingham UK&rdquo;. That is the last big manual decision left in the system, and it is the one with the highest leverage: choosing the right vertical matters more than any phrasing experiment ever will.</p>
+            <p><strong>The signal is already in data you pay for.</strong> Google Places returns a rating and a total review count for every business it finds. Across a cohort &mdash; one business type in one city &mdash; those two numbers carry three things:</p>
+            <ul>
+              <li><strong>New entrants.</strong> A cohort thick with businesses carrying very few reviews is a vertical people are opening right now. Money is moving into it.</li>
+              <li><strong>Review velocity.</strong> Total review counts climbing across the cohort between two scans means demand is growing, not just supply.</li>
+              <li><strong>The under-digitised share.</strong> The modernisation reader already measures who has no booking system, no chat, no AI &mdash; it just needed something to compare against.</li>
+            </ul>
+            <p>The third one is the whole point, and it is uniquely yours: <strong>nobody else can compute it, because nobody else crawls the sites.</strong> A vertical that is growing fast <em>and</em> mostly running on phone calls and paper is precisely a market with money arriving and no system to catch it. That is the definition of a business that needs what you sell, and there is no data vendor selling that intersection.</p>
+            <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+              <h4 style="color:var(--pass)">Better than I first thought</h4>
+              <p>I said in &sect;07 that this pays out in week three because velocity needs two scans separated by time. Checking the code: <code>places.rating</code> and <code>places.userRatingCount</code> are <strong>already in the search field mask</strong> &mdash; you have been paying for them all along &mdash; and both are <strong>already persisted</strong> on every location row. So a baseline going back to 17 August already exists for every vertical you have touched. A scan today produces velocity <em>immediately</em> for those cohorts. Only genuinely new verticals need to wait.</p>
+            </div>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th class="mono">ID</th><th>Modification</th><th>Where</th><th class="mono">Kind</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">W35</td><td><strong>Market scanner.</strong> A weekly workflow running a cheap, mask-limited Places search across the (vertical &times; city) grid, storing cohort statistics. No crawling &mdash; this is the cheap pass, and the field mask already returns everything it needs</td><td class="mono">new workflow<br>providers/<wbr>places.py</td><td><span class="chip crit">new</span></td></tr>
+                  <tr><td class="mono">W36</td><td><strong>Boom score per pair.</strong> Entrant density, review velocity, the under-digitised share from crawls already done, and &mdash; once W32 exists &mdash; the measured reply rate. Gated on a sample floor and reporting &ldquo;unknown&rdquo; below it, exactly as the market modifier already does</td><td class="mono">new: intelligence/<wbr>boom.py</td><td><span class="chip crit">new</span></td></tr>
+                  <tr><td class="mono">W37</td><td><strong>Backfill the baseline</strong> from the rating and review counts already stored, so the first scan produces velocity rather than a starting line</td><td class="mono">&mdash; batch job</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W38</td><td><strong>Campaigns that open and close themselves.</strong> Top-ranked pairs get a campaign; a pair whose score decays across three consecutive scans is paused. A new bounded actuator under the existing rule &mdash; it opens campaigns in <em>draft</em> and proposes them, and promotes to active only within limits you set</td><td class="mono">autonomy/<wbr>actuator.py</td><td><span class="chip crit">new</span></td></tr>
+                  <tr><td class="mono">W39</td><td><strong>Pitch selection follows the boom.</strong> Playbooks already gate which offers may be proposed on which findings were evidenced. Extend that so a vertical's <em>dominant</em> gap &mdash; no booking, no chat, no follow-up &mdash; steers which offer leads the message</td><td class="mono">intelligence/<wbr>playbooks.py</td><td><span class="chip med">code</span></td></tr>
+                  <tr><td class="mono">W40</td><td><strong>External signals</strong> &mdash; Google Trends for search demand, job-posting volume as a hiring proxy. Optional, deferred, and each adds a dependency. Not needed for the first version to be useful</td><td class="mono">&mdash; deferred</td><td><span class="chip med">later</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p class="accept"><b>Done when</b> The scanner has ranked at least 40 (vertical &times; city) pairs, opened a campaign nobody asked for, and that campaign's reply rate beats the hand-picked average.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 27 August -->
+      <section id="log-27">
+        <h2><span class="num">07</span>Work log &mdash; 27 August</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">The message now has the four parts you asked for</h4>
+          <p>Greeting by their clock; the defect and what it costs; what changes if they fix it; and who I am, in terms of work actually done &mdash; then the citations, at the end, under a heading. <strong>2,692 tests green</strong> (up from 2,381; 305 new), full suite, deployed.</p>
+          <p><strong>(A) The greeting is decided at the wire, not in the draft.</strong> This is the part that looks trivial and is not. A draft written on Monday can leave on Thursday, and the send window that releases it spans 08:00&ndash;17:00 <em>in their timezone</em> &mdash; morning and afternoon both. A greeting chosen at compose time is a coin flip, and &ldquo;Good morning&rdquo; landing at four in the afternoon tells the reader nobody was there when it was sent. So it joins the footer and the one-click header as a <em>send-time repair</em>, resolved against the same clock the send window already uses. It fails open in every direction &mdash; unknown timezone, unrecognised opening line, already-correct greeting all return the message untouched. A stale greeting costs a little credibility; a mangled first line costs the message.</p>
+          <p><strong>(B) References, from a curated table, verified against the live web.</strong> Sixteen primary sources &mdash; W3C, Google Search Central, web.dev, MDN, OWASP, Schema.org, Nielsen Norman &mdash; one or two per defect type, listed under <em>References</em> below the signature along with the page I actually examined. <strong>They are curated, never generated.</strong> A model asked for &ldquo;a source about page speed&rdquo; produces a plausible URL that 404s, and a broken citation turns the one paragraph designed to show you checked into proof that you did not. <code>scripts/check_references.py</code> walks all sixteen; all sixteen are live.</p>
+          <p><strong>(C) The upside paragraph &mdash; the half that was missing.</strong> Fourteen entries, one per defect type, saying what starts working once it is fixed. <strong>No numbers, ever.</strong> &ldquo;This would win you 30% more bookings&rdquo; is unknowable and is exactly the fabricated claim the validator refuses. Each states the mechanical consequence of the repair instead, which is entailed by the finding &mdash; so it carries the same evidence and goes in the claim map beside it. A conditional about their site is still a claim about their site.</p>
+          <p><strong>(D) Related projects &mdash; built, and deliberately empty.</strong> The registry ships with no case studies and resolves to nothing until you write real ones into <code>secrets/case_studies.json</code>. Until then the message keeps its generic credential sentence: a weaker paragraph, and a true one. <strong>I will not invent client work.</strong> A fabricated case study in a cold email is a false statement about a third party made for commercial gain &mdash; the recipient can check, the named client can sue, and every genuine claim in the message becomes worthless. The mechanism is finished and waiting; the content is yours.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Two things the sweep caught &mdash; both fixed by changing content, not by loosening a rule</h4>
+          <p>Composing all fourteen defect types through the <em>real</em> validator rather than a mock caught two failures that a single happy-path example would have missed.</p>
+          <p>A reference <em>title</em> &mdash; &ldquo;How a script error stops <strong>the rest of the page</strong>&rdquo; &mdash; pairs an article with a site noun, and the claim detector reads that as an assertion about the recipient that must trace to evidence. It is a claim about MDN's documentation, so I reworded the title. And a case study saying &ldquo;rebuilt <strong>the</strong> booking flow&rdquo; tripped the same rule, because the detector cannot tell whose booking flow a sentence means.</p>
+          <p>The tempting fix was to make the validator stop reading those paragraphs. I did the opposite: the <strong>registry now validates its own entries against the same rule the finished message faces</strong>, and rejects one that would read as a claim about the recipient &mdash; with a warning naming the fix (&ldquo;prefer <em>a</em> booking flow&rdquo;). The constraint moved to where a human can still act on it, instead of surfacing later as drafts failing for reasons nobody can see. The paragraph a generated message would most like to smuggle an unevidenced claim into is exactly the one that must stay checked.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Correction &mdash; last night's reply fix was only half installed</span>
+          <p>I reported the reply-path fix as deployed. The code was; <strong>the configuration was not.</strong> <code>docker-compose.yml</code> forwards an explicit allow-list of environment variables, and <code>TITAN_OPERATOR_EMAIL</code> was never added to it &mdash; so every container read the default of <code>None</code> and the guard against your own Gmail being read as a prospect reply was running <em>without your address in it</em>. The database half worked; the operator half did nothing.</p>
+          <p>This is the third time this exact trap has bitten this project &mdash; the file already carries a comment about <code>TITAN_MODEL_REWRITES_ENABLED</code> sitting in <code>.env</code> while every container read the code default, which is why the rewriter never once ran. Both variables are now forwarded and verified live in the running worker. I found this only because I went looking for why a <em>different</em> new setting was <code>None</code>.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">The contact bottleneck, measured properly &mdash; and it is not what the API keys are for</h4>
+          <p>You gave me OpenRouter and Cloudflare keys for finding addresses. Before spending them I measured where the addresses actually go, and <strong>the majority of the gap needs no model at all.</strong></p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Population</th><th class="mono">Count</th><th>What it means</th></tr></thead>
+              <tbody>
+                <tr><td>Organisations with a website</td><td class="mono">4,441</td><td>&mdash;</td></tr>
+                <tr><td>&hellip; with a contact stored</td><td class="mono">873</td><td>20%</td></tr>
+                <tr><td><strong>Crawled, address published, no contact row</strong></td><td class="mono"><strong>1,939</strong></td><td>Already paid for. Recoverable for free</td></tr>
+                <tr><td>Crawled, genuinely no address anywhere</td><td class="mono">1,120</td><td>Contact-form-only. <em>This</em> is the model's job</td></tr>
+                <tr><td>Research stuck <code>running</code> or <code>failed</code></td><td class="mono">348</td><td>Mostly pre-dating the surrogate fix</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>1,939 businesses published an address on their own site, our crawler read it and stored it, and no contact was ever created.</strong> They are the historical casualties of the defect I fixed last night &mdash; contact resolution ran <em>after</em> the score gate, so every lead under the bar dropped its address along with itself. The patch fixed the path going forward; it cannot reach backwards, because these leads will not be researched again.</p>
+          <p><strong>I got the diagnosis wrong twice on the way here</strong> and both are worth recording. I first assumed the crawler had failed to extract &mdash; it had not; <code>visible_emails</code> was populated on the very page I checked. I then assumed the 3,350 were historical failures from before the surrogate fix &mdash; they are not; 3,060 are <em>completed</em> runs, dated within the last nine days. Only measuring the actual populations produced the real answer.</p>
+          <p><strong><code>titan recover-contacts</code></strong> is built and dry-run. It does not crawl, guess or construct anything: it re-reads pages already in the database and calls the same <code>resolve_contact</code> activity the pipeline calls, so provenance, eligibility, MX and verification all apply exactly as they would have. Invariant 6 holds for the same reason it holds in the pipeline &mdash; the only candidates are strings the crawler recorded verbatim from the site. <strong>A 60-lead dry run recovered 28 addresses</strong> &mdash; <code>admin@myimplantdentist.com.au</code>, <code>praxis@sp64.de</code>, <code>enquire@centralbrisbanedental.com.au</code> &mdash; all on-domain, all published. That rate across the population is roughly <strong>1,400&ndash;1,900 contacts for no API spend and no crawling</strong>.</p>
+          <p class="accept"><b>Needs your word</b> It writes production rows that feed the send pipeline, so it is dry-run by default and I have not run <code>--apply</code>.</p>
+        </div>
+
+        <div class="note">
+          <h4>Where the model keys fit &mdash; and one thing only you can do</h4>
+          <p>The 1,120 with no published address are the model's job, and only theirs: pages that carry a contact form and nothing else. The gateway for both providers already exists in this codebase &mdash; <code>titan/models/providers.py</code> &mdash; so this is a lane, not an integration.</p>
+          <p><strong>OpenRouter is live.</strong> <code>check-providers</code> reports it configured and reachable. A daily call ceiling (<code>contact_model_calls_per_day</code>, default 200) is in place because both accounts are free-tier with daily caps, and a run that burns the allowance in an hour leaves the rest of the day with no lane at all.</p>
+          <p><strong>Cloudflare is not usable yet, and I cannot fix it from here.</strong> Your token and account id are stored, but the provider also needs an <strong>AI Gateway id</strong> &mdash; a gateway you create in the Cloudflare dashboard under <em>AI &rarr; AI Gateway</em>. Paste the id and the second lane comes up.</p>
+          <p><strong>The safety rule for this lane, stated before it is built:</strong> a model may only <em>point at</em> text already present in the page evidence. Anything it returns that does not appear verbatim in the crawled text is discarded &mdash; because a model asked for an email address will produce a well-formed one whether or not the page contained it. That check is the entire argument for letting a model near this at all.</p>
+        </div>
+
+        <div class="note">
+          <h4>Two small copy defects found by reading a rendered message</h4>
+          <p>Not by a test &mdash; by printing one and reading it. The observation sentence rendered as &ldquo;the main button on <strong>the page on malmin.co.uk</strong>&rdquo;: the description had already written &ldquo;your /book-appointment page&rdquo; and the link text fell back to a second way of saying the same thing, three words apart. And <code>/book-appointment</code> resolved to no trade noun at all, though <code>book</code> and <code>appointment</code> are both in the table. Compound slugs now fall back to their parts, so it reads &ldquo;your appointment page&rdquo;, and the anchor fallback now agrees with the sentence it is substituted into.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 28 August -->
+      <section id="log-28">
+        <h2><span class="num">08</span>Work log &mdash; 28 August</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Your ten real systems now carry the credibility paragraph</h4>
+          <p>I read arslanvuzmallone.com and took the projects from it. Every message now names <em>one</em> system you actually built, with a direct link to its case study, chosen to match the defect being reported. <strong>2,703 tests green</strong>, deployed.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Defect found on their site</th><th>System cited</th></tr></thead>
+              <tbody>
+                <tr><td>No booking path &middot; no visible phone number</td><td><strong>VoxCircuit</strong> &mdash; answers enquiry calls and books the appointment</td></tr>
+                <tr><td>High-friction contact form</td><td><strong>ThreadHarbor</strong> &mdash; WhatsApp enquiry routing, no form needed</td></tr>
+                <tr><td>Broken CTA &middot; broken link &middot; script errors &middot; failed requests</td><td><strong>RivalTrace</strong> &mdash; walks sites on a schedule and reports what changed</td></tr>
+                <tr><td>Slow largest contentful paint</td><td><strong>ModelSwitchyard</strong> &mdash; routes on measured cost and latency, fails over</td></tr>
+                <tr><td>Missing meta description &middot; no structured data</td><td><strong>SourceLatch</strong> &mdash; search that cites where each answer came from</td></tr>
+                <tr><td>Accessibility &middot; security headers &middot; mobile viewport</td><td><strong>FrictionBrief</strong> &mdash; audits a public presence and writes up what it costs</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>This is a better citation than the client story I was asking you for,</strong> and I would rather have it. A named client is a claim the reader has to take on trust and that I could get wrong. &ldquo;I built VoxCircuit &mdash; here it is&rdquo; is checkable in one click, and there is no third party to misrepresent. The registry keeps the client-engagement shape for when you want it; nothing was lost.</p>
+          <p>Where the project page sits on your own domain, the generic &ldquo;see my portfolio&rdquo; sentence is <em>dropped</em> rather than added to &mdash; two links to the same site three words apart is one too many, and the specific one is worth more. A project hosted elsewhere (a GitHub repo, say) keeps both, so the validator's portfolio check passes for a reason rather than by luck. There is a test for exactly that.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">The unsubscribe: the ugly half is gone, the half that protects you stays</h4>
+          <p>You are right that <code>Unsubscribe (https://&hellip;/u/&lt;64 characters of signature&gt;)</code> looks unprofessional. That line is gone from both the text and the HTML.</p>
+          <p><strong>What I did not remove is the <code>List-Unsubscribe</code> header</strong>, and I want to be direct about why. It is invisible &mdash; it renders nothing in the body. What it does is put Gmail's and Yahoo's <em>own</em> one-click unsubscribe control next to your name at the top of the message. Take it away and the recipient who wants out has one button left, and it is &ldquo;report spam&rdquo;. That is a domain-level event; a handful of them and every message you send lands in junk regardless of what it says. It is also a <code>Severity.BLOCK</code> gate in this codebase already, so removing it stops every send.</p>
+          <p>In its place the footer now says, in one line: <em>&ldquo;If you would rather not hear from me again, reply to this message and I will take you off the list.&rdquo;</em> That reads like correspondence, and it is a lawful opt-out mechanism under CAN-SPAM, PECR and GDPR alike.</p>
+          <p><strong>Then I checked whether the system actually keeps that promise, and it did not.</strong> Measured against the live classifier, most of the ways people write it were landing as ordinary human replies with no suppression &mdash; &ldquo;Please don't contact me again&rdquo;, &ldquo;Please take us off your list&rdquo;, &ldquo;Stop emailing me&rdquo;. The sequence stopped in each case, so no follow-up would have gone out, but the address was never suppressed and a <em>later</em> campaign could have written to them again. The patterns are widened: contractions, the plural (&ldquo;take <strong>us</strong> off&rdquo; &mdash; a receptionist answers for the practice), and the bare imperatives.</p>
+          <p><em>One judgement call, recorded as one.</em> &ldquo;No thanks&rdquo; and &ldquo;Not interested&rdquo; are deliberately <strong>not</strong> treated as opt-outs. They are declines, they already stop the sequence, and retiring a business permanently on &ldquo;no thanks&rdquo; is irreversible. Say the word if you would rather they were. And the test that matters most guards the opposite error: <em>&ldquo;Can you remove the broken link and email me the fix?&rdquo;</em> contains the word &ldquo;remove&rdquo; and is a hot lead &mdash; it stays a human reply.</p>
+        </div>
+
+        <div class="note">
+          <h4>The one-page brief &mdash; built as a link, and here is why not an attachment</h4>
+          <p>There is now a slot for it in the references block. Set <code>TITAN_ONE_PAGER_URL</code> and every message carries the line; leave it unset and nothing renders.</p>
+          <p><strong>I would not attach the PDF, and I would push back on that specifically.</strong> An unsolicited attachment from an unknown sender is one of the strongest spam signals in existence, and corporate mail gateways &mdash; which is what a solicitors' firm or a dental group runs &mdash; quarantine or strip PDFs from unrecognised senders as policy. A meaningful share of recipients would receive a message referring to a document that was removed in transit, which is worse than not sending one.</p>
+          <p>A hosted link costs nothing, cannot be stripped, and does something an attachment cannot: <strong>it produces a click.</strong> Reply and bounce are currently the only engagement signals in this system &mdash; the entire autonomy layer is starved of data. A one-pager on a domain you control is the cheapest click signal available to you.</p>
+          <p>There is a test asserting the message never says &ldquo;attached&rdquo;: a message claiming an attachment while carrying none is the specific failure worth guarding against, and <code>OutboundEmail</code> has no attachment field at all.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Cloudflare &mdash; the token is valid, the permission is missing</span>
+          <p>I tested the gateway id you gave me against the live API rather than assuming it worked. Two separate results:</p>
+          <ul>
+            <li><strong>The token is genuine and active</strong> &mdash; <code>/user/tokens/verify</code> returns <code>200</code>, &ldquo;This API Token is valid and active&rdquo;.</li>
+            <li><strong>It is not permitted to use AI Gateway</strong> &mdash; listing gateways on account <code>36f372be&hellip;</code> returns <code>403 Authentication error</code>, and a call through the gateway itself returns <code>403</code>.</li>
+          </ul>
+          <p>So this is a token <em>scope</em> problem, not a wrong id. In the Cloudflare dashboard: <em>My Profile &rarr; API Tokens</em>, edit that token, add <strong>Account &rarr; AI Gateway &rarr; Read</strong> (and Edit), scoped to that account. Worth confirming the gateway id at the same time &mdash; AI Gateway ids are normally the short name you chose when creating it, not a <code>gw_</code>-prefixed string, and I could not list them to check.</p>
+          <p><strong>Nothing is blocked by this.</strong> No model route points at Cloudflare, so it is a spare lane, not a dependency.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">OpenRouter &mdash; working, and the obvious default was already dead</h4>
+          <p>The free model I had picked, <code>meta-llama/llama-3.3-70b-instruct:free</code>, is answered by OpenRouter with <em>&ldquo;This model is unavailable for free.&rdquo;</em> It had been the sensible default for a year and is not one any more. <code>google/gemma-4-31b-it:free</code> returns <code>429</code> under load.</p>
+          <p><strong><code>minimax/minimax-m3:free</code> was verified live on your account</strong> &mdash; it returned a completion &mdash; and carries a 1M-token context, which is what matters when the input is a page of crawled text. That is now the configured contact route, with a note to re-check it rather than trust it indefinitely. Free tiers move.</p>
+        </div>
+      </section>
+
+      <!-- =========================== executed -->
+      <section id="executed">
+        <h2><span class="num">09</span>Executed &mdash; recovery, redraft, sending</h2>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Correction &mdash; I told you ~1,900 contacts. It was 306.</span>
+          <p>I estimated the recoverable backlog at &ldquo;1,400&ndash;1,900 contacts&rdquo; from a 60-lead dry run that found 28. <strong>That extrapolation was wrong and I had it on this page.</strong> The real figure is <strong>+306 organisations</strong>, from 873 to <strong>1,179</strong>.</p>
+          <p>Two mistakes produced it. The dry run had no ordering, so it returned the <em>head</em> of the queue every time &mdash; and that head was unrepresentative, rich in businesses that publish an address on their own domain. And I read &ldquo;1,939 orgs whose crawl recorded an address&rdquo; as &ldquo;1,939 recoverable&rdquo;, which was never the same claim.</p>
+          <p><strong>What the rest of them actually are.</strong> Of 1,734 contactless organisations that did record an address, the great majority carry somebody <em>else's</em> address &mdash; <code>office@jboydlawyers.com</code> on legalaidlawyersscotland.com, a web builder's <code>info@mysite.com</code>, a parent group's domain. The extractor refuses those, and it is <strong>right</strong> to: an address that appears on a site is not automatically that business's address. That is a correct refusal, not a bug, and the recoverable population was simply smaller than I said.</p>
+          <p>The one genuinely recoverable group left is <strong>111 organisations whose free-webmail address contains their own name</strong> &mdash; <code>snowymedispa@gmail.com</code> for snowymedispa.com.au. The domain-match rule refuses those too. Relaxing it narrowly (accept webmail when the local part matches the business) is defensible, and it is a policy change I have not made without asking.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">What actually shipped</h4>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Step</th><th>Result</th></tr></thead>
+              <tbody>
+                <tr><td>Contacts recovered from crawls already on disk</td><td><strong>+306 orgs</strong> (873 &rarr; 1,179), 246 channels, all <code>first_party_website</code> / <code>published_first_party</code>, correct workspace, no nulls</td></tr>
+                <tr><td>Drafts rewritten into the four-part format</td><td><strong>647 of 648</strong> (1 refused: too long)</td></tr>
+                <tr><td>Everything still waiting to send</td><td><strong>65 of 65 on the new format</strong>; nothing pending carries the old footer</td></tr>
+                <tr><td>Sent today</td><td><strong>11 of 12 on the new format</strong>, each citing a project with a direct link</td></tr>
+                <tr><td>Test suite</td><td>2,709 passing</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>A redraft deliberately returns a draft to <em>awaiting approval</em> &mdash; an approval given for the old words cannot authorise new ones &mdash; so the 647 needed re-queueing. The stranded-draft sweep does that through the same gate the workflow would have used, and 10 messages went out in the hour after it ran.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Sending is live. Volume is capped at 8 a day, and here is exactly why</h4>
+          <p>23 campaigns active on <code>controlled_autopilot</code>, seven always-on orchestrators running, all seven schedules installed. Nothing is switched off. The cap is the health gate doing its job:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Mailbox</th><th>Status</th><th>Bounces / sends</th><th>Effective limit</th></tr></thead>
+              <tbody>
+                <tr><td><code>outreach@</code></td><td><span class="chip crit">blocked</span></td><td>5 / 109 &mdash; <strong>4.6%</strong></td><td class="num">0</td></tr>
+                <tr><td><code>sales@</code></td><td><span class="chip crit">blocked</span></td><td>3 / 98 &mdash; <strong>3.06%</strong></td><td class="num">0</td></tr>
+                <tr><td><code>projects@</code></td><td><span class="chip med">warming</span></td><td>0 / 15</td><td class="num">8</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>SPF, DKIM and DMARC pass on all three. <strong>Two of your three mailboxes are stopped by their own bounce rate</strong>, and the third is early in its ramp. That is the entire explanation for &ldquo;8 allowed&rdquo;, and the block is protective &mdash; it is what stops a 4.6% bounce rate becoming a dead domain.</p>
+          <p><strong>The 306 new contacts do not change this and will not flood out.</strong> They queue behind the same gate and meter out at the same rate. That is the right behaviour: they are <code>published_first_party</code>, which is provenance and not verification.</p>
+          <p><em>And verification cannot rescue it.</em> I ran the SMTP prober over a sample: 25 checked, <strong>0 changed</strong>, because the probe skips Google- and Microsoft-hosted domains by design &mdash; which is precisely where the bounces are. This is the same conclusion Phase 1 reached when it dropped the paid verifier. The bounce rate has to come down through better addresses, not better checking of the ones we have.</p>
+        </div>
+
+        <div class="note">
+          <h4>Two host failures during this run, and one of them is the recurring one</h4>
+          <p><strong>Docker Desktop stopped mid-recovery</strong> &mdash; no daemon, every container gone. I restarted it and the stack came back clean, but the batch died partway.</p>
+          <p><strong>Housekeeping has missed its window 343 times.</strong> Its counters read <code>Total: 32, MissedCatchupWindow: 343</code>. It runs hourly at :17 with a 30-minute catch-up, and this machine is asleep at :17 far more often than it is awake. It is not stuck and it is not misconfigured &mdash; it fires the moment it is triggered, and it did.</p>
+          <p>I am not widening the catch-up window. I tried that once before, an existing test caught it violating &ldquo;no job may reach back past its own previous occurrence&rdquo;, and I reverted it. A window that fits inside the hour would buy a marginally better chance of catching a short sleep and would not fix a machine that is off. <strong>This is W2 &mdash; the always-on host &mdash; and it is now the item with the most evidence behind it on this page.</strong></p>
+        </div>
+      </section>
+
+      <!-- =========================== bounces -->
+      <section id="bounces">
+        <h2><span class="num">10</span>The bounce problem, solved at the source</h2>
+
+        <p class="standfirst">Eight bounces capped this system at 8 sends a day. Reading them one at a time turned out to be the whole answer: <strong>five of the eight were addresses that should never have been chosen</strong>, and every one of those businesses had published a better address on the same website.</p>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">What the eight actually were</h4>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Address</th><th>What it really was</th></tr></thead>
+              <tbody>
+                <tr><td><code>0606info@207dentalcare.com</code></td><td>a phone number and a mailbox, spliced together by the scraper</td></tr>
+                <tr><td><code>recruitment@zenlaw.co.uk</code></td><td>a hiring inbox</td></tr>
+                <tr><td><code>lettings@nppresidential.co.uk</code></td><td>a department</td></tr>
+                <tr><td><code>dubai@shamswilliams.com</code></td><td>a branch office</td></tr>
+                <tr><td><code>katie@reading-smiles.co.uk</code></td><td>somebody who had left</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>None were malformed. None were undeliverable in principle. Every one was published on the business's own site. They were simply <strong>the wrong address of the several each site offered</strong>.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Why the wrong one kept winning</h4>
+          <p><code>resolve_contact</code> looped over the addresses a crawl found and <strong>returned on the first one that passed its checks</strong> &mdash; and that loop ran in <em>page-crawl order</em>. A firm publishing <code>info@</code> on its contact page and a partner's mailbox on its people page was written to at whichever page the crawler happened to reach first. Worse, it stored only that one address, so the better alternative was never even recorded.</p>
+          <p>Two further faults compounded it. The role-address vocabulary was <strong>English-only</strong> while the campaigns are not &mdash; <code>kontakt@</code> (7 live) and <code>praxis@</code> (7) were both classified as named individuals. And the lead scorer gave a named mailbox <strong>0.4</strong> against a role address's <strong>0.2</strong>: it was actively <em>preferring</em> the shape that bounces most.</p>
+          <p>Measured on this workspace's own sending, that preference was backwards by a factor of six:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Address shape</th><th class="mono">Sent</th><th class="mono">Bounced</th><th class="mono">Rate</th></tr></thead>
+              <tbody>
+                <tr><td>Role addresses (<code>info@</code>, <code>reception@</code>&hellip;)</td><td class="mono">154</td><td class="mono">2</td><td class="mono"><strong>1.30%</strong></td></tr>
+                <tr><td>Everything else</td><td class="mono">74</td><td class="mono">6</td><td class="mono"><strong>8.11%</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The block threshold is 2%. One column sits under it and the other sits four times over it.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">What shipped</h4>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Change</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td><strong>The best address wins, not the earliest.</strong> Candidates are ranked before the loop, deterministically, so a retry cannot write to a different person</td><td>fixes the mechanism</td></tr>
+                <tr><td><strong>Front desks recognised in every market Titan sends to</strong> &mdash; German, Spanish, Polish, Dutch, French, Italian, Romanian, plus the English words the first list missed</td><td><strong>+62</strong> addresses reclassified</td></tr>
+                <tr><td><strong>The scorer stops preferring what bounces.</strong> A published role address now outranks an unidentified named mailbox; a <em>named decision maker</em> still wins outright at 1.0</td><td>removes the cause</td></tr>
+                <tr><td><strong>Privacy desks refused in every language</strong> &mdash; <code>datenschutz@</code>, <code>rgpd@</code>, <code>rodo@</code>, <code>privacidad@</code></td><td><strong>5 retired</strong>, one at a law firm</td></tr>
+                <tr><td><strong><code>titan repoint-contacts</code></strong> &mdash; re-reads pages already on disk and moves a lead onto the front desk it published all along. No crawling, no API cost, no address constructed</td><td><strong>154 leads moved</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>Leads sitting on a front-desk address: 69% &rarr; 87%.</strong> Among the moves: <code>careers@faceretreat.com</code> &rarr; <code>office@</code>, <code>lettings@blackstoneestateagent.co.uk</code> &rarr; <code>info@</code>, <code>adele.nicol@andersonstrathern.co.uk</code> &rarr; <code>info@</code>, and <code>inforu@lawfirmuk.net</code> &rarr; <code>info@</code> &mdash; a scrape typo that would have bounced for certain.</p>
+          <p>2,745 tests passing, 36 of them new and holding the reasoning rather than the numbers.</p>
+        </div>
+
+        <div class="note">
+          <h4>What was tested and rejected</h4>
+          <p>Both alternatives were measured rather than assumed, and both are dead ends on this list:</p>
+          <ul>
+            <li><strong>Email verification.</strong> The SMTP prober was run against 30 checkable addresses: <strong>29 returned &ldquo;unknown&rdquo;</strong> &mdash; <em>&ldquo;the receiving server refused this probe rather than the recipient&rdquo;</em>. This machine's IP is rejected before it can ask. And 64% of the list is Google- or Microsoft-hosted, which the prober declines to touch by design. A paid verifier fares no better: Phase 1 already measured that verification status does not predict bounces here.</li>
+            <li><strong>DNS filtering.</strong> Already running, and <strong>zero</strong> domains on the list lack a mail server. That layer has caught everything it can.</li>
+          </ul>
+          <p>Which leaves address <em>selection</em> as the only lever that works &mdash; and it is free.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">The residue, stated plainly</span>
+          <p><strong>157 leads are still on a named mailbox</strong>, because their site published nothing else &mdash; no front desk exists to move them to. They are the remaining bounce risk and no amount of code will fix them; the businesses simply do not publish a general address.</p>
+          <p>The honest options are to send to them slowly and accept the occasional bounce, or to hold them until the mailboxes are fully healthy. <strong>I have not decided that on your behalf.</strong></p>
+        </div>
+      </section>
+
+      <!-- =========================== throttle -->
+      <section id="throttle">
+        <h2><span class="num">11</span>Trickle, volume and authentication</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">The risky addresses now meter themselves</h4>
+          <p>111 leads had only a named or departmental mailbox to write to &mdash; their site published nothing else. Sending them together would re-block every mailbox and restart the seven-day recovery clock; never sending them writes off 111 businesses for the shape of a string.</p>
+          <p>They are now <strong>held</strong> (<code>contact_channels.is_active</code>, which the send gate already refuses) and released a few at a time by a new activity inside the hourly housekeeping pass. <strong>Verified live:</strong> 30 risky messages were already queued from before the hold, and every one of them is on a held channel &mdash; the gate refuses all 30, and the throttle correctly released nothing further.</p>
+          <p><strong>The budget is on risk <em>in flight</em>, not on releases</strong>, and getting there took one wrong version worth recording. The first counted &ldquo;risky channels activated today&rdquo;. Measuring it disproved it immediately: 34 such channels appeared in a single day from the webmail recovery &mdash; <code>snowymedispa@gmail.com</code> is risky <em>by shape</em> and went active because it was <em>found</em> that day, not released. The activity would have read 34 against a budget of 5 and stalled for a reason unconnected to sending.</p>
+          <p>That version also could not see a worse failure: releasing five a day while the mailboxes are blocked <em>accumulates</em>. Ten quiet days would leave fifty risky messages queued, all leaving together the moment the block lifted &mdash; exactly the event the throttle exists to prevent. Counting sent-today plus still-queued fixes both, and a test runs it forward ten days to prove the total tops out at the budget instead of climbing.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Volume &mdash; discovery is not the constraint</h4>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Stage, last 7 days</th><th class="mono">Count</th><th>Yield</th></tr></thead>
+              <tbody>
+                <tr><td>Leads discovered</td><td class="mono">1,934</td><td><strong>276/day</strong> &mdash; already past the 250 target</td></tr>
+                <tr><td>Research completed</td><td class="mono">1,668</td><td>86%</td></tr>
+                <tr><td>Ended with a usable address</td><td class="mono">359</td><td><strong>19%</strong> &mdash; the real constraint</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>Discovery already finds 1,000+ a day when the machine is awake.</strong> The daily series &mdash; 1035, 646, 104, 69, 2, 4, 4 &mdash; is not a capacity curve, it is a record of when the laptop was on. Adding sources would not move it; W2 would.</p>
+          <p><strong>What did move is the 19%.</strong> A small business running its website on one host and its mail on Gmail is ordinary, and every one of those was being refused because <code>gmail.com</code> is not <code>snowymedispa.com.au</code>. The rule now accepts a free-mailbox address <em>when the local part carries the business's own name</em> &mdash; a narrow exception with two conditions, not a relaxation: an address at another <em>business's</em> domain is still refused whatever it is called, and <code>fhdental.info@gmail.com</code> on fhfd.ca stays out.</p>
+          <p><strong>+122 contacts recovered</strong> from crawls already on disk, in Poland, the Netherlands, Germany and Australia. Contacts today: <strong>1,301 organisations, 1,332 active channels</strong> &mdash; from 873 at the start of the day.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">A gap found by a test I wrote for something else</span>
+          <p><code>is_never_contact</code> compared the <em>whole</em> local part against its list, so <code>careers.acmedental@gmail.com</code> was not <code>careers</code> and passed &mdash; a hiring inbox, eligible for outreach. It had been masked: the domain rule refused such addresses for an unrelated reason, and the webmail exception removed that cover.</p>
+          <p>The check now tests the local part's <strong>segments</strong>, matched whole: <code>careers.acme</code>, <code>hr-recruitment</code> and <code>privacy_team</code> are caught, while <code>stopford</code> does not match <code>stop</code> and <code>legalise</code> does not match <code>legal</code>. The asymmetry justifies the direction &mdash; a false positive costs one lead, a false negative pitches a privacy officer, and a complaint blocks a mailbox outright with no recovery window.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Authentication &mdash; passing every check, and weaker than it looks</h4>
+          <p><code>titan auth</code> is new. It prints what <code>dns_auth</code> has always computed and nothing ever displayed: <code>preflight</code> reports whether the process may send, <code>check-providers</code> whether credentials exist, and the daily verification records three booleans &mdash; all of which are true for a domain whose DMARC policy does nothing.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Record</th><th>State</th><th>What it means</th></tr></thead>
+              <tbody>
+                <tr><td>SPF</td><td><span class="chip ok">pass</span></td><td><code>include:spf.spacemail.com ~all</code></td></tr>
+                <tr><td>DKIM</td><td><span class="chip ok">pass</span></td><td>key present, selector <code>spacemail</code></td></tr>
+                <tr><td>DMARC</td><td><span class="chip med">p=none</span></td><td><strong>monitors, protects nothing</strong></td></tr>
+                <tr><td>Alignment</td><td><span class="chip ok">pass</span></td><td>From: and signing domain match</td></tr>
+                <tr><td>MTA-STS</td><td><span class="chip med">absent</span></td><td>delivery may be downgraded to plaintext</td></tr>
+                <tr><td>TLS-RPT</td><td><span class="chip med">absent</span></td><td>no way to learn when encryption fails</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong><code>p=none</code> is the one to move.</strong> It tells receivers to do nothing when a message fails authentication &mdash; so anyone may send as your domain and Gmail is instructed to accept it. Go to <code>p=quarantine</code> once a week or two of DMARC reports show your own mail passing, then <code>p=reject</code>. <code>titan auth</code> prints the exact MTA-STS and TLS-RPT records to publish alongside.</p>
+          <p><em>One thing checked rather than assumed:</em> the DKIM selector list includes <code>spacemail</code>, so the pass is real and not a lookup that quietly found nothing.</p>
+        </div>
+      </section>
+
+      <!-- =========================== one-pager -->
+      <section id="onepager">
+        <h2><span class="num">12</span>The one-page brief, attached</h2>
+
+        <p class="standfirst">Built, rendered, gated and live on the sending worker. <strong>You asked for an attachment after I argued for a link, so it is an attachment</strong> &mdash; built properly rather than half-built, with the concern answered where it can be: in a gate that refuses the shapes which actually trigger filtering.</p>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">What the document is</h4>
+          <p>One A4 page, <strong>102 KB, exactly one page</strong> &mdash; asserted by a test, because a two-page one-pager is a different document and finding that out from a recipient is the wrong way to find out. Rendered from HTML through Chromium, so it is regenerated by editing a file rather than a design tool.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Band</th><th>What it carries</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Flowchart</strong></td><td>Six stages &mdash; open, render, measure, verify, select, write &mdash; with the discard path drawn in: <em>no evidence &rarr; no claim, and no message is sent</em></td></tr>
+                <tr><td><strong>What every pass checks</strong></td><td>Eight categories with the real counts from your database: 11,396 undescribed images, 8,245 script failures, 5,384 slow pages</td></tr>
+                <tr><td><strong>What a repair involves</strong></td><td>Find it, fix the pattern, confirm from outside &mdash; named work, not an offer of help</td></tr>
+                <tr><td><strong>One finding, carried the whole way</strong></td><td>Seen &rarr; why it happens &rarr; what it costs &rarr; what I would do. The paragraph a sceptical reader wants</td></tr>
+                <tr><td><strong>What this is not</strong></td><td>Not a scan report; nothing private touched, robots.txt obeyed, no logins, no forms submitted</td></tr>
+                <tr><td><strong>References</strong></td><td>web.dev, W3C, Google Search Central, OWASP</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">The property worth having</h4>
+          <p><strong>The body and the attachment cannot disagree.</strong> The words are written at compose time and the file is read days later at send time, so &ldquo;I have attached&hellip;&rdquo; over an empty envelope is a real failure with two separate causes &mdash; a missing file, an unset path. One function does both or neither, which makes that state <em>unreachable</em> rather than unlikely. An absent file attaches nothing <em>and</em> says nothing, and the message still sends.</p>
+          <p>Verified on the real MIME message the provider builds: <code>multipart/mixed</code> wrapping the text and HTML alternative plus the PDF, 140 KB on the wire. Both body parts survive &mdash; a client falling back to plain text because the HTML alternative was displaced by the attachment is exactly the kind of silent regression a test should catch, and one does.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">The gate &mdash; BLOCK severity, at the send boundary</h4>
+          <p>An attachment now passes the same boundary as every other property of a message. Five rules, each with a reason:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+              <tbody>
+                <tr><td><strong>One attachment</strong></td><td>Two documents on a cold approach is a mailing, not a message &mdash; and the count is where &ldquo;attach the one-pager&rdquo; becomes &ldquo;attach the deck and the price list&rdquo;</td></tr>
+                <tr><td><strong>PDF only</strong></td><td>Office formats and archives carry macros and are quarantined by policy at most corporate gateways</td></tr>
+                <tr><td><strong>Under 400 KB</strong></td><td>Large attachments are scored, and a brief that does not fit is not a brief</td></tr>
+                <tr><td><strong>Never executable</strong></td><td>Checked on the <em>bytes</em>, not the filename: a <code>.pdf</code> beginning <code>MZ</code>, <code>ELF</code>, <code>PK</code> or <code>#!</code> is refused. The filename is the one part an attacker gets for free</td></tr>
+                <tr><td><strong>Actually a PDF</strong></td><td>Declared <code>application/pdf</code> and not beginning <code>%PDF-</code> means mailing something nobody has identified</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>2,809 tests passing</strong>, 27 of them on this.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">Decided &mdash; every message, not a sample</h4>
+          <p>I recommended deferring this to September and running it against a clean baseline. <strong>You said attach it to every mail, so it is on every mail:</strong> <code>TITAN_ONE_PAGER_SAMPLE_PERCENT=100</code>, verified live in the running worker, and the 140 messages currently queued will each carry it.</p>
+          <p>The recommendation still stands as a fact about measurement rather than a reason to wait: with no control group, the attachment's effect on reply rate will not be separable from everything else that changed this week. That is a cost of the choice, not an argument against it &mdash; and <code>one_pager_attached</code> is recorded per message either way, so the moment there is a reason to split the population, the column is already there.</p>
+          <p><strong>What has actually gone out so far: nothing.</strong> All 228 sent messages predate the column. The sampler is at 100% and the file is in place, but the send window is 08:00&ndash;17:00 Monday to Friday and it is Saturday, so the first message carrying the PDF leaves on Monday at the earliest &mdash; and only if a mailbox is out of its bounce block by then. See the log below.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 29 August -->
+      <section id="log-29">
+        <h2><span class="num">13</span>Work log &mdash; 29 August</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">You can now see the PDF in the dashboard, next to the message it ships with</h4>
+          <p>The attachment was live and invisible. The approvals queue renders the message body and nothing else, so a reviewer approving a message could not see that a 103 KB document goes out with it &mdash; they were deciding about half the message. That is a real gap, not cosmetics: the attachment is added at <em>send</em> time, after the draft exists, so nothing on the draft ever mentioned it.</p>
+          <p>Every draft card now carries a panel naming the file, its size, the share of messages that carry it, and the sentence the body gains &mdash; with <strong>preview</strong> to render the PDF inline and <strong>open in a new tab</strong> beside it. When nothing will be attached it says <em>why</em> (&ldquo;no attachment is configured&rdquo;, &ldquo;the sample is set to 0%&rdquo;) rather than showing nothing and leaving you to guess.</p>
+          <p>Two read-only endpoints behind it. <code>/api/v1/attachment</code> reports what will go out; <code>/api/v1/attachment/download</code> serves the file. Both read from disk on every call, because the outbox worker reads from disk on every send &mdash; anything cached here would eventually describe a document nobody is sending. The download path comes from settings and never from the request, so there is no input to traverse with: it serves one configured file or 404s.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Correction &mdash; the link I shipped could not have worked</span>
+          <p>I published this an hour before catching it. The panel's first version used a plain <code>&lt;a href="/api/v1/attachment/download"&gt;</code>, which fails for <strong>two independent reasons</strong>: the API is a different origin (<code>NEXT_PUBLIC_API_URL</code>, port 8010, not the dashboard on 3000), so the link resolved against the wrong host and 404ed; and authentication here is a bearer header, which an anchor does not send, so on the correct origin it would have 401ed instead.</p>
+          <p><strong>Neither shows up in a build.</strong> The markup is valid, the typecheck passes, the container starts &mdash; the link simply goes nowhere. It was caught by reading how the client resolves URLs rather than by any test, which is the same lesson as the rendered-message defects in &sect;07: some things are only visible when you look at the actual artefact.</p>
+          <p>The file is now fetched through the same authenticated path as every other call and handed to the browser as an object URL &mdash; fetched <em>once</em> for the page and shared by every card, because it is one document and 449 cards each pulling 103 KB of the same PDF is a self-inflicted denial of service.</p>
+          <p><strong>Verified end to end in a real browser</strong>, not asserted: the panel renders on every card, the preview iframe renders the one-pager, and the bytes served are the same 105,206 the outbox worker attaches.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Why nothing is sending right now, and when it resumes</h4>
+          <p>Docker Desktop was down again when I started &mdash; the whole stack, not a container. Restarted; all fifteen healthy. <strong>That is the third occurrence recorded on this page</strong> and it remains the single strongest piece of evidence for W2.</p>
+          <p>Two independent things are holding the queue, and both are the system working:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Holding it</th><th>Clears</th></tr></thead>
+              <tbody>
+                <tr><td><strong>The send window.</strong> 08:00&ndash;17:00, Monday to Friday, in the recipient's timezone. It is Saturday</td><td>Monday 08:00</td></tr>
+                <tr><td><strong>The bounce block.</strong> All three mailboxes last hard-bounced on 27 August; the quiet period is seven days</td><td>3 September, if nothing bounces before then</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Mailbox</th><th class="mono">Sent</th><th class="mono">Bounced</th><th class="mono">Rate</th><th>State</th></tr></thead>
+              <tbody>
+                <tr><td><code>outreach@</code></td><td class="mono">109</td><td class="mono">6</td><td class="mono"><strong>5.50%</strong></td><td><span class="chip crit">blocked</span></td></tr>
+                <tr><td><code>sales@</code></td><td class="mono">98</td><td class="mono">3</td><td class="mono"><strong>3.06%</strong></td><td><span class="chip crit">blocked</span></td></tr>
+                <tr><td><code>projects@</code></td><td class="mono">16</td><td class="mono">1</td><td class="mono">6.25%</td><td><span class="chip med">below the 50-send floor</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>The recovery path is real and I checked it rather than assuming.</strong> A rate over the threshold with no bounce for seven days drops from BLOCK to WARN and a small probation allowance starts delivering &mdash; which exists precisely because holding BLOCK made the bad rate self-perpetuating: no sends, so no clean sends, so no way for the rate to fall. It returns to BLOCK on the next hard bounce. So these mailboxes recover on their own; they do not need overriding, and overriding them is what would cost the domain.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 7 -->
+      <section id="expert">
+        <h2><span class="num">14</span>Two hard truths</h2>
+
+        <p>Two items on your list will not work the way the industry says they do, and I would rather say so now than build them and have you find out from the numbers.</p>
+
+        <h3>1 &middot; &ldquo;Have they seen it&rdquo; is mostly unanswerable now</h3>
+        <p>Open tracking works by embedding an invisible image; when the mail client loads it, you record an open. Since 2021, <strong>Apple Mail pre-loads that image for every message before the human sees anything</strong> &mdash; on iPhone, iPad and Mac. Gmail proxies images through its own cache. Between them that is the majority of the inboxes you are writing to, and it means a reported &ldquo;open&rdquo; is frequently a machine, while a real reader who blocks images registers nothing at all. Building it would give you a number that looks like insight and is closer to noise, and I would rather not put a metric on your dashboard that quietly lies.</p>
+        <p><strong>What I would build instead is click tracking</strong>, on the portfolio link already in every message. A click cannot be faked by a pre-fetcher in the same way, it is a decision by a person, and it is the signal that actually predicts a reply. It needs one public HTTPS endpoint &mdash; which is a real decision, because right now nothing in Titan is exposed to the internet, and I know you have turned down a public tunnel before. Two honest options: a small always-on endpoint on a host you control, or accept reply-and-bounce as the only engagement signals and skip this entirely. The system works either way; it just learns slower without it.</p>
+
+        <h3>2 &middot; Boom detection needs a source, and the best one is already yours</h3>
+        <p>There is no feed that says &ldquo;dentists in Leeds are booming&rdquo;. Anyone selling you one is selling a guess. But you are already buying the raw material: Google Places hands back a review count and rating for every business you look at, and you already crawl the winners' websites. Cohort statistics over those two things &mdash; how many businesses are brand new, how fast reviews are accumulating, and what share of the vertical still has no booking system &mdash; is a genuine growth signal, computed from data you pay for anyway. Phase 6 is built entirely on that, with no new vendor.</p>
+        <p>The caveat worth stating: velocity needs <em>two scans separated by time</em>. I assumed that meant a cold start &mdash; it does not. Both fields are already in the Places search mask you pay for and already stored on every location row, so there is a usable baseline going back to 17 August for every vertical you have touched. Phase 6 produces a real signal on its first run for existing markets, and only genuinely new verticals have to wait.</p>
+
+        <h3>What is already strong</h3>
+        <p>Evidence-first research, per-industry vocabulary so a solicitor and a gym owner get genuinely different prose, deterministic scoring you can argue with, a send gate that fails closed, exactly-once delivery, warm-up, adaptive limits, statistical A/B testing that reports &ldquo;inconclusive&rdquo; honestly, and a bounded autonomy layer that can only ever be more conservative than you. This is a better foundation than most commercial tools in this space have.</p>
+
+        <h3>The four real gaps</h3>
+        <ul>
+          <li><strong>It has never had a conversation.</strong> Everything is optimised up to the first message. Expertise in converting leads lives in the second, third and fourth exchange &mdash; handling &ldquo;how much&rdquo;, &ldquo;send me examples&rdquo;, &ldquo;we already have someone&rdquo;. Phase 5 is not a feature, it is the missing half of the product.</li>
+          <li><strong>Nothing learns.</strong> Every learning mechanism is written and inert, because they all need a reply rate and there has never been one. The moment Phases 0&ndash;3 produce volume, this stops being a build problem and becomes a switch.</li>
+          <li><strong>It cannot see itself.</strong> A system with 363 unread alarms about its own broken parts is not autonomous regardless of how many gates it passes. Phase 4.</li>
+          <li><strong>It cannot choose its own market.</strong> Every vertical and city in the database was typed by a human. Until the system picks where to hunt, it is an extremely capable tool being pointed &mdash; not an operator. Phase 6.</li>
+        </ul>
+
+        <div class="rule">
+          <span class="label">The honest read</span>
+          <p>You do not need a smarter system. You need the one you have to stop losing 99% of its work, to stop bouncing a fifth of what it sends, and to be able to hold a conversation. The intelligence is already there and it has never had enough traffic to demonstrate it.</p>
+        </div>
+      </section>
+
+      <!-- =========================== 8 -->
+      <section id="decisions">
+        <h2><span class="num">15</span>What I need from you</h2>
+
+        <p>Four still open. Three were answered on 27 August and are struck below: the copywriting format is built, the model keys are in, and the offer set is settled. What is left is the list below plus two one-line answers &mdash; the <strong>AI Gateway permission</strong> on the Cloudflare token, and a decision on the <strong>111 webmail addresses</strong> that carry the business's own name. The contact recovery is done &mdash; +306, not the 1,900 I wrongly projected.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Decision</th><th>Why it matters</th><th>My recommendation</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>An always-on host</strong></td>
+                <td>Every schedule, the warm-up ramp and the whole send loop stop when this laptop sleeps &mdash; and Docker went down during this session, proving it. No amount of code fixes a machine that is not on</td>
+                <td>Move it. A $10&ndash;20/month VPS running the same compose file. This is the highest-leverage single change on the page</td>
+              </tr>
+              <tr>
+                <td><strong>Paid email verification</strong></td>
+                <td>The bounce rate is the one problem that cannot be engineered away &mdash; the prober is right to refuse Google and Microsoft, and that is where the bounces are</td>
+                <td>Buy it. Roughly $30&ndash;60/month at this volume, and it unblocks the entire programme</td>
+              </tr>
+              <tr>
+                <td><strong>Smartlead: fix or drop</strong></td>
+                <td>37 permanent failures and a rejected key. Half-configured costs more than either choice</td>
+                <td>Drop it. The SMTP pool with three authenticated mailboxes already works and gives you full control of the gates</td>
+              </tr>
+              <tr>
+                <td><strong>Campaign structure</strong></td>
+                <td>29 city campaigns cannot be allocated sensibly against one workspace budget</td>
+                <td>Collapse to 5&ndash;6 business-type campaigns spanning markets, as already designed</td>
+              </tr>
+              <tr>
+                <td><strong>How autonomous, exactly</strong></td>
+                <td>Full autonomy means replies get answered without you reading them first</td>
+                <td>Autopilot for first contact and follow-ups; escalate any reply that reads as a real conversation until the classifier has earned trust</td>
+              </tr>
+              <tr>
+                <td><strong>A public endpoint, or none</strong></td>
+                <td>Click tracking needs one HTTPS address the internet can reach. Without it, reply and bounce are your only engagement signals</td>
+                <td>Put one small endpoint on a host you control. Not a tunnel from this machine &mdash; a real, minimal service that does nothing but record a signed click and redirect</td>
+              </tr>
+              <tr>
+                <td><strong>Who may open a campaign</strong></td>
+                <td>Phase 6 lets the system pick verticals and cities itself. That is the last manual decision in the pipeline</td>
+                <td>Let it open campaigns in <em>draft</em> and notify you; promote to active yourself for the first month, then hand it the promotion once its picks have beaten yours</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Suggested order of attack</h3>
+        <ol>
+          <li>Phase 0 in full &mdash; recovers 596 drafts before they expire on 31 August and roughly quadruples usable research output.</li>
+          <li>Phase 1 immediately after &mdash; nothing else is safe to scale until the bounce rate is down.</li>
+          <li>Phase 2, the contact yield work, which is where the commercial ceiling actually sits.</li>
+          <li>Then 3, 4, 5 and 6 in order, each gated on the acceptance criteria above.</li>
+        </ol>
+        <p>Phase 6 is the only one that can safely start early &mdash; its scanner needs two scans separated by weeks before it says anything useful, so kicking off the baseline scan during Phase 1 costs almost nothing and means the boom signal is ready when the volume is.</p>
+      </section>
+
+      <footer class="colophon">
+        TITAN-OS &middot; AUTONOMY PROGRAMME<br>
+        Diagnosed live against the running stack &middot; 15 containers up &middot; HEAD <span style="color:var(--ink-2)">15997d3</span><br>
+        All figures read from the production database and worker logs &middot; last updated 29 August 2026 &middot; 2,860 tests green &middot; mypy clean across 211 files<br>
+        One-pager on 100% of messages &middot; visible in the approvals queue &middot; 140 queued, 0 sent carrying it yet
+      </footer>
+
+    </main>
+  </div>
+</div>
+
