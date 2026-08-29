@@ -17,7 +17,7 @@
  */
 
 import Link from 'next/link';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Badge,
   Button,
@@ -33,13 +33,17 @@ import { api, type Attachment, type Draft } from '@/lib/titan';
 function DraftCard({
   draft,
   attachment,
+  attachmentUrl,
   onDecided,
 }: {
   draft: Draft;
   /** What goes out with the message. Undefined while it is still loading. */
   attachment?: Attachment;
+  /** Object URL for the attachment, once it has been fetched. */
+  attachmentUrl?: string;
   onDecided: () => void;
 }) {
+  const [previewing, setPreviewing] = useState(false);
   const { token, can } = useSession();
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -96,16 +100,9 @@ function DraftCard({
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Attached to this message
               </p>
-              <p className="mt-1 flex items-center gap-2 text-sm text-slate-800">
+              <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-800">
                 <span aria-hidden>&#128206;</span>
-                <a
-                  href="/api/v1/attachment/download"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-medium text-indigo-600 hover:underline"
-                >
-                  {attachment.filename}
-                </a>
+                <span className="font-medium">{attachment.filename}</span>
                 <span className="text-xs text-slate-500">
                   {attachment.size_bytes
                     ? `${Math.round(attachment.size_bytes / 1024)} KB`
@@ -114,11 +111,39 @@ function DraftCard({
                     ? ` · ${attachment.sample_percent}% of messages`
                     : ' · every message'}
                 </span>
+                {attachmentUrl ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewing((open) => !open)}
+                      className="text-xs font-medium text-indigo-600 hover:underline"
+                    >
+                      {previewing ? 'hide' : 'preview'}
+                    </button>
+                    <a
+                      href={attachmentUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-medium text-indigo-600 hover:underline"
+                    >
+                      open in a new tab
+                    </a>
+                  </>
+                ) : (
+                  <span className="text-xs text-slate-400">loading the file…</span>
+                )}
               </p>
               {attachment.body_note ? (
                 <p className="mt-1 text-xs italic text-slate-500">
                   Body adds: &ldquo;{attachment.body_note}&rdquo;
                 </p>
+              ) : null}
+              {previewing && attachmentUrl ? (
+                <iframe
+                  src={attachmentUrl}
+                  title={attachment.filename ?? 'attachment'}
+                  className="mt-2 h-[32rem] w-full rounded-lg border border-slate-200"
+                />
               ) : null}
             </div>
           ) : attachment ? (
@@ -220,6 +245,33 @@ export default function ApprovalsPage() {
   // Fetched once for the page rather than per card: it describes the
   // configuration, not the draft, so every card shows the same answer.
   const attachmentQuery = useApi((t) => api.attachment(t), []);
+
+  // Fetched once and shared by every card: it is one file, and 449 cards each
+  // pulling 105 KB to show the same document would be a self-inflicted DoS.
+  const { token } = useSession();
+  const [attachmentUrl, setAttachmentUrl] = useState<string | undefined>();
+  useEffect(() => {
+    if (!token || !attachmentQuery.data?.enabled) return;
+    let url: string | undefined;
+    let live = true;
+    api
+      .attachmentFile(token)
+      .then((created) => {
+        url = created;
+        // The fetch can outlive the page. Revoking immediately avoids handing
+        // React an object URL that is already dead.
+        if (live) setAttachmentUrl(created);
+        else URL.revokeObjectURL(created);
+      })
+      .catch(() => {
+        // A missing file is already reported by the panel's `reason`; failing
+        // to preview it should not take the approval queue down.
+      });
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [token, attachmentQuery.data?.enabled]);
   const { data, error, loading, reload } = useApi(
     (t) => api.drafts(t, 'awaiting_approval'),
     [],
@@ -254,6 +306,7 @@ export default function ApprovalsPage() {
               key={draft.id}
               draft={draft}
               attachment={attachmentQuery.data ?? undefined}
+              attachmentUrl={attachmentUrl}
               onDecided={reload}
             />
           ))}

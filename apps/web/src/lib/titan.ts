@@ -485,6 +485,23 @@ export const api = {
   // --- overview ------------------------------------------------------------
   stats: (t: string) => call<CrmStats>('/api/v1/stats', { token: t }),
   attachment: (t: string) => call<Attachment>('/api/v1/attachment', { token: t }),
+  /**
+   * The attachment itself, as an object URL the browser can display.
+   *
+   * Not a plain link: the API is a different origin and wants a bearer header,
+   * so an `<a href>` would 404 or 401. The caller owns the returned URL and
+   * should `URL.revokeObjectURL` it when done.
+   */
+  attachmentFile: async (t: string): Promise<string> => {
+    const response = await fetch(`${API_BASE}/api/v1/attachment/download`, {
+      headers: { Authorization: `Bearer ${t}` },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      throw new TitanError(response.status, await describeFailure(response));
+    }
+    return URL.createObjectURL(await response.blob());
+  },
 
   outcomes: (t: string, dimension?: string, windowDays = 30) =>
     call<OutcomeRollup[]>(
