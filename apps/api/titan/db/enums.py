@@ -564,6 +564,17 @@ class Industry(enum.StrEnum):
     OPTICIAN = "optician"
     PHYSIOTHERAPY = "physiotherapy"
     SALON_BARBER = "salon_barber"
+    # Three verticals where the gap Titan sells against is widest, and where
+    # the site being tidy says least about how the business runs. A clinic
+    # taking every booking by telephone during office hours has no website
+    # defect to report and is exactly the prospect this catalogue existed to
+    # reach; see docs/superpowers/specs/2026-09-07-selling-the-absence-design.md
+    CLINIC = "clinic"
+    PRIVATE_HOSPITAL = "private_hospital"
+    # Differs in kind from the two above: the conversion event is a quote
+    # request rather than an appointment, so its playbook leads with enquiry
+    # capture and renewal follow-up instead of booking.
+    INSURANCE = "insurance"
     GENERAL = "general"
 
 

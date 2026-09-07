@@ -1181,6 +1181,272 @@ GENERAL = Playbook(
     ),
 )
 
+CLINIC = Playbook(
+    industry=Industry.CLINIC,
+    name="Clinic booking and patient follow-up",
+    description=(
+        "Private clinics and small medical practices. The gap is almost never "
+        "the website: it is that every appointment goes through a telephone "
+        "answered during office hours, so an enquiry arriving at eight in the "
+        "evening waits until tomorrow or goes to whoever answers first."
+    ),
+    priority_paths=(
+        "/appointments",
+        "/book",
+        "/new-patients",
+        "/patients",
+        "/services",
+        "/contact",
+        "/fees",
+    ),
+    priorities=(
+        _p(
+            "appointment_booking",
+            "Whether an appointment can be made without telephoning",
+            FindingCategory.BOOKING,
+        ),
+        _p(
+            "new_patient_flow",
+            "How a new patient registers",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "out_of_hours_enquiry",
+            "What happens to an enquiry outside opening hours",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "appointment_reminders",
+            "Whether appointment reminders are automated",
+            FindingCategory.RETENTION,
+        ),
+        _p(
+            "patient_reactivation",
+            "Whether lapsed patients are re-engaged",
+            FindingCategory.RETENTION,
+        ),
+        _p(
+            "fees_and_cover",
+            "Whether fees and what is covered are explained",
+            FindingCategory.CONTENT,
+        ),
+    ),
+    offers=(
+        Offer(
+            "clinic_booking",
+            "Online appointment booking",
+            "Self-service appointment booking for new and existing patients",
+            frozenset(
+                {
+                    "no_self_service_booking",
+                    "no_booking_or_enquiry_path",
+                    # A twelve-field enquiry form is the same lost booking as
+                    # no booking path at all, and the same fix covers it.
+                    "high_friction_contact_form",
+                }
+            ),
+            2800,
+        ),
+        Offer(
+            "out_of_hours_responder",
+            "Out-of-hours enquiry handling",
+            "An assistant that answers and captures enquiries when the desk is closed",
+            frozenset({"no_conversational_capability", "no_visible_phone_number"}),
+            3200,
+        ),
+        Offer(
+            "appointment_reminders",
+            "Appointment reminder automation",
+            "Automatic reminders before an appointment and recall afterwards",
+            frozenset({"no_follow_up_automation"}),
+            2200,
+        ),
+        Offer(
+            "review_automation",
+            "Review collection",
+            "Automatic review requests after a visit",
+            frozenset({"no_review_automation"}),
+            1600,
+        ),
+        *QUALITY_OFFERS,
+    ),
+    prohibited_claims=(
+        # An offer is a promise, and neither of these is a promise to make in a
+        # cold opening email. Patient records are special-category data under
+        # UK GDPR; anything touching clinical judgement is a regulated device
+        # question, not a front-desk one.
+        "any handling, storage or processing of patient records",
+        "any clinical, diagnostic or triage capability",
+        "any claim about patient outcomes or waiting times",
+    ),
+)
+
+
+PRIVATE_HOSPITAL = Playbook(
+    industry=Industry.PRIVATE_HOSPITAL,
+    name="Private hospital enquiry routing",
+    description=(
+        "Small private hospitals. Distinct from a clinic in who is enquiring: "
+        "patients, GPs making referrals and consultants all arrive at the same "
+        "switchboard, and the routing between them is manual."
+    ),
+    priority_paths=(
+        "/appointments",
+        "/consultants",
+        "/referrals",
+        "/patients",
+        "/visiting",
+        "/services",
+        "/contact",
+    ),
+    priorities=(
+        _p(
+            "referral_routing",
+            "How a GP referral reaches the right consultant",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "consultant_enquiry",
+            "How a patient reaches a named consultant",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "self_service_booking",
+            "Whether anything can be booked without the switchboard",
+            FindingCategory.BOOKING,
+        ),
+        _p(
+            "out_of_hours_enquiry",
+            "What happens to an enquiry outside switchboard hours",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "visiting_information",
+            "Whether visiting and admission details are findable",
+            FindingCategory.CONTENT,
+        ),
+    ),
+    offers=(
+        Offer(
+            "enquiry_routing",
+            "Enquiry routing",
+            "Routes patient, referral and consultant enquiries to the right desk",
+            frozenset({"no_conversational_capability", "high_friction_contact_form"}),
+            4200,
+        ),
+        Offer(
+            "switchboard_assistant",
+            "Out-of-hours switchboard cover",
+            "An assistant that captures enquiries when the switchboard is closed",
+            frozenset({"no_conversational_capability", "no_visible_phone_number"}),
+            3800,
+        ),
+        Offer(
+            "hospital_booking",
+            "Self-service appointment booking",
+            "Booking that does not require the switchboard",
+            frozenset({"no_self_service_booking", "no_booking_or_enquiry_path"}),
+            3400,
+        ),
+        *QUALITY_OFFERS,
+    ),
+    prohibited_claims=(
+        "any handling, storage or processing of patient records",
+        "any clinical, diagnostic or triage capability",
+        "any claim about patient outcomes, waiting times or capacity",
+    ),
+)
+
+
+INSURANCE = Playbook(
+    industry=Industry.INSURANCE,
+    name="Insurance quote capture and renewals",
+    description=(
+        "Brokers and agencies. The conversion event is a quote request rather "
+        "than an appointment, and the retention event is a renewal -- so the "
+        "money is lost at a form nobody completes and at a renewal nobody "
+        "chases, not at a booking page."
+    ),
+    priority_paths=(
+        "/quote",
+        "/get-a-quote",
+        "/claims",
+        "/policies",
+        "/renewals",
+        "/contact",
+        "/about",
+    ),
+    priorities=(
+        _p(
+            "quote_request",
+            "How a prospect asks for a quote, and how much it asks of them",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "renewal_follow_up",
+            "Whether renewals are chased automatically",
+            FindingCategory.RETENTION,
+        ),
+        _p(
+            "out_of_hours_enquiry",
+            "What happens to an enquiry outside office hours",
+            FindingCategory.CONVERSION,
+        ),
+        _p(
+            "policy_information",
+            "Whether cover is explained well enough to enquire against",
+            FindingCategory.CONTENT,
+        ),
+        _p(
+            "review_presence",
+            "Whether reviews are collected and shown",
+            FindingCategory.CONTENT,
+        ),
+    ),
+    offers=(
+        Offer(
+            "quote_capture",
+            "Quote enquiry capture",
+            "Captures and qualifies a quote enquiry without a long form",
+            frozenset(
+                {
+                    "high_friction_contact_form",
+                    "no_conversational_capability",
+                    # A brokerage with no enquiry path and no number on the
+                    # page has the same problem in a sharper form: there is
+                    # nowhere for a quote request to land at all.
+                    "no_booking_or_enquiry_path",
+                    "no_visible_phone_number",
+                }
+            ),
+            3600,
+        ),
+        Offer(
+            "renewal_automation",
+            "Renewal follow-up",
+            "Automatic renewal reminders and follow-up",
+            frozenset({"no_follow_up_automation"}),
+            2600,
+        ),
+        Offer(
+            "insurance_review_automation",
+            "Review collection",
+            "Automatic review requests after a policy is placed",
+            frozenset({"no_review_automation"}),
+            1600,
+        ),
+        *QUALITY_OFFERS,
+    ),
+    prohibited_claims=(
+        # FCA territory. Advising on or arranging a contract of insurance is a
+        # regulated activity, and an offer is a promise.
+        "any advice on cover, suitability or price",
+        "any handling, assessment or settlement of claims",
+        "any claim about premiums, savings or payout outcomes",
+    ),
+)
+
+
 PLAYBOOKS: dict[Industry, Playbook] = {
     Industry.LAW_FIRM: LAW_FIRM,
     Industry.GYM_FITNESS: GYM_FITNESS,
@@ -1195,6 +1461,9 @@ PLAYBOOKS: dict[Industry, Playbook] = {
     Industry.OPTICIAN: OPTICIAN,
     Industry.PHYSIOTHERAPY: PHYSIOTHERAPY,
     Industry.SALON_BARBER: SALON_BARBER,
+    Industry.CLINIC: CLINIC,
+    Industry.PRIVATE_HOSPITAL: PRIVATE_HOSPITAL,
+    Industry.INSURANCE: INSURANCE,
 }
 
 

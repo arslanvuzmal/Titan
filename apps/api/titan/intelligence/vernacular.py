@@ -586,6 +586,97 @@ _SALON_BARBER = Vernacular(
     automation_workflow="appointment booking",
 )
 
+_CLINIC = Vernacular(
+    industry=Industry.CLINIC,
+    noun="clinic",
+    money_page="appointments page",
+    conversion_consequence=(
+        "Anyone who got that far had decided to book, so the break costs an "
+        "appointment rather than a browse."
+    ),
+    conversion_capability=(
+        "I build and repair booking flows for appointment businesses and can "
+        "send you the exact issue and how I would fix it."
+    ),
+    quality_consequence=(
+        "It is a small thing, but it makes parts of the site harder to use and "
+        "costs those pages some of their context."
+    ),
+    quality_capability=(
+        "I can list the affected pages and the quickest way to put them right."
+    ),
+    automation_consequence=(
+        "Somebody deciding at nine in the evening has to wait for the desk to "
+        "open, and the ones who do not wait ring whoever answers first."
+    ),
+    automation_capability=(
+        "I set up booking and an out-of-hours responder that captures the "
+        "enquiry instead of losing it to the clock."
+    ),
+    automation_workflow="appointment booking",
+)
+
+_PRIVATE_HOSPITAL = Vernacular(
+    industry=Industry.PRIVATE_HOSPITAL,
+    noun="hospital",
+    money_page="appointments page",
+    conversion_consequence=(
+        "Enquiries here come from patients, referring GPs and consultants "
+        "alike, so a break in the path holds up more than one kind of booking."
+    ),
+    conversion_capability=(
+        "I build and repair enquiry and booking paths and can send you the "
+        "exact issue and how I would fix it."
+    ),
+    quality_consequence=(
+        "It is a small thing, but it makes parts of the site harder to use and "
+        "costs those pages some of their context."
+    ),
+    quality_capability=(
+        "I can list the affected pages and the quickest way to put them right."
+    ),
+    automation_consequence=(
+        "Every enquiry arrives at the same switchboard and is sorted by hand, "
+        "so the ones that come in after hours wait until somebody is back."
+    ),
+    automation_capability=(
+        "I set up routing that sends each enquiry to the right desk and covers "
+        "the hours the switchboard does not."
+    ),
+    automation_workflow="enquiry routing",
+)
+
+_INSURANCE = Vernacular(
+    industry=Industry.INSURANCE,
+    noun="brokerage",
+    money_page="quote page",
+    conversion_consequence=(
+        "Anyone who reached that point was asking for a quote, so the break "
+        "costs an enquiry that had already chosen you."
+    ),
+    conversion_capability=(
+        "I build and repair quote and enquiry forms and can send you the exact "
+        "issue and how I would fix it."
+    ),
+    quality_consequence=(
+        "It is a small thing, but it makes parts of the site harder to use and "
+        "costs those pages some of their context."
+    ),
+    quality_capability=(
+        "I can list the affected pages and the quickest way to put them right."
+    ),
+    automation_consequence=(
+        "A quote asked for on a Saturday sits until Monday, and a renewal "
+        "nobody chases is a policy that quietly moves elsewhere."
+    ),
+    automation_capability=(
+        "I set up enquiry capture that works outside office hours and renewal "
+        "follow-up that runs without anybody remembering it."
+    ),
+    automation_workflow="enquiry capture and renewal follow-up",
+)
+
+
 #: The fallback, and deliberately not a weaker version of the others.
 #:
 #: It is what a message uses when the business type is genuinely unknown, and an
@@ -638,6 +729,9 @@ VERNACULARS: dict[Industry, Vernacular] = {
     Industry.OPTICIAN: _OPTICIAN,
     Industry.PHYSIOTHERAPY: _PHYSIOTHERAPY,
     Industry.SALON_BARBER: _SALON_BARBER,
+    Industry.CLINIC: _CLINIC,
+    Industry.PRIVATE_HOSPITAL: _PRIVATE_HOSPITAL,
+    Industry.INSURANCE: _INSURANCE,
 }
 
 
