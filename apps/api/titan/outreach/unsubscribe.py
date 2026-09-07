@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+from typing import Any
 from urllib.parse import quote
 
 from pydantic import SecretStr
@@ -80,4 +81,46 @@ def bearer(secret: Secret) -> str:
     return f"Bearer {_raw(secret)}"
 
 
-__all__ = ["Secret", "bearer", "link", "normalize", "one_click_url", "sign"]
+def headers_for(sender: Any, recipient: str, settings: Any) -> dict[str, str | None]:
+    """The List-Unsubscribe pair for one message.
+
+    Kept together because they are only correct together: the POST declaration
+    without an https target renders no button, and an https target without the
+    declaration is what Gmail treats as a non-compliant bulk sender.
+
+    Lives here, rather than beside the one caller that used to own it, because
+    a message's sending mailbox is no longer decided once. The outbox worker
+    can move a message to a different mailbox when the pinned one refuses, and
+    the headers have to move with it -- so both the queueing step and the
+    worker have to build them the same way, from the same function.
+    """
+    targets: list[str] = []
+    one_click: str | None = None
+
+    if sender.unsubscribe_url_template and settings.unsubscribe_secret:
+        targets.append(
+            one_click_url(
+                recipient,
+                base_url=str(settings.owner_portfolio_url),
+                secret=settings.unsubscribe_secret,
+            )
+        )
+        one_click = "List-Unsubscribe=One-Click"
+    if sender.unsubscribe_mailto:
+        targets.append(sender.unsubscribe_mailto)
+
+    return {
+        "list_unsubscribe": ", ".join(f"<{t}>" for t in targets) if targets else None,
+        "list_unsubscribe_post": one_click,
+    }
+
+
+__all__ = [
+    "Secret",
+    "bearer",
+    "headers_for",
+    "link",
+    "normalize",
+    "one_click_url",
+    "sign",
+]

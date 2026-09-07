@@ -547,6 +547,82 @@ def extract_contacts_from_pages(
 DIGIT_RUN_PREFIX = re.compile(r"^[0-9]{3,}[a-z]", re.I)
 
 
+#: Pages whose published addresses are written by a lawyer, not answered by one.
+#:
+#: A privacy notice, cookie banner or terms page carries an address because the
+#: GDPR requires the data controller to name one. That is a different act from
+#: a business putting a mailbox on its contact page: the contact address is
+#: where they want to be reached, and the policy address is a compliance field
+#: filled in once -- very often from the web agency's template, naming a
+#: mailbox that was never created, or one retired years ago with the page never
+#: revisited.
+#:
+#: This is not a guess. Measured on Titan's own send history: addresses taken
+#: from these pages hard-bounced at **27.8%** (5 of 18), against **1.4%**
+#: (3 of 211) for everything else -- a twentyfold difference, and between them
+#: the policy-page addresses account for most of the bounces that blocked every
+#: mailbox. No other signal available before sending separates the population
+#: anywhere near as sharply.
+#:
+#: DOWNGRADE, not REFUSE, matching :data:`DIGIT_RUN_PREFIX`. Plenty of small
+#: firms put their real ``info@`` on the privacy page too, and a refusal would
+#: discard them with no way back. Downgrading holds the address below the
+#: automatic sending bar and leaves it for a person to release.
+#:
+#: Note that a probe cannot release it: ``_resolve`` checks DOWNGRADE before
+#: CONFIRM, so a mailbox the probe confirms still lands at RISKY. That ordering
+#: is right rather than incidental -- the same rule stops a confirmed mailbox
+#: at a lookalike domain from being sent to, where confirmation means somebody
+#: really is receiving mail at the typo and it still is not the business.
+#: The consequence here is narrower than it looks, because 70% of this list
+#: sits behind operators the probe declines to ask at all.
+#:
+#: **Matched against the path only, never the host.** The first version of this
+#: matched the whole URL and caught 46 law firms whose *domain* contains
+#: "legal" -- ``clarkslegal.com``, ``mueller.legal``, ``burneylegal.co.uk`` --
+#: most of them from their own ``/contact/`` page. Solicitors are one of the
+#: larger verticals on this list, so the rule aimed at the smallest bad
+#: population was quietly holding back one of the best good ones.
+#:
+#: Bare ``legal`` is gone for the same reason: a firm's ``/legal-services``
+#: page is not a compliance notice. Only the phrases that name a compliance
+#: page in their own right are matched, in the markets Titan sends to.
+#:
+#: ``policy`` is kept despite ``/policies`` being a plausible product page for
+#: an insurance broker, because it is the one token carrying direct evidence:
+#: ``/booking-policy/`` produced two of the observed bounces on its own.
+POLICY_PAGE_PATH = re.compile(
+    r"""(
+          privacy | cookie | gdpr | disclaimer | impressum | imprint
+        | datenschutz | polityka-prywatnosci | privacybeleid
+        | terms                       # /terms, /terms-and-conditions
+        | polic(y|ies)                # /privacy-policy, /booking-policy
+        | legal[-_]?notice            # but never bare "legal"
+        | mentions[-_]?legales | avis(o)?[-_]?legal | note[-_]?legali
+    )""",
+    re.I | re.X,
+)
+
+
+def published_on_a_policy_page(source_url: str | None) -> bool:
+    """Whether this address was taken from a compliance page.
+
+    Splits the host off before matching, because a business is entitled to
+    have any of these words in its own domain name and many do. Everything
+    after the host counts -- a query string can carry the page identity on
+    sites that route through one script.
+    """
+    if not source_url:
+        return False
+    remainder = source_url.split("://", 1)[-1]
+    slash = remainder.find("/")
+    if slash == -1:
+        # A bare domain with no path: the home page, which is not a
+        # compliance page whatever the domain happens to be called.
+        return False
+    return POLICY_PAGE_PATH.search(remainder[slash:]) is not None
+
+
 #: Free mailbox providers a small business plausibly runs its own mail on.
 #:
 #: The distinction that matters: an address at one of these is *nobody's* by

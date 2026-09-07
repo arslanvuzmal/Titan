@@ -48,7 +48,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from titan.db.enums import VerificationStatus, verification_permits_sending
 from titan.db.models import ContactChannel, ContactVerification
 from titan.intelligence.bounce_risk import assess
-from titan.intelligence.mx import MxCheck, MxResolver, check_many, system_mx_resolver
+from titan.intelligence.mx import (
+    MxCheck,
+    MxResolver,
+    MxStatus,
+    check_many,
+    system_mx_resolver,
+)
 from titan.intelligence.verifier import MailboxVerifier
 
 logger = logging.getLogger(__name__)
@@ -90,6 +96,10 @@ class Candidate:
     domain: str
     source: object
     status_before: VerificationStatus
+    #: The page the address was published on. Provenance is not one thing: a
+    #: contact page and a privacy notice are both FIRST_PARTY_WEBSITE and the
+    #: second bounces about twenty times as often.
+    source_url: str | None = None
 
 
 @dataclass
@@ -141,6 +151,7 @@ async def find_recheckable(
                 ContactChannel.value_domain,
                 ContactChannel.source,
                 ContactChannel.verification_status,
+                ContactChannel.source_url,
             )
             .where(
                 ContactChannel.workspace_id == workspace_id,
@@ -182,6 +193,7 @@ async def find_recheckable(
             domain=(row[2] or row[1].partition("@")[2] or "").lower(),
             source=row[3],
             status_before=row[4],
+            source_url=row[5],
         )
         for row in rows
     ]
@@ -235,12 +247,48 @@ async def reverify(
             report.remained += 1
             continue
 
+        # Two lookups of the same domain, and they can disagree.
+        #
+        # The probe resolves MX itself before deciding whether the operator is
+        # worth asking, and it reports what it saw in ``raw["mx"]``. So this
+        # loop holds two independent observations of one domain, taken seconds
+        # apart -- and on 31 August they disagreed on
+        # burnssolicitors.com: the bulk check said "NXDOMAIN, confirmed twice"
+        # while the probe, moments later, saw protection.outlook.com. The
+        # domain was live throughout.
+        #
+        # NXDOMAIN is one of the few verdicts this engine treats as conclusive,
+        # so the false one refused a real law firm outright -- and INVALID is
+        # excluded from RECHECKABLE, meaning nothing would ever have looked at
+        # it again. A resolver having a bad minute is indistinguishable from
+        # every domain on earth being dead, and "confirmed twice" does not
+        # help when both attempts hit the same bad minute.
+        #
+        # Contradiction is not evidence. When the two disagree, this drops to
+        # "not checked", which is what the engine already does with a failed
+        # lookup, and lets the remaining layers decide.
+        if (
+            mx is not None
+            and mx.is_conclusively_undeliverable
+            and verification.raw.get("mx") == MxStatus.PRESENT.value
+        ):
+            logger.warning(
+                "MX observations disagree for this domain; treating it as unchecked",
+                extra={
+                    "domain": candidate.domain,
+                    "bulk_status": mx.status.value,
+                    "probe_status": verification.raw.get("mx"),
+                },
+            )
+            mx = None
+
         report.checked += 1
         risk = assess(
             email=candidate.email,
             source=candidate.source,  # type: ignore[arg-type]
             mx=mx,
             verification=verification if verification.is_conclusive else None,
+            source_url=candidate.source_url,
         )
         report.record(risk.status)
 

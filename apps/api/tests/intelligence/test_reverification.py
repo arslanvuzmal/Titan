@@ -512,3 +512,90 @@ def test_the_candidate_carries_the_status_it_started_from() -> None:
     )
 
     assert candidate.status_before in SENDABLE_VERIFICATION_STATUSES
+
+
+# ------------------------------------------------- contradictory MX readings
+def dead_domain(domain: str) -> tuple[list[str], bool]:
+    """A resolver that says the domain does not exist.
+
+    Stands in for a resolver having a bad minute, which is indistinguishable
+    from the domain genuinely being gone -- that being the whole problem.
+    """
+    return [], False
+
+
+async def test_a_false_nxdomain_is_not_allowed_to_refuse_a_live_domain(
+    db_session, workspace, channel
+) -> None:
+    """Two MX readings, taken seconds apart, that disagree.
+
+    Observed on 31 August: the bulk check reported "NXDOMAIN, confirmed twice"
+    for burnssolicitors.com while the probe, moments later, saw
+    protection.outlook.com. The domain was live throughout, and the false
+    reading refused a real firm outright.
+
+    It is worth being precise about why that was expensive rather than merely
+    wrong. NXDOMAIN is conclusive, so it produced INVALID; INVALID is excluded
+    from RECHECKABLE, so the catch-up pass would never look at the address
+    again. A transient DNS failure became a permanent verdict that nothing
+    downstream could report or undo.
+    """
+    verifier = ScriptedVerifier(
+        {
+            channel.normalized_value: VerificationResult(
+                status=VerificationStatus.UNKNOWN,
+                provider="scripted",
+                detail="fronted by an operator worth not asking",
+                # What the probe's own lookup saw.
+                raw={"mx": "mx_present", "operator": "protection.outlook.com"},
+            )
+        }
+    )
+
+    report = await reverify(
+        db_session,
+        workspace_id=workspace,
+        verifier=verifier,
+        apply=True,
+        resolver=dead_domain,
+    )
+    await db_session.commit()
+
+    await db_session.refresh(channel)
+    assert channel.verification_status is not VerificationStatus.INVALID
+    assert channel.verification_status in SENDABLE_VERIFICATION_STATUSES
+    assert report.downgraded == []
+
+
+async def test_an_uncontradicted_dead_domain_still_refuses(
+    db_session, workspace, channel
+) -> None:
+    """The control, and the more important half.
+
+    Contradiction is the only thing the rule above reacts to. A domain that is
+    genuinely gone produces no contradicting reading, and must still be
+    refused -- every address at it hard-bounces, and softening that would
+    trade a rare false refusal for a steady supply of real ones.
+    """
+    verifier = ScriptedVerifier(
+        {
+            channel.normalized_value: VerificationResult(
+                status=VerificationStatus.UNKNOWN,
+                provider="scripted",
+                raw={"mx": "domain_does_not_exist"},
+            )
+        }
+    )
+
+    await reverify(
+        db_session,
+        workspace_id=workspace,
+        verifier=verifier,
+        apply=True,
+        resolver=dead_domain,
+    )
+    await db_session.commit()
+
+    await db_session.refresh(channel)
+    assert channel.verification_status is VerificationStatus.INVALID
+    assert channel.verification_status not in SENDABLE_VERIFICATION_STATUSES

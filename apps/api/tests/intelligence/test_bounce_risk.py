@@ -552,3 +552,125 @@ def test_the_assessment_serialises_every_signal() -> None:
     assert detail["permits_sending"] is False
     recorded = {s["code"] for s in detail["signals"]}  # type: ignore[index,union-attr]
     assert recorded == codes(risk)
+
+
+# ==========================================================================
+# Which page published it
+# ==========================================================================
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.test/privacy-policy/",
+        "https://example.test/privacy-and-cookies/",
+        "https://www.example.test/booking-policy/",
+        "https://example.test/terms",
+        "https://example.test/legal/gdpr",
+        "https://example.test/cookie-notice",
+        "https://example.test/impressum",
+    ],
+)
+def test_a_policy_page_address_is_held_back(url: str) -> None:
+    """Same provenance, different page, different answer.
+
+    FIRST_PARTY_WEBSITE alone would make this sendable -- and did, which is how
+    five of the eight bounces behind a blocked mailbox got out.
+    """
+    risk = assess(
+        email="info@harborline-legal.test",
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        source_url=url,
+    )
+
+    assert "policy_page_source" in codes(risk)
+    assert risk.status is VerificationStatus.RISKY
+    assert risk.permits_sending is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.test/contact/",
+        "https://example.test/contact-us",
+        "https://example.test/",
+        "https://example.test/about/our-team",
+        "https://example.test/book-an-appointment",
+        # The host is not the page. Every one of these is a real shape from
+        # the live list, and the first version of this rule downgraded 46 of
+        # them -- solicitors, mostly from their own contact page.
+        "https://clarkslegal.test/about-us/",
+        "https://mueller.legal/de/",
+        "https://burneylegal.test/services/",
+        "https://marquis-legal.test/contact/",
+        "https://privacyshieldpartners.test/contact",
+        # A firm's own legal *services*, which is what it sells.
+        "https://example.test/legal-services",
+        "https://example.test/legal-advice-for-startups",
+    ],
+)
+def test_an_ordinary_page_address_still_sends(url: str) -> None:
+    """The false-positive control. This rule costs leads if it is too broad,
+    and a contact page is the population it must never touch.
+
+    Solicitors are one of the larger verticals Titan sends to, so a rule that
+    reads "legal" in a domain name as a compliance page aims at the smallest
+    bad population and hits one of the best good ones."""
+    risk = assess(
+        email="info@harborline-legal.test",
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        source_url=url,
+    )
+
+    assert "policy_page_source" not in codes(risk)
+    assert risk.status is VerificationStatus.PUBLISHED_FIRST_PARTY
+    assert risk.permits_sending is True
+
+
+def test_an_unrecorded_source_url_is_not_held_against_the_address() -> None:
+    """Absent means "not known", never "found wanting" -- the rule the whole
+    engine is built on. 154 stored channels have no source_url and predate the
+    column; none of them may become unsendable because of that."""
+    risk = assess(
+        email="info@harborline-legal.test",
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        source_url=None,
+    )
+
+    assert "policy_page_source" not in codes(risk)
+    assert risk.permits_sending is True
+
+
+def test_a_confirmed_mailbox_does_not_rescue_a_policy_page_address() -> None:
+    """Confirmation says a mailbox receives mail. It does not say the business
+    reads it, and a compliance address that accepts and ignores is the outcome
+    this rule exists to avoid paying for."""
+    risk = assess(
+        email="info@harborline-legal.test",
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        source_url="https://example.test/privacy-policy/",
+        verification=VerificationResult(
+            status=VerificationStatus.PROVIDER_VERIFIED, provider="test"
+        ),
+    )
+
+    assert risk.status is VerificationStatus.RISKY
+    assert risk.permits_sending is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://clarkslegal.test/privacy-policy",
+        "https://mueller.legal/de/datenschutz",
+        "https://burneylegal.test/legal-notice",
+    ],
+)
+def test_the_page_still_decides_on_a_domain_that_shares_its_words(url: str) -> None:
+    """The other half: stripping the host must not stop the path being read."""
+    risk = assess(
+        email="info@harborline-legal.test",
+        source=ContactSource.FIRST_PARTY_WEBSITE,
+        source_url=url,
+    )
+
+    assert "policy_page_source" in codes(risk)
+    assert risk.permits_sending is False

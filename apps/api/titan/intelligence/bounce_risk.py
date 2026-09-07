@@ -51,6 +51,7 @@ from titan.intelligence.contacts import (
     email_domain,
     is_valid_email,
     normalize_email,
+    published_on_a_policy_page,
 )
 from titan.intelligence.domain_health import DomainHealth, DomainWindow, classify, explain
 from titan.intelligence.mx import MxCheck
@@ -137,6 +138,7 @@ def assess(
     mx: MxCheck | None = None,
     verification: VerificationResult | None = None,
     history: DomainWindow | None = None,
+    source_url: str | None = None,
 ) -> BounceRisk:
     """Classify a recipient as deliverable, catch-all, risky, unknown or invalid.
 
@@ -194,6 +196,28 @@ def assess(
                 "the local part is a digit run followed by letters, the shape a "
                 "phone number makes when it runs into an address; it may be two "
                 "things stuck together rather than a published mailbox",
+            )
+        )
+
+    # ---- layer 1c: which page published it -------------------------------
+    # Provenance is not one thing. FIRST_PARTY_WEBSITE says the address came
+    # off the company's own site, and that is the claim carrying every
+    # published_first_party address past the sending bar -- but a contact page
+    # and a privacy notice make very different claims. One says "reach us
+    # here". The other fills in a field the GDPR requires, very often from the
+    # web agency's template, naming a mailbox nobody created.
+    #
+    # Measured, not assumed: 27.8% of sends to policy-page addresses hard
+    # bounced, against 1.4% for every other page. See POLICY_PAGE_URL.
+    if published_on_a_policy_page(source_url):
+        signals.append(
+            RiskSignal(
+                "policy_page_source",
+                Verdict.DOWNGRADE,
+                "published on a privacy, cookie or terms page rather than a "
+                "contact page; such addresses are compliance fields more often "
+                "than staffed mailboxes, and bounce around twenty times as "
+                "often in Titan's own send history",
             )
         )
 

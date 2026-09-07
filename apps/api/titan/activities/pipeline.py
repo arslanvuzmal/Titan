@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
-from titan.config import Settings, get_settings
+from titan.config import get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
     ContactSource,
@@ -1065,6 +1065,7 @@ async def _assess_bounce_risk(
         source=candidate.source,
         mx=mx,
         history=history,
+        source_url=candidate.source_url,
     )
     if risk.refusals:
         return risk
@@ -1089,6 +1090,7 @@ async def _assess_bounce_risk(
         mx=mx,
         history=history,
         verification=result,
+        source_url=candidate.source_url,
     )
 
 
@@ -1596,35 +1598,6 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
 # ==========================================================================
 
 
-def _unsubscribe_headers(
-    sender: SenderIdentity, recipient: str, settings: Settings
-) -> dict[str, str | None]:
-    """The List-Unsubscribe pair for one message.
-
-    Kept together because they are only correct together: the POST declaration
-    without an https target renders no button, and an https target without the
-    declaration is what Gmail treats as a non-compliant bulk sender.
-    """
-    targets: list[str] = []
-    one_click: str | None = None
-
-    if sender.unsubscribe_url_template and settings.unsubscribe_secret:
-        url = unsubscribe.one_click_url(
-            recipient,
-            base_url=str(settings.owner_portfolio_url),
-            secret=settings.unsubscribe_secret,
-        )
-        targets.append(url)
-        one_click = "List-Unsubscribe=One-Click"
-    if sender.unsubscribe_mailto:
-        targets.append(sender.unsubscribe_mailto)
-
-    return {
-        "list_unsubscribe": ", ".join(f"<{t}>" for t in targets) if targets else None,
-        "list_unsubscribe_post": one_click,
-    }
-
-
 @activity.defn(name="queue_message")
 async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
     """Write the outbox row. Does NOT send.
@@ -1788,7 +1761,7 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
                 # implement RFC 8058. `list_unsubscribe_post` is what makes the
                 # button appear at all -- without it the header is present and
                 # not one-click, which is exactly what the send gate refuses.
-                **_unsubscribe_headers(sender, channel.value, get_settings()),
+                **unsubscribe.headers_for(sender, channel.value, get_settings()),
             },
         )
         session.add(outbox)
