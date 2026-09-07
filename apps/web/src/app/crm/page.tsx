@@ -8,10 +8,17 @@
  * Titan measures page facts and delivery outcomes -- it does not measure
  * business results, and a dashboard that displays one it did not measure is
  * the exact failure the pre-0.2 build shipped.
+ *
+ * The counters below are cumulative -- every lead, every message, ever. That
+ * makes them useless for the question asked most often, which is whether
+ * anything is going out *right now*: 237 sent reads identically on a day that
+ * sent forty and a day that sent nothing. `TodaySection` answers that one, and
+ * sits first because it is the reason the page gets opened.
  */
 
 import Link from 'next/link';
 import React from 'react';
+import { TodaySection } from '@/components/crm/Today';
 import { Badge, Card, ErrorNote, Spinner, Stat } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
 import { api } from '@/lib/titan';
@@ -83,6 +90,8 @@ export default function OverviewPage() {
           estimated or projected.
         </p>
       </div>
+
+      <TodaySection />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Leads" value={data.leads_total} hint={`${data.organizations_total} businesses`} />

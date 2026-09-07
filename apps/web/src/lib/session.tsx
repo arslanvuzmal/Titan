@@ -170,6 +170,102 @@ export function useSession(): SessionValue {
   return value;
 }
 
+
+/**
+ * Load data repeatedly, for a panel that has to stay current on its own.
+ *
+ * Three ways this differs from `useApi`, each answering a way a live number
+ * misleads:
+ *
+ * **A failed poll does not erase the last good answer.** `useApi` clears `data`
+ * on error, which is right for a page load -- there is nothing to show. Here
+ * there is: the numbers from thirty seconds ago, which are still roughly true.
+ * Blanking the section on one dropped request would make a network blip look
+ * like a stopped run, which is the exact misreading this panel exists to
+ * prevent. The error is surfaced alongside instead, and `stale` says so.
+ *
+ * **It stops while the tab is hidden.** A backgrounded dashboard polling all
+ * night is requests nobody reads. It refreshes immediately on return rather
+ * than waiting out the interval, so the first thing seen is current.
+ *
+ * **`fetchedAt` is exposed.** A figure that updates silently is indistinguishable
+ * from one that has quietly stopped updating, so the caller can always say when
+ * the number was last true.
+ */
+export function useLiveApi<T>(
+  loader: (token: string) => Promise<T>,
+  intervalMs: number,
+): {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+  fetchedAt: Date | null;
+  stale: boolean;
+  reload: () => void;
+} {
+  const { token } = useSession();
+  const [state, setState] = useState<{
+    data: T | null;
+    error: string | null;
+    fetchedAt: Date | null;
+  }>({ data: null, error: null, fetchedAt: null });
+  const [nonce, setNonce] = useState(0);
+
+  // The loader is rebuilt on every render by every caller that writes it
+  // inline. Held in a ref so the polling effect depends on the interval and the
+  // token alone -- otherwise each render tears down and restarts the timer, and
+  // the interval never actually elapses.
+  const loaderRef = React.useRef(loader);
+  loaderRef.current = loader;
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+
+    const run = () => {
+      loaderRef
+        .current(token)
+        .then((result) => {
+          if (!cancelled) setState({ data: result, error: null, fetchedAt: new Date() });
+        })
+        .catch((e: unknown) => {
+          // Keep whatever was last known good. `stale` is how the caller tells
+          // the difference between a current number and a surviving one.
+          if (!cancelled) {
+            setState((prev) => ({
+              ...prev,
+              error: e instanceof Error ? e.message : 'request failed',
+            }));
+          }
+        });
+    };
+
+    run();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') run();
+    }, intervalMs);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') run();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [token, intervalMs, nonce]);
+
+  return {
+    data: state.data,
+    error: state.error,
+    loading: token !== null && state.fetchedAt === null && state.error === null,
+    fetchedAt: state.fetchedAt,
+    stale: state.error !== null && state.data !== null,
+    reload: () => setNonce((n) => n + 1),
+  };
+}
+
 /**
  * Load data for the signed-in session.
  *

@@ -29,19 +29,20 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from fastapi.responses import FileResponse
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from titan.delivery.outbox_worker import ONE_PAGER_NOTE
 from titan.api.schemas import (
     AttachmentOut,
     ContactChannelOut,
     ContactOut,
     CrmStatsOut,
+    DeferralOut,
     DraftOut,
     LeadOut,
+    MailboxDayOut,
     MeetingOut,
     MessageOut,
     OpportunityOut,
@@ -57,6 +58,7 @@ from titan.api.schemas import (
     TimelineEventOut,
     TimingReportOut,
     TimingSlotOut,
+    TodayOut,
     VariantArmOut,
     VariantComparisonOut,
 )
@@ -86,7 +88,9 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import workspace_session
+from titan.delivery import day_report
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
+from titan.delivery.outbox_worker import ONE_PAGER_NOTE
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence import domain_health, insights, timing
 from titan.intelligence import portfolio as portfolio_mod
@@ -860,6 +864,69 @@ async def crm_stats(
             ),
             operating_mode=workspace.operating_mode.value,
         )
+
+
+@router.get("/today", response_model=TodayOut)
+async def crm_today(
+    principal: Principal = Depends(require("research:read")),
+) -> TodayOut:
+    """What has gone out today, and what is left of the day.
+
+    Cheap enough to poll. Every figure is an aggregate over indexed columns for
+    one workspace, and the allowance arithmetic runs over the handful of
+    sending identities rather than over messages -- so a screen refreshing this
+    every half minute costs the database less than one lead list.
+
+    Deliberately *not* cached. A stale "sent today" is worse than no number at
+    all: it is the one figure on the dashboard an operator reads to decide
+    whether to intervene, and a cached copy would say the run is healthy for
+    however long the cache lives after it has stopped.
+    """
+    now = dt.datetime.now(dt.UTC)
+    async with workspace_session(principal.workspace_id) as session:
+        report = await day_report.build(session, principal.workspace_id, now=now)
+
+    return TodayOut(
+        as_of=report.as_of,
+        window_date=report.window_date,
+        sent=report.sent,
+        ceiling=report.ceiling,
+        remaining=report.remaining,
+        delivered=report.delivered,
+        bounced=report.bounced,
+        complained=report.complained,
+        failed=report.failed,
+        queued=report.queued,
+        bounce_rate=report.bounce_rate_today,
+        hourly=list(report.hourly),
+        mailboxes=[
+            MailboxDayOut(
+                sender_identity_id=uuid.UUID(box.sender_identity_id),
+                label=box.label,
+                from_email=box.from_email,
+                sent=box.sent,
+                allowed=box.allowed,
+                remaining=box.remaining,
+                configured=box.configured,
+                queued=box.queued,
+                health=box.health,
+                health_as_of=box.health_as_of,
+                warmup_day=box.warmup_day,
+                warmup_days=box.warmup_days,
+                note=box.note,
+                reasons=list(box.reasons),
+            )
+            for box in report.mailboxes
+        ],
+        deferrals=[
+            DeferralOut(
+                reason=item.reason,
+                count=item.count,
+                next_attempt_at=item.next_attempt_at,
+            )
+            for item in report.deferrals
+        ],
+    )
 
 
 # ==========================================================================

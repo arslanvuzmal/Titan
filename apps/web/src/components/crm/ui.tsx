@@ -60,6 +60,16 @@ const STATUS_TONE: Record<string, keyof typeof TONES> = {
   complained: 'bad',
   unsubscribed: 'bad',
   failed: 'bad',
+  // mailbox health, as sender_health.classify names it. `warming` is info
+  // rather than warn: a new mailbox sending a tenth of its ceiling is the ramp
+  // working, not a problem, and colouring it amber would train the eye to
+  // ignore amber on the row that matters.
+  healthy: 'good',
+  warming: 'info',
+  watch: 'warn',
+  degraded: 'warn',
+  blocked: 'bad',
+  unknown: 'neutral',
   // draft / campaign
   approved: 'good',
   changes_requested: 'warn',

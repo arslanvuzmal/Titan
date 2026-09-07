@@ -338,6 +338,63 @@ export interface CrmStats {
   operating_mode: string;
 }
 
+/** One mailbox's day, with the sentence that explains its ceiling. */
+export interface MailboxDay {
+  sender_identity_id: string;
+  label: string;
+  from_email: string;
+  sent: number;
+  /** What the gate would allow today. Zero means it may not send at all. */
+  allowed: number;
+  remaining: number;
+  configured: number;
+  queued: number;
+  health: string;
+  /**
+   * The date of the snapshot behind `health`. Earlier than `window_date` means
+   * nothing has sent from this mailbox today and the daily capture has not run
+   * -- shown as stale rather than presented as a current verdict.
+   */
+  health_as_of: string | null;
+  warmup_day: number | null;
+  warmup_days: number;
+  note: string;
+  reasons: string[];
+}
+
+/** Why messages are waiting, in the gate's own words. */
+export interface Deferral {
+  reason: string;
+  count: number;
+  next_attempt_at: string | null;
+}
+
+/**
+ * Today's sending.
+ *
+ * `ceiling` is what the gate would permit, not a forecast: a message also needs
+ * an open window in the recipient's timezone and a queue to draw from. The gap
+ * between `sent` and `ceiling` is a question, and `deferrals` is the answer.
+ */
+export interface Today {
+  as_of: string;
+  window_date: string;
+  sent: number;
+  ceiling: number;
+  remaining: number;
+  delivered: number;
+  bounced: number;
+  complained: number;
+  failed: number;
+  queued: number;
+  /** Null when nothing has been sent. Never 0, which would read as clean. */
+  bounce_rate: number | null;
+  /** Sends per hour since midnight UTC, 24 buckets. */
+  hourly: number[];
+  mailboxes: MailboxDay[];
+  deferrals: Deferral[];
+}
+
 export interface Opportunity {
   id: string;
   lead_id: string;
@@ -484,6 +541,9 @@ export const api = {
 
   // --- overview ------------------------------------------------------------
   stats: (t: string) => call<CrmStats>('/api/v1/stats', { token: t }),
+  /** Deliberately uncached on both sides: a stale "sent today" is the one
+   *  number that would keep saying the run is healthy after it stopped. */
+  today: (t: string) => call<Today>('/api/v1/today', { token: t }),
   attachment: (t: string) => call<Attachment>('/api/v1/attachment', { token: t }),
   /**
    * The attachment itself, as an object URL the browser can display.

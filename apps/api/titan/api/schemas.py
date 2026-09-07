@@ -314,6 +314,64 @@ class CrmStatsOut(BaseModel):
     operating_mode: str
 
 
+class MailboxDayOut(BaseModel):
+    """One mailbox's day, and the sentence explaining its ceiling."""
+
+    sender_identity_id: uuid.UUID
+    label: str
+    from_email: str
+    sent: int
+    allowed: int
+    remaining: int
+    configured: int
+    queued: int
+    health: str
+    #: The date of the snapshot behind ``health``. Earlier than ``window_date``
+    #: means nothing has sent from this mailbox today and the daily capture has
+    #: not run -- surfaced rather than passed off as a current verdict.
+    health_as_of: dt.date | None = None
+    warmup_day: int | None = None
+    warmup_days: int
+    note: str
+    reasons: list[str] = Field(default_factory=list)
+
+
+class DeferralOut(BaseModel):
+    """Why messages are waiting, in the gate's own words."""
+
+    reason: str
+    count: int
+    next_attempt_at: dt.datetime | None = None
+
+
+class TodayOut(BaseModel):
+    """Today's sending, live.
+
+    ``ceiling`` is what the gate would permit, not a forecast: a message also
+    needs an open window in the recipient's timezone and a queue to draw from.
+    ``deferrals`` is where the difference is explained, which is why the two
+    travel together.
+    """
+
+    as_of: dt.datetime
+    window_date: dt.date
+    sent: int
+    ceiling: int
+    remaining: int
+    delivered: int
+    bounced: int
+    complained: int
+    failed: int
+    queued: int
+    #: Today's bounce rate, or null when nothing has been sent. A tripwire, not
+    #: a verdict -- the thirty-day window governs anything that acts on it.
+    bounce_rate: float | None = None
+    #: Sends per hour since midnight UTC, 24 buckets.
+    hourly: list[int] = Field(default_factory=list)
+    mailboxes: list[MailboxDayOut] = Field(default_factory=list)
+    deferrals: list[DeferralOut] = Field(default_factory=list)
+
+
 class FindingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
