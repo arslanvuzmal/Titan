@@ -246,7 +246,7 @@
 <div class="page">
 
   <header class="masthead">
-    <p class="eyebrow">Titan-OS &middot; diagnosis &amp; programme &middot; 29 August 2026</p>
+    <p class="eyebrow">Titan-OS &middot; diagnosis &amp; programme &middot; 31 August 2026, updated 7 September</p>
     <h1>Why nothing is going out, and what it takes to fix it for good</h1>
     <p class="standfirst">Read live from the running stack and the production database. The system is not broken and it is not idle &mdash; it is losing three quarters of its work to a single crash, and spreading what survives so thin that nothing accumulates. Of the eleven things it must do unattended, <strong>seven already run</strong>.</p>
 
@@ -283,6 +283,11 @@
         <li><a href="#throttle">Trickle, volume and authentication</a></li>
         <li><a href="#onepager">The one-page brief, attached</a></li>
         <li><a href="#log-29">Work log &mdash; 29 August</a></li>
+        <li><a href="#log-31">Work log &mdash; 31 August: the bounce cause</a></li>
+        <li><a href="#guards">Every guard against a bounce, audited live</a></li>
+        <li><a href="#log-07">Work log &mdash; 7 September: four silent days</a></li>
+        <li><a href="#w25">W25 &mdash; the schedule watchdog</a></li>
+        <li><a href="#today">The dashboard answers &ldquo;is it sending?&rdquo;</a></li>
         <li><a href="#expert">Two hard truths</a></li>
         <li><a href="#decisions">What I need from you</a></li>
       </ol>
@@ -1366,9 +1371,376 @@
         </div>
       </section>
 
+      <!-- =========================== 31 August -->
+      <section id="log-31">
+        <h2><span class="num">14</span>Work log &mdash; 31 August: the bounce cause, found</h2>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">One signal explains almost every bounce, and it costs nothing to check</h4>
+          <p>Every bounce Titan has ever taken came from an address that was <em>published on the business's own website</em> &mdash; which is the provenance that makes an address sendable in the first place. So provenance could not be the answer, and for a while nothing else looked like one either: the list is syntactically clean, carries no disposable domains, no lookalikes, no never-contact addresses, and every recipient domain resolves with live MX. Every cheap test passed.</p>
+          <p>The answer was in a column nobody had looked at. <code>source_url</code> records <em>which page</em> the crawler took the address from, and splitting the send history on it is unambiguous:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Address taken from</th><th class="mono">Sent</th><th class="mono">Hard bounced</th><th class="mono">Rate</th></tr></thead>
+              <tbody>
+                <tr><td>a privacy, cookie or terms page</td><td class="mono">18</td><td class="mono">5</td><td class="mono"><strong>27.78%</strong></td></tr>
+                <tr><td>a contact page, or anywhere else</td><td class="mono">211</td><td class="mono">3</td><td class="mono">1.42%</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>Twenty times the bounce rate, from under 4% of the list.</strong> The reason is not statistical, it is editorial: a contact page carries the address a business wants to be reached at, and a privacy notice carries the address the GDPR obliges a data controller to name. The second is a compliance field, very often filled in from the web agency's template, naming a mailbox that was never created or was retired years ago with the page never revisited. Both are <code>first_party_website</code>; only one of them is answered by a human.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">What changed, and what it is worth</span>
+          <p><code>POLICY_PAGE_URL</code> now raises a DOWNGRADE signal in the bounce-risk engine, wired through both the discovery path and the catch-up re-check, so it applies to every address found from here on and to every address already stored. DOWNGRADE rather than REFUSE, matching the digit-run rule beside it: plenty of small firms do put their real <code>info@</code> on the privacy page, and a refusal would discard them with no way back.</p>
+          <p>Applied to the live list it holds back <strong>92 addresses</strong> as <code>risky</code>, which is not sendable &mdash; among them the three that hard-bounced on 27 August, which is the strongest confirmation available that the rule catches the right population. Messages already sitting in the queue for those addresses are blocked without touching the queue, because the send gate reads the channel's status live rather than from the draft's snapshot.</p>
+          <p>The counterfactual is the number that matters:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Scenario</th><th class="mono">Sent</th><th class="mono">Bounced</th><th class="mono">Rate</th><th>Against the 2% block</th></tr></thead>
+              <tbody>
+                <tr><td>What actually happened</td><td class="mono">229</td><td class="mono">8</td><td class="mono"><strong>3.49%</strong></td><td><span class="chip crit">blocked every mailbox</span></td></tr>
+                <tr><td>With this rule in place</td><td class="mono">217</td><td class="mono">3</td><td class="mono"><strong>1.38%</strong></td><td><span class="chip ok">under the threshold</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Twelve fewer sends and five fewer bounces &mdash; and the mailboxes would never have been blocked at all.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Correction &mdash; the rule I just described shipped matching the wrong half of the URL</span>
+          <p>The first version searched the <em>whole</em> URL, host included. So it read the word &ldquo;legal&rdquo; in a solicitor's <em>domain</em> as evidence of a compliance page, and downgraded <strong>46 law firms</strong> &mdash; <code>clarkslegal.com</code>, <code>mueller.legal</code>, <code>burneylegal.co.uk</code>, <code>marquis-legal.com</code> &mdash; most of them from their own <code>/contact/</code> page.</p>
+          <p>Solicitors are one of the larger verticals on this list. A rule aimed at the smallest bad population was quietly holding back one of the best good ones, and it would have looked like the rule working.</p>
+          <p><strong>Two changes.</strong> The host is split off before matching, because a business is entitled to have any of these words in its own name. And bare <code>legal</code> is gone entirely &mdash; a firm's <code>/legal-services</code> page is what it sells, not a compliance notice &mdash; replaced by the phrases that name a compliance page in their own right, in each market Titan sends to: <code>legal-notice</code>, <code>mentions-legales</code>, <code>avis-legal</code>, <code>datenschutz</code>, <code>impressum</code>.</p>
+          <p><strong>49 addresses restored.</strong> The corrected rule is strictly better, not merely safer: it still catches every one of the five observed bounces while holding back 92 instead of 141, and the counterfactual improves from 1.43% to <strong>1.38%</strong>.</p>
+        </div>
+
+        <div class="note">
+          <h4>How it was caught, which is the part worth keeping</h4>
+          <p>By an existing test &mdash; <code>test_evidence_becomes_a_queued_message</code> &mdash; whose fixture domain is <code>harborline-legal-fixture.test</code>. It failed with my own rejection message quoted back at it.</p>
+          <p><strong>But it had been skipping.</strong> That test needs a database, the suite skips its database tests when none is reachable, and nothing runs on the port they expect. So a suite that reports itself green was silently not running <strong>15 reverification tests and every pipeline test</strong> &mdash; and the first full run after starting one turned up <strong>three genuine pre-existing failures</strong> in mailbox pooling and warm-up budgeting that have nothing to do with today's work. They were verified as pre-existing by stashing every change and watching them fail identically.</p>
+          <p>The lesson is not about this rule. <strong>A skipped test reports the same colour as a passing one</strong>, and the tests that need a database are exactly the ones that check whether the pipeline end-to-end still works.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">What verification cannot do, measured rather than assumed</h4>
+          <p>The obvious answer to bounces is "verify the list first", and it was worth finding out exactly how far that goes before promising anything on it. The SMTP probe deliberately declines to ask Google, Microsoft and the big filtering front-ends, because they accept every recipient at the door and a probe there learns nothing. Nobody had measured what share of <em>this</em> list that covers. Across a 400-domain sample:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Mail operator</th><th class="mono">Share</th><th>Probe can answer?</th></tr></thead>
+              <tbody>
+                <tr><td>Microsoft 365</td><td class="mono">35.2%</td><td><span class="chip crit">no &mdash; accepts everything</span></td></tr>
+                <tr><td>Google Workspace</td><td class="mono">26.5%</td><td><span class="chip crit">no &mdash; accepts everything</span></td></tr>
+                <tr><td>Mimecast, Proofpoint, Barracuda, Zoho</td><td class="mono">7.9%</td><td><span class="chip crit">no &mdash; refuses probers</span></td></tr>
+                <tr><td>Everything else</td><td class="mono">30.5%</td><td><span class="chip good">yes</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>Probing can give a real answer for 30% of the list, and no money changes that</strong> &mdash; no verification vendor can tell you a Microsoft 365 mailbox exists either, because the tenant does not tell anyone. Put directly to the test: the probe returns <code>unknown</code> for <em>all seven</em> of the addresses that actually bounced. Five sit behind Microsoft or Google.</p>
+          <p>So the honest target is not zero. It is <strong>comfortably under 1%</strong>, reached by not sending to the populations that bounce rather than by verifying the ones that do not. The policy-page rule is the first of those and the largest found so far; the probe still runs, and still earns its place on the 30% it can speak to.</p>
+        </div>
+
+        <div class="note" style="background:var(--refuse-soft);border-color:var(--refuse)">
+          <h4 style="color:var(--refuse)">Waiting does not heal a blocked mailbox &mdash; for one of them it makes it worse</h4>
+          <p>The bounce rate is measured over a rolling 30 days, and the instinct is that a blocked mailbox recovers if left alone. Projecting each mailbox's own history forward day by day says otherwise, because <strong>the rate is a ratio and stopping sends shrinks the denominator</strong>. Clean sends age out of the window; the bounces are more recent, so they age out later.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>As of</th><th class="mono">outreach@</th><th class="mono">sales@</th></tr></thead>
+              <tbody>
+                <tr><td>31 August</td><td class="mono">4.55%</td><td class="mono">3.06%</td></tr>
+                <tr><td>20 September</td><td class="mono">0.00%<span style="color:var(--ink-3)"> (14 sends)</span></td><td class="mono">4.41%</td></tr>
+                <tr><td>26 September</td><td class="mono">0.00%<span style="color:var(--ink-3)"> (3 sends)</span></td><td class="mono"><strong>13.04%</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><code>sales@</code> more than quadruples by sitting still. <code>outreach@</code> only reaches zero because its sample collapses below the 50-send floor, at which point no rate applies &mdash; recovery by having nothing left to measure, which is not recovery.</p>
+          <p><strong>What actually clears a mailbox is clean sends entering the window</strong>, which is exactly what the block prevents. That trap is why the probation allowance exists, and it is why the two fresh mailboxes matter more than waiting does.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Executed today</span>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Change</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td><strong>The score gate came down</strong> from 70 to 55 across all 29 active campaigns, on your instruction</td><td class="mono">3,481 leads admitted</td></tr>
+                <tr><td><strong>Six active campaigns had no sender at all</strong> and could never have sent &mdash; they were created after the last provisioning run and nothing linked them</td><td class="mono">76 links added</td></tr>
+                <tr><td><code>contact@</code> and <code>marketing@</code> renamed to <code>arslan@</code> and <code>me@</code>, in the file, in the database and in every campaign pool; SMTP and IMAP verified on all five</td><td class="mono">5 mailboxes live</td></tr>
+                <tr><td><strong>Our own address was on our own bounce list.</strong> <code>arslan@</code> was suppressed on 25 August, when it did not exist &mdash; and <code>titan warmup</code> sends between the pool's own mailboxes, so the newest mailbox was the one that could not have warmed up</td><td class="mono">removed</td></tr>
+                <tr><td>The policy-page rule, its tests, and the re-assessment of everything already stored</td><td class="mono">92 held back</td></tr>
+                <tr><td><strong>A false NXDOMAIN can no longer refuse a live domain.</strong> Contradictory MX readings inside one assessment now resolve to &ldquo;not checked&rdquo; rather than letting the negative win</td><td class="mono">3 restored</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><strong>Three of the five mailboxes now carry no bounces at all:</strong> <code>projects@</code> (16 sent, none bounced), and <code>arslan@</code> and <code>me@</code>, which have never sent. Those three are the sending capacity for September &mdash; roughly 800 messages over the three-week ramp &mdash; and they start against a list with its worst-bouncing population already removed.</p>
+        </div>
+
+        <div class="note" style="background:var(--refuse-soft);border-color:var(--refuse)">
+          <h4 style="color:var(--refuse)">A second defect, caught in the act &mdash; the verifier was quietly deleting real businesses</h4>
+          <p>This started as a false alarm. I found 206 addresses the probe had called <code>invalid</code> while the channel still read <code>published_first_party</code>, and concluded the verifier's answers were not reaching the send gate. Wrong: checking the domains live, every one resolves with working MX. The <code>invalid</code> verdicts were themselves <strong>false</strong> &mdash; a resolver failure during one probe run returned NXDOMAIN for everything it was asked, and a second run three minutes later happened to overwrite them.</p>
+          <p><strong>Then a probe run I started produced a fresh one while I was watching, and that changed what this is.</strong> One record, <code>enquiries@burnssolicitors.com</code>, holds <em>two independent MX readings of the same domain taken seconds apart</em>:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Observation</th><th>Result</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>The bulk lookup, resolved for the whole batch</td><td class="mono">NXDOMAIN, confirmed twice</td><td><span class="chip crit">REFUSE &rarr; INVALID</span></td></tr>
+                <tr><td>The probe's own lookup, moments later</td><td class="mono">mx_present &middot; protection.outlook.com</td><td><span class="chip med">ignored</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The domain was live throughout and is live now. The engine had the contradicting evidence <em>in the same assessment</em> and the false negative still won, because NXDOMAIN is one of the few verdicts it treats as conclusive. Note also that &ldquo;confirmed twice&rdquo; bought nothing: the second attempt hit the same bad minute as the first.</p>
+          <p><strong>Why that is expensive rather than merely wrong.</strong> A conclusive NXDOMAIN produces <code>INVALID</code>, and <code>INVALID</code> is excluded from the re-checkable set &mdash; the catch-up pass deliberately never revisits a settled answer. So a transient DNS blip became a <em>permanent</em> verdict that nothing downstream could report or undo. <strong>Every one of the five addresses stored as invalid was checked against live DNS, and all five domains are answering.</strong> Five real businesses, discarded silently, that nothing would ever have looked at again.</p>
+          <p><strong>Fixed where the contradiction is visible.</strong> Two disagreeing readings are not evidence, so the re-check now drops to &ldquo;not checked&rdquo; &mdash; the same thing it already does with a failed lookup &mdash; and lets the remaining layers decide. The control matters more than the rule: a domain that is <em>genuinely</em> gone raises no contradiction and is still refused outright, because every address at it really does hard-bounce. Two tests, one in each direction, differing only in what the probe saw. The three active addresses have been restored to sendable after a live MX check each; the two inactive ones were left alone.</p>
+          <p>Worth saying plainly: <strong>this was found by watching a job run, not by a test.</strong> The bug needs a real resolver having a real bad minute, which no unit test produces, and its whole signature is that nothing complains.</p>
+        </div>
+      </section>
+
+      <!-- =========================== guards -->
+      <section id="guards">
+        <h2><span class="num">15</span>Every guard against a bounce, audited live</h2>
+
+        <p class="standfirst">Read from the running system rather than from the design, because the two had drifted. <strong>Four layers are enforcing, one was never scheduled, and one had stopped firing.</strong></p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Layer</th><th>What it refuses</th><th class="mono">State</th></tr></thead>
+            <tbody>
+              <tr><td colspan="3" style="background:var(--surface-2);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Before the address is ever stored</td></tr>
+              <tr><td>Syntax</td><td>Anything that is not an address</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Disposable domains</td><td>Throwaway providers &mdash; healthy mail servers nobody reads</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Lookalike domains</td><td><code>gmial.com</code> and friends, including squatted ones that accept mail</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Never-contact list</td><td><code>abuse@</code>, <code>postmaster@</code>, <code>unsubscribe@</code>, <code>remove@</code>, privacy desks &mdash; in eight languages, matched on local-part segments</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Digit-run prefix</td><td>A phone number fused to a mailbox: <code>0606info@</code></td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Domain match</td><td>Somebody else's address that happens to appear on the site</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>MX</td><td>Domains publishing no route for inbound mail</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td><strong>Policy-page source</strong></td><td>Addresses off privacy, cookie and terms pages &mdash; 27.8% bounce rate</td><td><span class="chip ok">new today</span></td></tr>
+              <tr><td>Address ranking</td><td>Prefers the front desk over a named mailbox: 1.30% against 8.11%</td><td><span class="chip ok">enforcing</span></td></tr>
+
+              <tr><td colspan="3" style="background:var(--surface-2);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">At the wire, re-read live for every message</td></tr>
+              <tr><td>Verification status</td><td>Anything not sendable &mdash; read from the channel, not the draft's snapshot, so a downgrade takes effect on messages already queued</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Suppression</td><td>Every prior hard bounce, unsubscribe and complaint</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Bounce rate</td><td>BLOCK at 2% over a rolling 30 days, above a 50-send floor</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Complaint rate</td><td>BLOCK &mdash; a spam report needs no sample size</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Warm-up ramp</td><td>10% of target on day one, 21 days to full</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Per-recipient-domain cap</td><td><strong>2 a day</strong> to any one domain</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Recipient domain health</td><td>A domain that has bounced or complained before</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Spacing and hours</td><td>90 seconds between sends; quiet hours, send window and holidays in the recipient's own timezone</td><td><span class="chip ok">enforcing</span></td></tr>
+
+              <tr><td colspan="3" style="background:var(--surface-2);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">After a bounce</td></tr>
+              <tr><td>Classification</td><td>Hard, soft and unknown kept apart; our own throttle is never read as a dead recipient</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Automatic suppression</td><td>The address, permanently, on the first hard bounce</td><td><span class="chip ok">enforcing</span></td></tr>
+              <tr><td>Quiet period and probation</td><td>Seven clean days drops BLOCK to WARN with a small allowance, so a bad rate cannot perpetuate itself</td><td><span class="chip ok">enforcing</span></td></tr>
+
+              <tr><td colspan="3" style="background:var(--surface-2);font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Not running</td></tr>
+              <tr><td><strong>Re-verification</strong></td><td>Addresses going stale &mdash; a mailbox retired after a staff change is exactly what <code>katie@reading-smiles</code> was</td><td><span class="chip ok">wired today</span></td></tr>
+              <tr><td><strong>Trickle release</strong></td><td>Held addresses leaving in a batch instead of a few a day</td><td><span class="chip ok">restarted today</span></td></tr>
+              <tr><td><strong>Public holidays</strong></td><td>Mail arriving at a closed office, on top of the first-morning-back pile</td><td><span class="chip ok">fixed for the UK today</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">The two that were not doing their job</span>
+          <p><strong>Re-verification had no schedule at all.</strong> Not paused, not broken &mdash; absent. Nothing under <code>workflows/</code> or <code>activities/</code> so much as mentioned it; the only caller was a CLI command somebody had to remember to run. That was <strong>W12</strong>, outstanding since the first version of this page, and it is the guard that keeps every other guard's answer current: an address checked in July is protected by a July answer.</p>
+          <p><strong>Now wired into the hourly housekeeping pass</strong>, after the release and before the vitals &mdash; that order matters, because a re-check that withdrew an address <em>after</em> today's release decision would leave a message queued to an address just found wanting. Twenty-five a pass, which sweeps the whole 2,300-address list about every four days against a thirty-day window; sized against the window rather than against capacity, because probing faster spends other people's connections for answers already in hand. <strong>Confirmed running unattended:</strong> the first scheduled pass recorded 25 <code>smtp_probe</code> checks, none of which had to be asked for.</p>
+          <p>Two refusals are pinned by tests, both of which would have failed quietly rather than loudly. It declines to run against the <em>null</em> verifier &mdash; that would examine a batch, learn nothing, and write rows saying it had asked, excluding those addresses from the next thirty days of <em>real</em> checks. And it declines when the verifier reports itself unhealthy, so an outage is never recorded as a batch of answers.</p>
+          <p><strong>Housekeeping had stopped firing again.</strong> Not paused, and its next run time was two days in the past: <code>Total: 36, MissedCatchupWindow: 482</code>. It owns the release of held addresses a few at a time, so while it was down the throttle was not metering anything &mdash; harmless this once, because the failure was in the safe direction, but the same stall previously cost 596 stranded drafts. Re-installed and triggered; it fired within the minute and is on the hour again. <strong>That is the fourth stall recorded on this page, and the fifth Docker outage.</strong> Both are W2.</p>
+        </div>
+
+        <div class="note" style="background:var(--refuse-soft);border-color:var(--refuse)">
+          <h4 style="color:var(--refuse)">Today is a bank holiday and Titan did not know</h4>
+          <p>Checking whether the day's quota could actually be spent turned up a live defect. <strong>31 August is the Late Summer Bank Holiday in England, and the holiday check returned &ldquo;not a holiday&rdquo;.</strong> 39 British messages were queued to go out into closed offices.</p>
+          <p>The mechanism is worth stating because it fails in the quietest possible way. The <code>holidays</code> library files <em>every</em> UK bank holiday under a nation &mdash; England, Wales, Scotland, Northern Ireland &mdash; so a bare <code>GB</code> calendar contains Christmas, New Year and almost nothing else. The lookup only passes a subdivision when the lead's record carries an administrative area, and <strong>not one British lead in the queue has one</strong>. So the check ran, found nothing, and returned a confident negative on a day the country is shut.</p>
+          <p>It also explains why nobody caught it: the calendar <em>works</em>. Ask it about Christmas and it answers correctly, which is exactly the test anybody would write.</p>
+          <p><strong>England is now the default subdivision for <code>GB</code></strong> &mdash; England, Wales and Northern Ireland share this holiday and Scotland does not, so it is both the majority calendar and the cautious one. An explicit subdivision still wins, so a Scottish lead is believed. Holding a message for a day it need not have waited costs a day; sending it into an empty office costs the message.</p>
+          <p><strong>Confirmed live, and larger than predicted.</strong> 63 messages now carry <code>outside_campaign_send_window: Mon 31 Aug is Late Summer Bank Holiday in GB</code> and retry Tuesday at 08:00 London. Not the 39 forecast &mdash; the 28 queued rows carrying no country of their own resolve to GB through their campaign's region, so they were caught too. Every one of them would have landed in a closed office.</p>
+          <p><em>One correction to my own framing.</em> I said this would not cost today's volume, because 71 non-British messages were queued behind it. That was too confident. The non-GB remainder is thinner than the raw count: 21 are held by <code>sales@</code>'s bounce block, 6 by Irish quiet hours, and the American and Canadian ones do not open until their own mornings. The day landed at <strong>14 of 26</strong> rather than the full ceiling &mdash; not the whole quota, but the right messages on the right day instead of 63 wasted on a bank holiday.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Today's quota, and what sets it</span>
+          <p><strong>14 sent</strong> by the evening, including the <strong>first messages ever sent from <code>arslan@</code> and <code>me@</code></strong>, and <strong>zero bounces</strong>. The ceiling is <strong>26</strong>, and every part of it is a guard rather than a setting:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Mailbox</th><th class="mono">Sent</th><th class="mono">Allowed</th><th>What sets the number</th></tr></thead>
+              <tbody>
+                <tr><td><code>projects@</code></td><td class="mono">3</td><td class="mono">11</td><td>Warm-up day 7, further along than the new pair</td></tr>
+                <tr><td><code>outreach@</code></td><td class="mono">5</td><td class="mono">5</td><td>Probation &mdash; over the bounce threshold but quiet, so a small allowance rather than nothing. Spent in full.</td></tr>
+                <tr><td><code>arslan@</code></td><td class="mono">4</td><td class="mono">5</td><td>Warm-up day one: 10% of 50</td></tr>
+                <tr><td><code>me@</code></td><td class="mono">2</td><td class="mono">5</td><td>Warm-up day one</td></tr>
+                <tr><td><code>sales@</code></td><td class="mono">0</td><td class="mono">0</td><td><span class="chip crit">blocked</span> 3.06% over 98 sends; last bounce 27 August, so it clears on 3 September</td></tr>
+                <tr><td colspan="2"><strong>Workspace</strong></td><td class="mono">100</td><td>Not binding, and will not be for weeks</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The number that matters is not 26 but its shape: <strong>21 of it belongs to three mailboxes with no bounces at all</strong>, climbing on the ramp to roughly 800 sends over the next three weeks. The one blocked mailbox is the only one carrying the old rate, and it is the one being left alone to clear.</p>
+        </div>
+      </section>
+
+      <!-- =========================== dashboard -->
+      <!-- =========================== 16 -->
+      <section id="log-07">
+        <h2><span class="num">16</span>Work log &mdash; 7 September: four silent days, and the tank that switched off the engine</h2>
+
+        <p class="standfirst">Nothing had gone out since <strong>3 September</strong>. Not blocked, not throttled, not paused &mdash; the outbox was <em>empty</em>. Every one of the 29 orchestrators was running, cycling on the hour, and returning &ldquo;nothing to do&rdquo; while 2,031 leads with a published address sat untouched.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>The last time each stage did anything</th><th class="mono">When</th><th>What that means</th></tr></thead>
+            <tbody>
+              <tr><td>A research run started</td><td class="mono">28 Aug 05:03</td><td>The real moment it stopped</td></tr>
+              <tr><td>A workflow event recorded</td><td class="mono">28 Aug 05:18</td><td>Nothing has run the pipeline since</td></tr>
+              <tr><td>A draft composed</td><td class="mono">29 Aug 14:36</td><td>The redraft pass, not new research</td></tr>
+              <tr><td>A message row written</td><td class="mono">31 Aug 06:24</td><td>The housekeeping sweeper's last act</td></tr>
+              <tr><td>An outbox row created</td><td class="mono">31 Aug</td><td>46 of them, all from 29 August drafts</td></tr>
+              <tr><td>An email actually sent</td><td class="mono">3 Sep 15:01</td><td>Those same 46, finishing draining</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><strong>Sending did not stop on 3 September. It stopped on 28 August and took six days to become visible.</strong> Everything that left the building between 31 August and 3 September was one batch of 46 stranded drafts that the housekeeping sweeper rescued on its last run &mdash; the run recorded in the section above. The estate looked alive for four days because a repair job had refilled the outbox once, and nothing was refilling it again.</p>
+
+        <div class="note" style="background:var(--refuse-soft);border-color:var(--refuse)">
+          <h4 style="color:var(--refuse)">The tank was full, so the engine that empties it was switched off</h4>
+          <p>The planner decides each cycle how much work a campaign may start. That number comes from the fuel gauge, which asks how many <em>reachable, never-written-to</em> leads the workspace is holding against a five-day reserve. Read live from the running worker:</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Fuel gauge</th><th class="mono">Value</th></tr></thead>
+              <tbody>
+                <tr><td>Reachable leads nobody has written to</td><td class="mono"><strong>2,031</strong></td></tr>
+                <tr><td>Reserve target &mdash; 5 days &times; 250 send capacity</td><td class="mono">1,250</td></tr>
+                <tr><td>Days of fuel in the tank</td><td class="mono">8.1</td></tr>
+                <tr><td>Research the planner therefore ordered</td><td class="mono"><strong>0</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>That zero is correct. Ordering more crawls when the tank is at 162% of target would be waste, and the module that decided it exists to stop the opposite failure &mdash; research capped at the send rate, so a buffer could never form. It says so in its own docstring.</p>
+          <p><strong>The defect is that the same zero was then used as the budget for everything else the cycle could do.</strong> One line:</p>
+          <p class="mono" style="background:var(--surface-2);padding:12px 14px;border-radius:6px;font-size:12.5px">budget = fuel_budget.leads</p>
+          <p>and the lead selector opens with <code>if limit &lt;= 0: return []</code>. So a full tank returned no leads at all &mdash; not the cold ones, and not the follow-ups either. The stall notices spelled it out every hour and nobody had read one: <em>&ldquo;no lead qualifies: 15 follow-up(s) due, 3 send(s) of budget left&rdquo;</em>. Fifteen due, three sends available, zero planned.</p>
+          <p><strong>And it is self-locking.</strong> A lead leaves the reserve only once a message row exists for it. The only thing that writes a message row is a lead this planner returned. So a full reserve stops the work that would drain it, and nothing can ever make the argument for starting again. This is not a stall that recovers on its own &mdash; it is a fixed point, and the estate would have sat in it indefinitely.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">The fix, and the guard that already knew the answer</span>
+          <p>Six lines above the defect, the cycle's early exit reads <code>if remaining == 0 and fuel_budget.leads == 0</code> &mdash; stop only when <em>both</em> are spent. That guard already assumed the budget was the larger of the two. Only the line computing it disagreed.</p>
+          <p class="mono" style="background:var(--surface-2);padding:12px 14px;border-radius:6px;font-size:12.5px">budget = max(fuel_budget.leads, min(remaining, fuel.headroom))</p>
+          <p>Still not <code>min</code>, which is the coupling that starved the pipeline in the first place: when the day's sends are spent but the tank is low, the cycle researches anyway and the messages wait for tomorrow's budget. That is what having a reserve means, and it stays pinned by its own test.</p>
+          <p><strong>The send side is bounded by the crawler, because every planned lead costs a crawl</strong> &mdash; whether it was planned to fill the tank or to spend today's budget. The research side was already bounded that way; letting the send side through unbounded is how 1,123 research runs once failed against 1,242 started, none of it a crawl going wrong. <code>headroom</code> is now a property on the fuel state rather than arithmetic repeated in two places, so two claims on one crawler cannot drift apart.</p>
+          <p><strong>Four tests, two of them planted violations checked in both directions.</strong> Restore <code>fuel_budget.leads</code> alone and a campaign holding six workable leads reports <code>no_work_available</code>; drop the headroom bound and a saturated crawler is handed more work. Both fail on the old code and pass on the new.</p>
+          <p><strong>Confirmed live, not only in test.</strong> Worker rebuilt and redeployed, then the planner run against a real campaign: <em>Dentists Birmingham UK</em> went from <code>no_work_available</code> with 0 leads to <code>ready</code> with 2. The hourly cycle takes it from there.</p>
+        </div>
+
+        <div class="note">
+          <h4>Housekeeping has stalled for the fifth time, and 509 drafts are waiting on it</h4>
+          <p>The section above recorded the fourth stall and said it had been re-installed and was &ldquo;on the hour again&rdquo;. It stopped again the same day. The schedule is not paused and reports no error; its internal clock is simply frozen at <strong>31 August 06:24</strong> &mdash; each of its next ten firing times is a date in the past, and its missed-occurrence counter has run to 656.</p>
+          <p>That is also why the fuel deadlock stayed invisible: housekeeping is the job that sweeps validated drafts with nowhere to go back into the outbox, and its single run on 31 August is the entire explanation for the four days of sending that followed it.</p>
+          <p><strong>509 drafts are stranded behind it</strong> &mdash; all composed on 29 August by the redraft pass, all validated, none with an outbox row or a message. That is 509 emails already researched, written and checked. <strong>They are also nine days old</strong>, against a reserve deliberately sized at five days because &ldquo;research goes stale, and evidence gathered today is weaker by the time a message quoting it goes out&rdquo;. The sweeper applies no freshness bound; it takes the oldest first.</p>
+          <p><strong>You said release them, so they were released</strong> &mdash; swept in four passes until the mailboxes ran out of day, which is the honest stopping point rather than an arbitrary one.</p>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th class="mono">Pass</th><th class="mono">Examined</th><th class="mono">Queued</th><th>What refused the rest</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">1</td><td class="mono">100</td><td class="mono"><strong>49</strong></td><td>46 no capacity, 4 already queued, 1 suppressed</td></tr>
+                <tr><td class="mono">2</td><td class="mono">100</td><td class="mono"><strong>8</strong></td><td>88 no capacity, 3 already queued, 1 suppressed</td></tr>
+                <tr><td class="mono">3</td><td class="mono">100</td><td class="mono"><strong>4</strong></td><td>93 no capacity, 2 already queued, 1 suppressed</td></tr>
+                <tr><td class="mono">4</td><td class="mono">100</td><td class="mono">0</td><td>100 no capacity &mdash; the day is spent</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The falling yield is not the sweep failing. It is the throttle metering: <strong>the sweep does not decide the rate, the daily caps do</strong>, and asked directly the pool says exactly where it stands &mdash; <code>projects@</code> 23 of 25 used, <code>arslan@</code> 12 of 12, <code>me@</code> 12 of 12, and the two blocked mailboxes unavailable. There was never a version of this that sent 509 messages in an afternoon.</p>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">Sending resumed &mdash; 7 September</span>
+          <p>First mail in four days. <strong>46 sent, 0 bounced</strong> &mdash; <code>projects@</code> 22, <code>arslan@</code> 12, <code>me@</code> 12, and nothing at all from the two blocked mailboxes, which is correct. 61 queued in total; the remainder is in flight.</p>
+          <p><strong>448 drafts still to go</strong>, releasing at roughly a day's capacity at a time and accelerating as <code>arslan@</code> and <code>me@</code> climb their ramp from 12 toward 50. No further sweep is useful today &mdash; the next one is worth running tomorrow, and the repaired housekeeping schedule should be the thing running it rather than a person.</p>
+          <p>The two repairs are independent and both were needed. The sweep releases work that was already finished; <strong>the planner fix is what stops the queue draining to nothing again</strong> once these are gone.</p>
+        </div>
+      </section>
+
+      <!-- =========================== W25 -->
+      <section id="w25">
+        <h2><span class="num">17</span>W25 &mdash; the watchdog, and why it is not a schedule</h2>
+
+        <p class="standfirst">Built the same afternoon, because the fifth stall made the argument the first four had not. <strong>The repair was always three seconds of work; the cost was always in the noticing.</strong></p>
+
+        <div class="note">
+          <h4>The constraint that decided the design</h4>
+          <p>The obvious home for this is the hourly housekeeping pass &mdash; it is already the repair pass. <strong>It is also the schedule that wedges</strong>, so a watchdog living there stops in the same minute as the thing it is watching, and nobody is any the wiser. That is not hypothetical: it is what happened on 31 August, twice over.</p>
+          <p>So it runs as an <strong>always-on workflow</strong> on the campaign orchestrator's pattern &mdash; timer loop, continue-as-new, no schedule behind it. Not a guess about which mechanism is sturdier: through the same window in which housekeeping's clock stopped and stayed stopped, <strong>the orchestrators cycled 232 times without missing one</strong>. Betting the healer on the mechanism that broke is the mistake; betting it on the mechanism that held is the repair.</p>
+        </div>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Piece</th><th>What it does</th><th>Why it is separate</th></tr></thead>
+            <tbody>
+              <tr><td><code>schedule_health.assess</code></td><td>Given one schedule's paused flag, cron and predicted firing times, says wedged or healthy</td><td>Pure &mdash; no Temporal, no database, no clock of its own. The two dangerous cases become testable without a server</td></tr>
+              <tr><td><code>heal_wedged_schedules</code></td><td>Reads the seven schedules this workspace owns, reinstalls the stopped ones</td><td>Repairs through the existing installer, which updates in place and never resumes a paused schedule</td></tr>
+              <tr><td><code>SupervisorWorkflow</code></td><td>Runs that pass every fifteen minutes, for ever</td><td>The part that has to survive the failure it repairs</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="verdict" style="margin:0 0 22px">
+          <span class="label">The detection rule, and the two ways it does damage</span>
+          <p>A wedged schedule is judged on <strong>the furthest firing time it predicts, not the soonest.</strong> One that is merely late has a single occurrence behind it and nine ahead; one whose clock has stopped has every one of them behind. Reading the soonest would call an ordinary three-minute delay a fault and reinstall all seven schedules on every pass, for ever &mdash; churn on working machinery, and how a watchdog becomes the thing that needs watching.</p>
+          <p>The tolerance comes from each job's own cron rather than a number typed here, reusing <code>catchup_for</code>: hourly jobs get 30 minutes, the daily ramp gets 23 hours. Judging the 06:10 ramp on the hourly tolerance would call it wedged every morning the laptop was shut, and reinstalling it would not have been the repair.</p>
+          <p><strong>A paused schedule is never touched.</strong> Pausing stops the clock &mdash; that is what pausing means &mdash; so a paused schedule presents exactly like a wedged one, and it is the single most likely thing to be under a watchdog's nose five minutes after somebody hit pause during an incident. Guarded twice: in the predicate, and end to end.</p>
+        </div>
+
+        <div class="note" style="background:var(--pass-soft);border-color:var(--pass)">
+          <h4 style="color:var(--pass)">It is not allowed to heal quietly</h4>
+          <p>Every repair files a notification naming the schedule and how far behind it had fallen. <strong>A self-repair that leaves no trace converts a visible outage into an invisible recurring fault</strong> &mdash; and the count of occurrences is the entire argument for fixing the host underneath. Five stalls is a number worth being able to say.</p>
+          <p>A pass that finds nothing files nothing. This runs four times an hour; a watchdog reporting its own good health into the operator queue would add ninety-six rows a day to the list where the real alarms live, which is precisely how the first 363 went unread. Repairs are deduped to one per schedule per day for the same reason.</p>
+        </div>
+
+        <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
+          <h4 style="color:var(--defer)">Confirmed live, and stated as what it is</h4>
+          <p><strong>13 tests, six of them planted violations checked in both directions.</strong> One was dishonest as first written &mdash; its docstring claimed to catch a change that would not in fact have broken it. Planting the real violation (a pass that reports its own good health) made it fail, which is the only evidence that a test is worth keeping. <strong>3,327 pass</strong> across the full suite.</p>
+          <p>Deployed and running: <code>supervisor::b6134809&hellip;</code>, first cycle complete, <code>schedules_healed: 0</code> &mdash; correct, because all seven are advancing again.</p>
+          <p><strong>This is a workaround and should be read as one.</strong> A scheduler that never falls a week behind never wedges. W25 makes the symptom self-correcting and gives the recurrence a number; it does not touch the cause, which is still <strong>W2, the always-on host</strong>.</p>
+        </div>
+      </section>
+
+      <section id="today">
+        <h2><span class="num">18</span>The dashboard can now answer &ldquo;is it sending?&rdquo;</h2>
+
+        <p class="standfirst">Today's shortfall was found by hand, in psql, after the day was half gone. <strong>Nothing in the CRM could have told you.</strong> That is now a section at the top of the overview, refreshing itself every thirty seconds.</p>
+
+        <p>Every other view in the CRM answers a question about the whole history &mdash; leads by status, messages by state, outcomes over thirty days. None of them answers the one actually asked first thing in the morning and again at four. <strong>&ldquo;237 sent&rdquo; reads identically on a day that sent forty and a day that sent nothing</strong>, which is exactly why this morning's nine-of-twenty-six sat there unnoticed until I went looking in the database.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>What it shows</th><th>Why that and not something else</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Sent today, against the ceiling</strong></td><td>The headline. 14 / 26 rather than 14, because the bare number cannot be judged without knowing what was permitted.</td></tr>
+              <tr><td><strong>Room left, bounced, failed, waiting</strong></td><td>Bounced and failed are different things &mdash; one left and came back, the other never left &mdash; and a dashboard that merges them hides which is happening.</td></tr>
+              <tr><td><strong>Per mailbox, with the throttle's own sentence</strong></td><td>&ldquo;5 of 50 a day; warm-up caps today at 5&rdquo;. Not a status colour: the reason, in the words the gate itself used.</td></tr>
+              <tr><td><strong>Why every waiting message is waiting</strong></td><td>Grouped and counted. Today: <span class="mono">63</span> bank holiday, <span class="mono">21</span> blocked mailbox, <span class="mono">17</span> quiet hours or spent quota.</td></tr>
+              <tr><td><strong>The day hour by hour</strong></td><td>A run that stopped at 10:00 and one still going at 17:00 carry the same total. Only one is a problem, and only the shape tells them apart.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>What it refuses to say</h3>
+        <p><strong>The ceiling is not a target.</strong> A message also needs an open window in the recipient's timezone and something approved to send, so falling short is a question rather than a fault &mdash; which is why the deferral reasons sit directly beneath the number instead of on their own screen. &ldquo;14 of 26&rdquo; prompts exactly one question, and the answer must not be a click away.</p>
+        <p><strong>No bounce rate until enough has been sent to have one.</strong> One bounce in three sends is not a 33% bounce rate. Today's count is always shown; today's <em>rate</em> appears only past twenty sends, and nothing is ever throttled on it &mdash; the thirty-day window governs that.</p>
+        <p><strong>A failed refresh does not blank the numbers.</strong> It keeps the last ones that arrived and marks them stale. Wiping the section on one dropped request would make a network blip look like a stopped run, which is the precise misreading this panel exists to prevent. It also stops polling while the tab is hidden and refreshes the moment you come back to it, so the first thing you see is current rather than however old the tab is.</p>
+
+        <div class="note">
+          <h4>Two defects this surfaced on its first run</h4>
+          <p><strong>A mailbox on probation described as &ldquo;reduced to 0%&rdquo;.</strong> <code>outreach@</code> is blocked, has not bounced in a fortnight, and is therefore allowed five a day to earn its rate back. The sentence explaining that read <em>&ldquo;5 of 50 a day; reduced to 0%: health is blocked&rdquo;</em> &mdash; every clause true, the whole reading as a bug. That function was written weeks ago and displayed nowhere, so nothing had ever read it. It now says it is on probation, and why.</p>
+          <p><strong>A deferral naming a mailbox by its database id.</strong> <em>&ldquo;sender daily quota of 5 reached for '9d38f7ad-4305-4663-a557-056851e2cb99'&rdquo;</em> is correct and unusable &mdash; you cannot tell which mailbox is full without opening the database, which is the errand this page exists to remove. The stored audit record keeps the id; only the reading of it now says <code>outreach@arslanvuzmallone.com</code>.</p>
+        </div>
+
+        <p>Sixteen tests hold it, most of them pinning ways a &ldquo;sent today&rdquo; number goes comfortingly wrong: capacity that pools across mailboxes when it does not, a mailbox stopped by its own DNS reported as merely quiet, yesterday's sends leaking into today, a soft bounce counted against the day, and a rate of exactly 0% on a morning when nothing has been sent at all.</p>
+      </section>
+
       <!-- =========================== 7 -->
       <section id="expert">
-        <h2><span class="num">14</span>Two hard truths</h2>
+        <h2><span class="num">19</span>Two hard truths</h2>
 
         <p>Two items on your list will not work the way the industry says they do, and I would rather say so now than build them and have you find out from the numbers.</p>
 
@@ -1399,14 +1771,19 @@
 
       <!-- =========================== 8 -->
       <section id="decisions">
-        <h2><span class="num">15</span>What I need from you</h2>
+        <h2><span class="num">20</span>What I need from you</h2>
 
-        <p>Four still open. Three were answered on 27 August and are struck below: the copywriting format is built, the model keys are in, and the offer set is settled. What is left is the list below plus two one-line answers &mdash; the <strong>AI Gateway permission</strong> on the Cloudflare token, and a decision on the <strong>111 webmail addresses</strong> that carry the business's own name. The contact recovery is done &mdash; +306, not the 1,900 I wrongly projected.</p>
+        <p>Five still open. Three were answered on 27 August and are struck below: the copywriting format is built, the model keys are in, and the offer set is settled. What is left is the list below plus two one-line answers &mdash; the <strong>AI Gateway permission</strong> on the Cloudflare token, and a decision on the <strong>111 webmail addresses</strong> that carry the business's own name. The contact recovery is done &mdash; +306, not the 1,900 I wrongly projected.</p>
 
         <div class="tablewrap">
           <table>
             <thead><tr><th>Decision</th><th>Why it matters</th><th>My recommendation</th></tr></thead>
             <tbody>
+              <tr>
+                <td><strong>The 509 stranded drafts</strong></td>
+                <td>Nine days of finished work &mdash; researched, written, validated &mdash; sitting behind a frozen housekeeping schedule. The observations in them are older than the five-day window the reserve is deliberately sized to</td>
+                <td><span class="chip done">ANSWERED</span> Release &mdash; done. Four passes, 61 queued, 46 sent, none bounced, stopped when the day's capacity ran out. 448 left, metering out daily</td>
+              </tr>
               <tr>
                 <td><strong>An always-on host</strong></td>
                 <td>Every schedule, the warm-up ramp and the whole send loop stop when this laptop sleeps &mdash; and Docker went down during this session, proving it. No amount of code fixes a machine that is not on</td>
@@ -1458,9 +1835,10 @@
 
       <footer class="colophon">
         TITAN-OS &middot; AUTONOMY PROGRAMME<br>
-        Diagnosed live against the running stack &middot; 15 containers up &middot; HEAD <span style="color:var(--ink-2)">15997d3</span><br>
-        All figures read from the production database and worker logs &middot; last updated 29 August 2026 &middot; 2,860 tests green &middot; mypy clean across 211 files<br>
-        One-pager on 100% of messages &middot; visible in the approvals queue &middot; 140 queued, 0 sent carrying it yet
+        Diagnosed live against the running stack &middot; 12 containers up<br>
+        All figures read from the production database and worker logs &middot; last updated 7 September 2026<br>
+        Score gate at 55 &middot; 5 mailboxes live, 3 of them healthy &middot; 2,031 reachable leads against a 1,250 reserve<br>
+        Four days without a send, root-caused and fixed &middot; 48 sent, 18 research runs, one soft bounce &middot; W25 shipped
       </footer>
 
     </main>
