@@ -23,7 +23,10 @@ are the ones that close businesses, and they are the ones a wrong answer costs
 most. Where the recipient's address carries a subdivision the library
 recognises -- an Australian state, a Canadian province -- it is used, because
 those markets have genuinely divergent calendars. Where it does not, the country
-calendar stands rather than nothing.
+calendar stands rather than nothing -- except where the country calendar is
+empty by construction. The United Kingdom files every bank holiday under a
+nation, so ``GB`` alone answers "not a holiday" on days the country is shut;
+:data:`DEFAULT_SUBDIVISION` supplies England for that case.
 
 **Only where a country is unambiguous.** A campaign declaring EUROPE or
 MIDDLE_EAST names a market spanning many countries with different calendars, so
@@ -54,6 +57,28 @@ REGION_COUNTRIES: dict[Region, str | None] = {
     Region.OTHER: None,
     Region.UNSPECIFIED: None,
 }
+
+
+#: Countries whose public holidays are recorded *only* against a subdivision.
+#:
+#: The United Kingdom is the case that matters here and it fails silently. Ask
+#: the library for ``GB`` with no subdivision and it returns a calendar holding
+#: Christmas and New Year and almost nothing else -- every bank holiday, the
+#: Late Summer one included, is filed under England, Wales, Scotland or
+#: Northern Ireland individually. So a British lead whose record carries no
+#: administrative area gets a calendar that answers "not a holiday" on days
+#: when the whole country is shut, and nothing anywhere reports a problem.
+#:
+#: Found on 31 August 2026 -- the Late Summer Bank Holiday -- with 39 British
+#: messages queued and no region on any of them.
+#:
+#: England rather than the union: England, Wales and Northern Ireland share the
+#: Late Summer Bank Holiday and Scotland does not, so England is both the
+#: majority calendar and the more cautious one. Holding a message for a day it
+#: need not have waited costs a day; sending it into a closed office costs the
+#: message, and it is the one that arrives on top of the first-morning-back
+#: pile announcing that nobody knew what day it was.
+DEFAULT_SUBDIVISION: dict[str, str] = {"GB": "ENG"}
 
 
 @lru_cache(maxsize=64)
@@ -116,7 +141,8 @@ def holiday_on(
     """
     if not country:
         return None
-    calendar = _calendar(country, (subdiv or "").strip().upper() or None)
+    wanted = (subdiv or "").strip().upper() or DEFAULT_SUBDIVISION.get(country)
+    calendar = _calendar(country, wanted)
     if calendar is None:
         return None
     try:
@@ -151,6 +177,7 @@ def clear_cache() -> None:
 
 
 __all__ = [
+    "DEFAULT_SUBDIVISION",
     "REGION_COUNTRIES",
     "clear_cache",
     "holiday_on",

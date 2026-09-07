@@ -209,3 +209,40 @@ def test_the_recipients_country_beats_the_campaigns_market() -> None:
     assert DenyCode.OUTSIDE_SEND_WINDOW not in british.codes
     assert DenyCode.OUTSIDE_SEND_WINDOW in american.codes
     assert "Thanksgiving" in american.reason_text()
+
+
+# ==========================================================================
+# Countries whose holidays are filed only under a nation
+# ==========================================================================
+def test_a_british_lead_with_no_region_still_gets_bank_holidays() -> None:
+    """The failure this exists for, and it is silent.
+
+    ``holidays.country_holidays("GB")`` with no subdivision returns a calendar
+    holding Christmas and New Year and almost nothing else -- every bank
+    holiday is filed under England, Wales, Scotland or Northern Ireland
+    individually. Most British leads carry no administrative area, so the
+    lookup answered "not a holiday" on days the country is shut and nothing
+    reported a problem.
+
+    Found live on 31 August 2026 with 39 British messages queued.
+    """
+    assert holiday_on(dt.date(2026, 8, 31), country="GB") == "Late Summer Bank Holiday"
+    assert holiday_on(dt.date(2026, 5, 25), country="GB") is not None
+
+
+def test_an_explicit_subdivision_still_wins() -> None:
+    """The default is a fallback, not an override. Scotland does not keep the
+    Late Summer Bank Holiday, and a lead that says so must be believed."""
+    assert holiday_on(dt.date(2026, 8, 31), country="GB", subdiv="Scotland") is None
+
+
+def test_the_default_does_not_leak_into_other_countries() -> None:
+    """Only countries in the map are affected; everywhere else is unchanged."""
+    for country in ("US", "CA", "AU", "DE", "IE", "NL", "PL"):
+        assert holiday_on(dt.date(2026, 8, 31), country=country) is None
+
+
+def test_an_ordinary_working_day_is_still_a_working_day() -> None:
+    """The control. A rule that holds mail must not hold it every day."""
+    assert is_working_day(dt.date(2026, 9, 1), country="GB") is True
+    assert is_working_day(dt.date(2026, 8, 31), country="GB") is False
