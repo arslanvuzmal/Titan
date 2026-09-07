@@ -918,8 +918,17 @@ def cmd_schedules(args: argparse.Namespace) -> int:
 
         jobs: list = []
         starts: list = []
+        # The watchdog goes in with the schedules, not behind
+        # --start-campaigns. That flag is gated because it starts *outreach*;
+        # this starts nothing but the loop that keeps the other jobs running,
+        # and an installer that left it out would install seven schedules with
+        # nothing watching them.
+        supervisors: list = []
         for ws_id, slug in workspaces:
             jobs.extend(schedules.plan_schedules(ws_id, task_queue=RESEARCH_QUEUE))
+            supervisors.append(
+                schedules.plan_supervisor(ws_id, task_queue=RESEARCH_QUEUE)
+            )
             if args.start_campaigns:
                 starts.extend(
                     schedules.plan_orchestrators(
@@ -940,6 +949,8 @@ def cmd_schedules(args: argparse.Namespace) -> int:
             print("PLAN (nothing was changed)")
             for job in jobs:
                 print(f"  schedule  {job.schedule_id}  cron={job.cron!r}  {job.note}")
+            for supervisor in supervisors:
+                print(f"  watchdog  {supervisor.workflow_id}  watches the schedules")
             for start in starts:
                 print(f"  loop      {start.workflow_id}")
             if not args.start_campaigns:
@@ -948,6 +959,8 @@ def cmd_schedules(args: argparse.Namespace) -> int:
 
         client = await connect()
         applied = await schedules.install(client, jobs)
+        for supervisor in supervisors:
+            applied.append(await schedules.start_supervisor(client, supervisor))
         if starts:
             applied.extend(await schedules.start_orchestrators(client, starts))
         print(schedules.summarise(applied))

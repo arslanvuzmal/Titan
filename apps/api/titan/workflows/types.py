@@ -254,6 +254,30 @@ class ReopenStaleRunsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReverifyContactsInput:
+    """One pass of the stored-address re-check."""
+
+    workspace_id: str
+    #: None takes ``reverification.HOURLY_BATCH``. Small, because every one of
+    #: these is a connection to somebody else's mail server, and housekeeping
+    #: runs every hour.
+    batch: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReverifyContactsResult:
+    #: Addresses looked at, and how many got an answer from a verifier.
+    examined: int = 0
+    checked: int = 0
+    #: Statuses that moved.
+    changed: int = 0
+    #: The number that matters: addresses that stopped being sendable. Each is
+    #: a hard bounce that will not now happen.
+    downgraded: int = 0
+    reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class ReleaseHeldInput:
     """One pass of the higher-risk address release."""
 
@@ -272,6 +296,13 @@ class ReleaseHeldResult:
     released: int
     #: Why nothing more was released, in words an operator can act on.
     reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class HealSchedulesInput:
+    """One pass over the schedules, looking for one whose clock has stopped."""
+
+    workspace_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -631,6 +662,7 @@ __all__ = [
     "DiscoverActivityResult",
     "DraftActivityInput",
     "DraftActivityResult",
+    "HealSchedulesInput",
     "OrchestratorStatus",
     "PauseSignal",
     "PlannedLead",

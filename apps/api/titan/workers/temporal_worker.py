@@ -29,6 +29,8 @@ from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
+from titan.activities import reverification as reverification_activities
+from titan.activities import schedule_healing as schedule_healing_activities
 from titan.activities import sender_health as sender_health_activities
 from titan.activities import smartlead_replies as smartlead_reply_activities
 from titan.activities import stale_runs as stale_run_activities
@@ -48,6 +50,7 @@ from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
 from titan.workflows.sender_health import SenderHealthSnapshotWorkflow
+from titan.workflows.supervisor import SupervisorWorkflow
 from titan.workflows.verification import SenderVerificationWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
@@ -94,6 +97,7 @@ async def main() -> None:
             PullOptOutsWorkflow,
             HousekeepingWorkflow,
             MailboxRampWorkflow,
+            SupervisorWorkflow,
         ],
         activities=[
             research_activities.close_research_run,
@@ -106,8 +110,10 @@ async def main() -> None:
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
+            *schedule_healing_activities.ALL_SCHEDULE_HEALING_ACTIVITIES,
             stale_run_activities.reopen_stale_research_runs,
             trickle_activities.release_held_contacts,
+            *reverification_activities.ALL_REVERIFICATION_ACTIVITIES,
             *vitals_activities.ALL_VITALS_ACTIVITIES,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
             *optout_activities.ALL_OPTOUT_ACTIVITIES,

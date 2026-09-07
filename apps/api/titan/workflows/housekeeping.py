@@ -34,6 +34,8 @@ with workflow.unsafe.imports_passed_through():
         ReleaseHeldResult,
         ReopenStaleRunsInput,
         ReopenStaleRunsResult,
+        ReverifyContactsInput,
+        ReverifyContactsResult,
         SweepStrandedInput,
         SweepStrandedResult,
     )
@@ -112,6 +114,35 @@ class HousekeepingWorkflow:
             )
         except Exception as error:
             workflow.logger.warning("held-contact release skipped: %s", error)
+
+        # The only guard that keeps the other guards' answers true, and until
+        # now the only one with no schedule at all. Placed after the release
+        # rather than before it on purpose: the release decides what may go out
+        # today, and a re-check that withdrew an address *after* that decision
+        # would leave a message queued to an address just found wanting. The
+        # send gate would still refuse it -- it reads the channel live -- but a
+        # queue full of messages that can never send is a queue nobody can read.
+        #
+        # Swallowed like the release, and for the same reason: this is a guard
+        # on top of a working pipeline, and a pass that repaired stranded
+        # drafts must not be recorded as failed because a mail server was slow.
+        try:
+            rechecked: ReverifyContactsResult = await workflow.execute_activity(
+                "reverify_contacts",
+                ReverifyContactsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                retry_policy=RETRY,
+                result_type=ReverifyContactsResult,
+            )
+            workflow.logger.info(
+                "re-checked %s addresses, %s moved, %s withdrawn from sending (%s)",
+                rechecked.checked,
+                rechecked.changed,
+                rechecked.downgraded,
+                rechecked.reason or "ok",
+            )
+        except Exception as error:
+            workflow.logger.warning("address re-check skipped: %s", error)
 
         # Last, and deliberately after both repairs: the vitals should describe
         # the pipeline as it stands once this pass has done what it can, not as

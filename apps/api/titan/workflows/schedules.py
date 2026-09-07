@@ -75,6 +75,7 @@ from titan.workflows.sender_health import sender_health_workflow_id
 from titan.workflows.types import (
     CampaignOrchestratorInput,
     CaptureSenderHealthInput,
+    HealSchedulesInput,
     PollDeliveryEventsInput,
     PullOptOutsInput,
     RampMailboxesInput,
@@ -161,6 +162,20 @@ class OrchestratorStart:
     workflow_id: str
     campaign_id: uuid.UUID
     arg: CampaignOrchestratorInput
+    task_queue: str
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorStart:
+    """The one always-on loop that is not about a campaign.
+
+    Separate from :class:`OrchestratorStart` because it carries no campaign and
+    never could: it watches the schedules, which belong to the workspace rather
+    than to any campaign in it.
+    """
+
+    workflow_id: str
+    arg: HealSchedulesInput
     task_queue: str
 
 
@@ -255,6 +270,26 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="re-checks SPF, DKIM and DMARC before the claim goes stale",
         ),
     ]
+
+
+def supervisor_workflow_id(workspace_id: uuid.UUID) -> str:
+    """Stable, so a second watchdog can never start beside the first."""
+    return f"supervisor::{workspace_id}"
+
+
+def plan_supervisor(workspace_id: uuid.UUID, *, task_queue: str) -> SupervisorStart:
+    """The schedule watchdog, started as a loop rather than installed as a job.
+
+    Deliberately absent from :func:`plan_schedules`. The failure it exists to
+    catch is a schedule whose clock has stopped, and a watchdog installed as a
+    schedule stops the same way in the same minute -- which is how the fifth
+    stall ran for nine days with every part of the system reporting healthy.
+    """
+    return SupervisorStart(
+        workflow_id=supervisor_workflow_id(workspace_id),
+        arg=HealSchedulesInput(workspace_id=str(workspace_id)),
+        task_queue=task_queue,
+    )
 
 
 def plan_orchestrators(
@@ -363,6 +398,36 @@ async def _update_existing(client: Any, job: ScheduledJob) -> Applied:
             description.schedule.state.note or "paused by hand; not resumed",
         )
     return Applied(job.schedule_id, Outcome.UPDATED, job.note)
+
+
+async def start_supervisor(client: Any, start: SupervisorStart) -> Applied:
+    """Start the watchdog, treating "already running" as success.
+
+    Same collision rule as the campaign loops, for a sharper reason: two
+    watchdogs would reinstall the same wedged schedule twice and file the same
+    notification twice, so the id doing the refusing is the whole guard.
+    """
+    from temporalio.exceptions import WorkflowAlreadyStartedError
+
+    try:
+        await client.start_workflow(
+            "SupervisorWorkflow",
+            start.arg,
+            id=start.workflow_id,
+            task_queue=start.task_queue,
+        )
+        return Applied(start.workflow_id, Outcome.CREATED, "watches the schedules")
+    except WorkflowAlreadyStartedError:
+        return Applied(
+            start.workflow_id, Outcome.ALREADY_RUNNING, "one watchdog is enough"
+        )
+    except Exception as exc:  # pragma: no cover - network shape varies
+        logger.warning(
+            "could not start the schedule supervisor",
+            extra={"workflow_id": start.workflow_id},
+            exc_info=True,
+        )
+        return Applied(start.workflow_id, Outcome.FAILED, str(exc))
 
 
 async def start_orchestrators(
