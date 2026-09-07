@@ -318,3 +318,22 @@ def test_the_queue_ceiling_is_measured_from_completions_not_configuration() -> N
 
     assert "CrawlRun" in source
     assert "crawl_rate_per_hour=" in source
+
+
+def test_headroom_is_what_the_queue_ceiling_has_left() -> None:
+    """The planner has a second claim on the same crawler.
+
+    Every lead it plans costs a crawl, whether it was planned to fill the tank
+    or to spend today's send budget, so both have to fit under one ceiling.
+    Exposed here rather than recomputed there, because two callers deriving the
+    same bound separately is how they drift apart.
+    """
+    s = state(in_flight=200, crawl_rate_per_hour=120)
+
+    assert s.queue_ceiling == 240
+    assert s.headroom == 40
+
+
+def test_a_jammed_crawler_leaves_no_headroom_rather_than_a_negative_one() -> None:
+    """A caller multiplying by a negative headroom would order backwards."""
+    assert state(in_flight=500, crawl_rate_per_hour=120).headroom == 0

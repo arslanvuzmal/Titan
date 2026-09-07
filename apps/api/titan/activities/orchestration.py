@@ -245,12 +245,28 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
         )
     followups_due = sum(1 for result in scan if result.due)
 
-    # Deliberately not bounded by `remaining`. When the day's sends are spent
-    # but the tank is low, this cycle still researches -- the messages it
-    # produces wait in the outbox for tomorrow's budget, which is what having a
-    # reserve means. The authorization gate already says as much: a campaign
-    # whose sending is paused may still want its pipeline warm.
-    budget = fuel_budget.leads
+    # Two claims on this cycle, and the budget is whichever is larger.
+    #
+    # `fuel_budget` answers "how much new research tops the tank up"; `remaining`
+    # answers "how many sends are left today". Taking the research budget alone
+    # deadlocks, because a lead leaves the reserve only once a message exists
+    # for it and the only thing that writes a message is a lead this planner
+    # returned: a full tank switches off the engine that empties it. The live
+    # workspace stopped there -- 2,031 reachable leads against a 1,250 target,
+    # every campaign reporting `no_work_available`, four days without mail.
+    #
+    # Still not `min`, and still not bounded by `remaining` alone: when the
+    # day's sends are spent but the tank is low, this cycle researches anyway
+    # and the messages wait in the outbox for tomorrow. That is what having a
+    # reserve means, and it is why BUDGET_SPENT above requires *both* to be
+    # zero -- the guard already assumed the max; only this line disagreed.
+    #
+    # The send side is bounded by the crawler's headroom for the same reason
+    # the research side already is: every planned lead costs a crawl, whether
+    # it was planned to fill the tank or to spend the day's budget. Ordering
+    # past what the crawler can clear does not produce mail sooner, it
+    # produces research runs that exhaust their retries in the queue.
+    budget = max(fuel_budget.leads, min(remaining, fuel.headroom))
     async with workspace_session(workspace_id) as session:
         planned = await _select_leads(
             session,

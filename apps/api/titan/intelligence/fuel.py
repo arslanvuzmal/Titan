@@ -140,6 +140,17 @@ class FuelState:
         return rate * MAX_QUEUE_HOURS
 
     @property
+    def headroom(self) -> int:
+        """How much more research the crawler has room for right now.
+
+        Exposed rather than kept inside :func:`research_budget` because the
+        planner has a second claim on the same crawler -- the leads it must
+        work to spend today's send budget -- and both have to fit under one
+        ceiling. Two callers computing it separately is how they would drift.
+        """
+        return max(0, self.queue_ceiling - self.in_flight)
+
+    @property
     def expected_from_in_flight(self) -> int:
         """How many addresses the research already running should produce.
 
@@ -213,7 +224,7 @@ def research_budget(
     # What the crawler can actually make, before what the reserve would like.
     # A deficit is a statement about demand; it says nothing about whether the
     # machine that fills it has any room left.
-    headroom = state.queue_ceiling - state.in_flight
+    headroom = state.headroom
     if headroom <= 0:
         return FuelBudget(
             0,

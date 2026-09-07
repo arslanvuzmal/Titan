@@ -9,12 +9,28 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from dataclasses import replace
+from unittest import mock
 
 import pytest
 from sqlalchemy import select
-from titan.activities.orchestration import plan_campaign_cycle
-from titan.db.enums import CampaignStatus, LeadStatus, MessageState
-from titan.db.models import Campaign, CampaignPolicy, Lead, Message
+from titan.activities.orchestration import _read_fuel, plan_campaign_cycle
+from titan.db.enums import (
+    CampaignStatus,
+    ContactSource,
+    LeadStatus,
+    MessageState,
+    VerificationStatus,
+)
+from titan.db.models import (
+    Campaign,
+    CampaignPolicy,
+    Contact,
+    ContactChannel,
+    Lead,
+    Message,
+    Organization,
+)
 from titan.db.models.ops import Task
 from titan.db.session import workspace_unit_of_work
 from titan.workflows.types import CampaignCycleInput, CycleVerdict
@@ -298,3 +314,110 @@ async def test_planning_runs_the_follow_up_scan(db_session, workspace):
         # Either a due date or a recorded reason for there not being one. Null
         # with no explanation is the state that meant nothing was ever owed.
         assert lead.next_action_at is not None or lead.status_reason is not None
+
+
+async def add_reachable_leads(
+    session, workspace: uuid.UUID, campaign_id: uuid.UUID, *, count: int
+) -> None:
+    """Leads holding a published address that nobody has written to yet.
+
+    Exactly what ``titan.intelligence.fuel`` counts as the reserve: an address,
+    no suppression, no message. Built here rather than in ``build_sendable``
+    because that fixture's lead carries a message and so is, by definition, not
+    in the reserve at all.
+    """
+    for index in range(count):
+        tag = uuid.uuid4().hex[:8]
+        org = Organization(
+            workspace_id=workspace,
+            display_name=f"Reserve Business {tag}",
+            normalized_name=f"reserve business {tag}",
+            canonical_domain=f"reserve-{tag}.test",
+        )
+        session.add(org)
+        await session.flush()
+        contact = Contact(
+            workspace_id=workspace, organization_id=org.id, full_name="Sam Reserve"
+        )
+        session.add(contact)
+        await session.flush()
+        address = f"hello-{tag}@reserve-{tag}.test"
+        channel = ContactChannel(
+            workspace_id=workspace,
+            contact_id=contact.id,
+            channel_type="email",
+            value=address,
+            normalized_value=address,
+            value_domain=address.split("@", 1)[1],
+            source=ContactSource.FIRST_PARTY_WEBSITE,
+            source_url=f"https://reserve-{tag}.test/contact",
+            discovered_at=dt.datetime.now(dt.UTC),
+            verification_status=VerificationStatus.PUBLISHED_FIRST_PARTY,
+            confidence=0.9,
+        )
+        lead = Lead(
+            workspace_id=workspace,
+            campaign_id=campaign_id,
+            organization_id=org.id,
+            status=LeadStatus.QUALIFIED,
+            latest_score=88,
+        )
+        session.add_all([channel, lead])
+        await session.flush()
+        lead.primary_contact_channel_id = channel.id
+    # The planner reads through its own session, so uncommitted rows would be
+    # invisible to it and the reserve would read as empty.
+    await session.commit()
+
+
+async def test_a_full_reserve_does_not_stop_the_sending(db_session, workspace):
+    """Planted violation: pass ``fuel_budget.leads`` alone as the cycle's
+    budget and this fails.
+
+    The mirror of ``test_a_spent_send_budget_does_not_stop_the_pipeline``, and
+    the deadlock that one's fix opened. A lead leaves the reserve only when a
+    message exists for it, and the only thing that writes a message is a lead
+    this planner returned. So a full tank switches off the engine that empties
+    it, and nothing ever refills the argument for switching it back on.
+
+    Observed on the live workspace: 2,031 reachable leads against a 1,250-lead
+    target, 407 of them awaiting approval, twenty-nine campaigns all reporting
+    ``no_work_available`` -- and four consecutive days with no mail sent.
+    """
+    fixture = await build_sendable(db_session, workspace, daily_send_limit=1)
+    # One day's capacity is 1, so RESERVE_DAYS puts the target at 5. Five
+    # untouched reachable leads is a reserve that is exactly full.
+    await add_reachable_leads(db_session, workspace, fixture.campaign_id, count=5)
+
+    plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
+
+    assert plan.remaining_budget > 0, "the day's sends are not spent"
+    assert plan.verdict == CycleVerdict.READY.value, (
+        f"a full reserve must not stop the cycle that drains it: {plan.detail}"
+    )
+    assert plan.leads, "there are leads with an address and nobody has written to them"
+
+
+async def test_a_jammed_crawler_bounds_the_send_side_too(db_session, workspace):
+    """Planted violation: drop the ``fuel.headroom`` bound and this fails.
+
+    The send budget is a claim on the same crawler the research budget is
+    bounded against. Letting it through unbounded is how 1,123 research runs
+    failed against 1,242 started -- none of it a crawl going wrong, all of it
+    work ordered past what the machine could clear.
+    """
+    fixture = await build_sendable(db_session, workspace, daily_send_limit=50)
+    await add_reachable_leads(db_session, workspace, fixture.campaign_id, count=3)
+
+    async def saturated(session, *, workspace_id):
+        real = await _read_fuel(session, workspace_id=workspace_id)
+        return replace(real, in_flight=real.queue_ceiling + 10)
+
+    with mock.patch("titan.activities.orchestration._read_fuel", saturated):
+        plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
+
+    assert plan.remaining_budget == 50, "the day's sends are not spent"
+    assert plan.verdict == CycleVerdict.NO_WORK_AVAILABLE.value, (
+        "a saturated crawler must not be handed more work, however much "
+        f"send budget is left: {plan.detail}"
+    )
