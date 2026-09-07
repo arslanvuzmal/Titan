@@ -1,0 +1,555 @@
+<title>Get Sending Again</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  /* Cool, technical palette -- the world of DNS records and mail authentication.
+     Neutrals carry a slight blue bias so they read as chosen rather than default. */
+  :root {
+    --ground:#eef1f4; --surface:#ffffff; --surface-2:#e4e9ee; --sunken:#dde3e9;
+    --ink:#141d26; --ink-2:#47596b; --ink-3:#71838f;
+    --rule:#ccd6de; --rule-soft:#dee5eb;
+    --accent:#12626f; --accent-2:#0d4a54; --accent-soft:#dcedef;
+    --done:#2b6349; --done-soft:#dcece4;
+    --wait:#845d0c; --wait-soft:#f6ecd5;
+    --harm:#96322a; --harm-soft:#f8e3e1;
+    --shadow:0 1px 2px rgba(20,29,38,.06), 0 10px 26px -18px rgba(20,29,38,.35);
+    --display:"Bricolage Grotesque","Segoe UI",Helvetica,Arial,sans-serif;
+    --body:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0d1319; --surface:#141c24; --surface-2:#1c262f; --sunken:#101820;
+      --ink:#e6edf2; --ink-2:#a3b3c0; --ink-3:#7a8b98;
+      --rule:#28353f; --rule-soft:#1f2a33;
+      --accent:#5ec4d3; --accent-2:#8ad8e3; --accent-soft:#123036;
+      --done:#63bd93; --done-soft:#14291f;
+      --wait:#d5a648; --wait-soft:#2a2315;
+      --harm:#e28379; --harm-soft:#2e1b19;
+      --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -18px rgba(0,0,0,.9);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0d1319; --surface:#141c24; --surface-2:#1c262f; --sunken:#101820;
+    --ink:#e6edf2; --ink-2:#a3b3c0; --ink-3:#7a8b98;
+    --rule:#28353f; --rule-soft:#1f2a33;
+    --accent:#5ec4d3; --accent-2:#8ad8e3; --accent-soft:#123036;
+    --done:#63bd93; --done-soft:#14291f;
+    --wait:#d5a648; --wait-soft:#2a2315;
+    --harm:#e28379; --harm-soft:#2e1b19;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 26px -18px rgba(0,0,0,.9);
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:var(--body); font-size:16px; line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1140px; margin:0 auto; padding:0 22px 88px; }
+
+  /* masthead */
+  header.top { padding:56px 0 26px; border-bottom:2px solid var(--ink); }
+  .kicker {
+    font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:.15em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 16px;
+  }
+  header.top h1 {
+    font-family:var(--display); font-weight:700;
+    font-size:clamp(2.2rem,5.6vw,3.4rem); line-height:1.02;
+    letter-spacing:-.025em; text-wrap:balance; margin:0 0 16px;
+  }
+  .lede {
+    font-size:clamp(1.02rem,1.9vw,1.16rem); line-height:1.55;
+    color:var(--ink-2); max-width:64ch; margin:0;
+  }
+  .lede strong { color:var(--ink); font-weight:600; }
+
+  .totals { display:flex; flex-wrap:wrap; gap:0; margin-top:28px; border-top:1px solid var(--rule); }
+  .total { flex:1 1 160px; padding:15px 20px 13px 0; border-right:1px solid var(--rule-soft); }
+  .total:last-child { border-right:0; }
+  .total dt {
+    font-family:var(--mono); font-size:10px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 5px;
+  }
+  .total dd {
+    margin:0; font-family:var(--display); font-size:1.55rem; font-weight:700;
+    font-variant-numeric:tabular-nums; line-height:1.15; letter-spacing:-.01em;
+  }
+  .total dd small {
+    display:block; font-family:var(--body); font-size:12px; font-weight:400;
+    color:var(--ink-3); margin-top:3px; letter-spacing:0;
+  }
+
+  /* layout */
+  .cols { display:grid; grid-template-columns:1fr; gap:40px; padding-top:40px; }
+  @media (min-width:980px) {
+    .cols { grid-template-columns:196px minmax(0,1fr); gap:52px; }
+    nav.rail { position:sticky; top:26px; align-self:start; }
+  }
+  nav.rail p.railtitle {
+    font-family:var(--mono); font-size:10px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 12px 14px;
+  }
+  nav.rail a {
+    display:block; padding:8px 0 8px 14px; position:relative;
+    font-size:13.5px; line-height:1.3; color:var(--ink-2); text-decoration:none;
+    border-left:2px solid var(--rule-soft); transition:color .15s, border-color .15s;
+  }
+  nav.rail a:hover, nav.rail a:focus-visible { color:var(--accent); border-left-color:var(--accent); }
+  nav.rail a span {
+    display:block; font-family:var(--mono); font-size:10px;
+    color:var(--ink-3); letter-spacing:.05em; margin-top:1px;
+  }
+  main { min-width:0; }
+
+  section { scroll-margin-top:22px; }
+  section + section { margin-top:52px; }
+  h2 {
+    font-family:var(--display); font-size:clamp(1.4rem,3vw,1.78rem); font-weight:700;
+    line-height:1.12; letter-spacing:-.02em; text-wrap:balance;
+    margin:0 0 4px; padding-top:13px; border-top:1px solid var(--ink);
+  }
+  h2 .when {
+    display:block; font-family:var(--mono); font-size:10.5px; font-weight:500;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--accent); margin-bottom:9px;
+  }
+  .sectionnote { color:var(--ink-2); max-width:66ch; margin:10px 0 22px; font-size:15px; }
+
+  /* step cards */
+  .step {
+    background:var(--surface); border:1px solid var(--rule); border-radius:4px;
+    margin:0 0 14px; box-shadow:var(--shadow); overflow:hidden;
+  }
+  .step > .head {
+    display:flex; flex-wrap:wrap; align-items:center; gap:9px 12px;
+    padding:13px 18px; background:var(--surface-2); border-bottom:1px solid var(--rule);
+  }
+  .step .n {
+    font-family:var(--mono); font-size:11px; font-weight:500; color:var(--ink-3);
+    letter-spacing:.06em; flex:0 0 auto;
+  }
+  .step .what { font-weight:600; flex:1 1 240px; font-size:15.5px; line-height:1.35; }
+  .step .body { padding:15px 18px 4px; }
+  .step .body > p:first-child { margin-top:0; }
+  .step p { margin:0 0 13px; max-width:66ch; font-size:15px; }
+  .step ul { margin:0 0 13px; padding-left:19px; max-width:66ch; font-size:15px; }
+  .step li { margin-bottom:6px; }
+  .step li::marker { color:var(--ink-3); }
+
+  /* where / duration chips -- both encode something real about the step */
+  .chip {
+    display:inline-block; font-family:var(--mono); font-size:10px; font-weight:500;
+    letter-spacing:.07em; text-transform:uppercase; padding:3px 8px;
+    border-radius:2px; border:1px solid currentColor; white-space:nowrap; flex:0 0 auto;
+  }
+  .chip.spacemail { color:var(--accent); background:var(--accent-soft); }
+  .chip.namecheap { color:var(--wait); background:var(--wait-soft); }
+  .chip.claude    { color:var(--done); background:var(--done-soft); }
+  .chip.mins { color:var(--ink-3); border-color:var(--rule); }
+
+  /* copyable values -- the reason JetBrains Mono is here: these get pasted,
+     and 0/O and 1/l have to be distinguishable at a glance. */
+  .value {
+    position:relative; background:var(--sunken); border:1px solid var(--rule);
+    border-radius:3px; padding:11px 78px 11px 13px; margin:0 0 13px;
+    font-family:var(--mono); font-size:12.5px; line-height:1.55;
+    overflow-x:auto; white-space:pre; color:var(--ink);
+  }
+  .value .label {
+    display:block; font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--ink-3); margin-bottom:5px; white-space:normal;
+  }
+  .copy {
+    position:absolute; top:9px; right:9px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.07em; text-transform:uppercase;
+    padding:5px 10px; border-radius:2px; cursor:pointer;
+    background:var(--surface); color:var(--accent);
+    border:1px solid var(--rule); transition:background .15s, color .15s;
+  }
+  .copy:hover, .copy:focus-visible { background:var(--accent); color:var(--surface); border-color:var(--accent); }
+  .copy[data-done="1"] { color:var(--done); border-color:var(--done); }
+
+  .swap { display:grid; gap:9px; margin:0 0 13px; }
+  .swap .row {
+    display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+    font-family:var(--mono); font-size:12.5px;
+    background:var(--sunken); border:1px solid var(--rule); border-radius:3px; padding:9px 13px;
+  }
+  .swap .from { color:var(--ink-3); text-decoration:line-through; }
+  .swap .arrow { color:var(--ink-3); }
+  .swap .to { color:var(--accent); font-weight:500; }
+
+  /* callouts */
+  .flag {
+    max-width:66ch; border-radius:3px; padding:14px 18px; margin:0 0 14px;
+    border:1px solid var(--rule); background:var(--surface); border-left:3px solid var(--accent);
+  }
+  .flag h4 {
+    font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.13em;
+    text-transform:uppercase; margin:0 0 7px; color:var(--accent);
+  }
+  .flag p { margin:0; font-size:14.5px; line-height:1.55; }
+  .flag p + p { margin-top:9px; }
+  .flag.warn { border-left-color:var(--wait); background:var(--wait-soft); }
+  .flag.warn h4 { color:var(--wait); }
+  .flag.stop { border-left-color:var(--harm); background:var(--harm-soft); }
+  .flag.stop h4 { color:var(--harm); }
+  .flag.good { border-left-color:var(--done); background:var(--done-soft); }
+  .flag.good h4 { color:var(--done); }
+
+  .tablewrap {
+    overflow-x:auto; border:1px solid var(--rule); border-radius:3px;
+    background:var(--surface); margin:0 0 14px; box-shadow:var(--shadow);
+  }
+  table { border-collapse:collapse; width:100%; min-width:440px; font-size:14px; }
+  th {
+    text-align:left; font-family:var(--mono); font-size:10px; font-weight:600;
+    letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3);
+    padding:11px 15px; border-bottom:1px solid var(--rule); white-space:nowrap;
+  }
+  td { padding:10px 15px; border-bottom:1px solid var(--rule-soft); vertical-align:top; line-height:1.5; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.mono { font-family:var(--mono); font-size:12.5px; font-variant-numeric:tabular-nums; }
+  td.num { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; }
+
+  code {
+    font-family:var(--mono); font-size:.86em; background:var(--surface-2);
+    padding:.12em .38em; border-radius:2px;
+  }
+  a { color:var(--accent); text-underline-offset:2px; }
+  a:focus-visible, .copy:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:2px; }
+
+  footer.end {
+    margin-top:60px; padding-top:20px; border-top:2px solid var(--ink);
+    font-family:var(--mono); font-size:11px; letter-spacing:.04em;
+    color:var(--ink-3); line-height:1.85;
+  }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <p class="kicker">arslanvuzmallone.com &middot; one domain, no spend &middot; 29 August 2026</p>
+    <h1>Get sending again</h1>
+    <p class="lede">Everything that is <strong>yours to do</strong>, in the order that matters. Nothing here costs money. The domain is not burned &mdash; it is at <strong>4.4% bounce against a 2% ceiling</strong>, and roughly a thousand clean sends clears it. Most of this is ten minutes in two control panels.</p>
+
+    <dl class="totals">
+      <div class="total"><dt>Bounce rate</dt><dd>4.4%<small>10 of 228 &mdash; ceiling is 2%</small></dd></div>
+      <div class="total"><dt>Clean sends to clear it</dt><dd>~1,000<small>at the 1.3% front-desk rate</small></dd></div>
+      <div class="total"><dt>Contactable businesses</dt><dd>2,325<small>up from 1,264 today</small></dd></div>
+      <div class="total"><dt>Waiting on the score gate</dt><dd>726<small>all carry evidence</small></dd></div>
+      <div class="total"><dt>Your spend</dt><dd>&pound;0<small>every step below</small></dd></div>
+    </dl>
+  </header>
+
+  <div class="cols">
+
+    <nav class="rail" aria-label="Contents">
+      <p class="railtitle">Steps</p>
+      <a href="#today">Do today<span>6 steps &middot; ~25 min</span></a>
+      <a href="#week">This week<span>2 steps &middot; optional</span></a>
+      <a href="#september">Around 20 Sept<span>2 steps &middot; after ramp</span></a>
+      <a href="#never">Never do this<span>1 rule</span></a>
+      <a href="#mine">What I am doing<span>no action needed</span></a>
+    </nav>
+
+    <main>
+
+      <section id="today">
+        <h2><span class="when">Do today &middot; about 25 minutes</span>Six things, in this order</h2>
+        <p class="sectionnote">Ordered by what unblocks the most. Step 1 costs you one word and is the single biggest lever on this page.</p>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">01</span>
+            <span class="what">Answer me on the 726 leads</span>
+            <span class="chip claude">tell Claude</span>
+            <span class="chip mins">1 min</span>
+          </div>
+          <div class="body">
+            <p>Every one of your 48 campaigns requires a lead score of <strong>70</strong>. Not one lead in the backlog reaches it. Sitting behind that gate:</p>
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>Backlog, scoring 55&ndash;69</th><th class="num">Leads</th></tr></thead>
+                <tbody>
+                  <tr><td>With a working address <em>and</em> five or more findings</td><td class="num">533</td></tr>
+                  <tr><td>With a working address and two to four findings</td><td class="num">182</td></tr>
+                  <tr><td>With a working address and one finding</td><td class="num">11</td></tr>
+                  <tr><td><strong>With no evidence at all</strong></td><td class="num"><strong>0</strong></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>The band 55&ndash;69 is literally named <em>manual review</em> &mdash; it means &ldquo;a person should decide&rdquo;, not &ldquo;reject&rdquo;. Reject is below 55. Every one of the 726 carries evidence, so the messages read exactly like the ones you approved.</p>
+            <div class="flag">
+              <h4>What I need</h4>
+              <p>Just say <strong>open the gate</strong>. It is one setting per campaign and reversible in a minute. That is roughly three days of sending at your 250/day target, available immediately and for nothing.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">02</span>
+            <span class="what">Rename the two unused mailboxes</span>
+            <span class="chip spacemail">Spacemail</span>
+            <span class="chip mins">5 min</span>
+          </div>
+          <div class="body">
+            <p>Neither has ever sent a message, so renaming them costs nothing at all &mdash; no warm-up lost, no reputation carried, no replies to reroute. Do these two and leave the other three alone for now.</p>
+            <div class="swap">
+              <div class="row"><span class="from">contact@arslanvuzmallone.com</span><span class="arrow">&rarr;</span><span class="to">arslan@arslanvuzmallone.com</span></div>
+              <div class="row"><span class="from">marketing@arslanvuzmallone.com</span><span class="arrow">&rarr;</span><span class="to">me@arslanvuzmallone.com</span></div>
+            </div>
+            <p>If Spacemail has no rename option, create the two new mailboxes and delete these two. Safe in this one case, precisely because they have never sent.</p>
+            <div class="flag warn">
+              <h4>Why these two names and not the others</h4>
+              <p><code>marketing@</code> is the single most heavily filtered local-part in cold email, and <code>contact@</code> is weak. Getting off them is free and helps immediately &mdash; which is not true of the other three, where a rename throws away warm-up you have already paid for.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">03</span>
+            <span class="what">Point your DMARC reports at a mailbox that exists</span>
+            <span class="chip namecheap">Namecheap</span>
+            <span class="chip mins">5 min</span>
+          </div>
+          <div class="body">
+            <p>Your DMARC record asks for reports at <code>admin@arslanvuzmallone.com</code> &mdash; and <strong>you have no <code>admin@</code> mailbox</strong>. Those reports have been bouncing, so you have had no visibility into who is authenticating as your domain or whether your own mail passes.</p>
+            <p>Do this <em>after</em> step 2, so <code>arslan@</code> exists to receive them. In Namecheap: <strong>Domain List &rarr; Manage &rarr; Advanced DNS</strong>, find the existing TXT record with host <code>_dmarc</code>, and replace its value.</p>
+            <div class="value"><span class="label">Replace this &mdash; host <code>_dmarc</code>, type TXT</span>v=DMARC1; p=none; rua=mailto:admin@arslanvuzmallone.com; fo=1</div>
+            <div class="value" data-copy="v=DMARC1; p=quarantine; pct=25; rua=mailto:arslan@arslanvuzmallone.com; fo=1"><span class="label">With this</span>v=DMARC1; p=quarantine; pct=25; rua=mailto:arslan@arslanvuzmallone.com; fo=1</div>
+            <p>That one line does two jobs: it fixes the dead reporting address, and it moves you off <code>p=none</code>.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">04</span>
+            <span class="what">Understand what you just changed</span>
+            <span class="chip mins">read only</span>
+          </div>
+          <div class="body">
+            <p><code>p=none</code> tells Gmail and Microsoft to do <em>nothing</em> when a message fails authentication. Anyone can send mail as your domain and receivers are instructed to accept it. It monitors; it protects nothing.</p>
+            <p><code>p=quarantine</code> tells them to put failures in spam. <code>pct=25</code> applies it to a quarter of failing mail to start &mdash; a deliberate ramp, so if something of yours is misconfigured you find out from reports rather than from silence.</p>
+            <div class="flag good">
+              <h4>Why this is safe for you specifically</h4>
+              <p>Your SPF, DKIM and alignment all pass today &mdash; I checked against live DNS, and the DKIM selector <code>spacemail</code> genuinely resolves rather than quietly finding nothing. Your legitimate mail already authenticates, so tightening the policy does not touch it.</p>
+              <p>In about a week, once reports show clean, raise <code>pct=25</code> to <code>pct=100</code>. Later still, <code>p=reject</code>.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">05</span>
+            <span class="what">Add TLS-RPT</span>
+            <span class="chip namecheap">Namecheap</span>
+            <span class="chip mins">2 min</span>
+          </div>
+          <div class="body">
+            <p>One new TXT record. It asks receivers to tell you when encrypted delivery to your domain fails &mdash; which is currently something you would simply never find out.</p>
+            <div class="value" data-copy="_smtp._tls"><span class="label">Host</span>_smtp._tls</div>
+            <div class="value" data-copy="v=TLSRPTv1; rua=mailto:arslan@arslanvuzmallone.com"><span class="label">Value &mdash; type TXT</span>v=TLSRPTv1; rua=mailto:arslan@arslanvuzmallone.com</div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">06</span>
+            <span class="what">Tell me the passwords held</span>
+            <span class="chip claude">tell Claude</span>
+            <span class="chip mins">1 min</span>
+          </div>
+          <div class="body">
+            <p>After the rename, tell me whether the passwords stayed the same. A rename usually keeps them; creating fresh mailboxes will not.</p>
+            <p>Then I swap the Titan side in one pass &mdash; the mailbox file, both identity fields that carry the local part, the worker reload, and an authentication check on all five, rolling back automatically if anything fails.</p>
+            <div class="flag stop">
+              <h4>Rotate the two passwords you sent me</h4>
+              <p>You pasted them into the chat in plain text. They work, which is exactly why they should not stay as they are. Change both when you do the rename, and put the new ones straight into the mailbox file yourself rather than sending them.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="week">
+        <h2><span class="when">This week &middot; both optional</span>Two worth asking about</h2>
+        <p class="sectionnote">Neither blocks anything. Skip both if the answer is &ldquo;that costs money&rdquo;.</p>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">07</span>
+            <span class="what">Ask Spacemail whether subdomain mail is included</span>
+            <span class="chip spacemail">Spacemail</span>
+            <span class="chip mins">one email</span>
+          </div>
+          <div class="body">
+            <p>You already own <code>arslanvuzmallone.com</code>, so <code>send.arslanvuzmallone.com</code> costs nothing at the registrar. Receivers track subdomain reputation partly separately from the root, so sending from one gives some insulation for the domain your portfolio lives on.</p>
+            <p>The only question is whether Spacemail will host mailboxes on a subdomain under your current plan. Some do at no extra cost; some charge per domain. <strong>If it is free, take it. If it costs anything, skip it</strong> &mdash; it is a nice-to-have, not a fix.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">08</span>
+            <span class="what">MTA-STS, only if your site host makes it easy</span>
+            <span class="chip namecheap">Namecheap + web host</span>
+            <span class="chip mins">30 min</span>
+          </div>
+          <div class="body">
+            <p>This one needs a DNS record <em>and</em> a small file served over HTTPS at a subdomain, so it is more work than the others and the payoff is smaller. Do it only if adding a subdomain to your portfolio host is straightforward.</p>
+            <div class="value" data-copy="_mta-sts"><span class="label">Host</span>_mta-sts</div>
+            <div class="value" data-copy="v=STSv1; id=20260828T000000Z"><span class="label">Value &mdash; type TXT</span>v=STSv1; id=20260828T000000Z</div>
+            <div class="value" data-copy="version: STSv1
+mode: testing
+mx: mx1.spacemail.com
+mx: mx2.spacemail.com
+max_age: 604800"><span class="label">Served at https://mta-sts.arslanvuzmallone.com/.well-known/mta-sts.txt</span>version: STSv1
+mode: testing
+mx: mx1.spacemail.com
+mx: mx2.spacemail.com
+max_age: 604800</div>
+            <p><code>mode: testing</code> means it reports problems without refusing any delivery. Leave it there for a few weeks before considering <code>enforce</code>.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="september">
+        <h2><span class="when">Around 20 September &middot; not before</span>The other three mailboxes</h2>
+        <p class="sectionnote">Wait until <code>arslan@</code> and <code>me@</code> have finished their 21-day ramp. Renaming everything at once leaves you with no sending capacity for three weeks &mdash; and five brand-new addresses appearing on one domain and all starting to send together is itself a pattern receivers notice.</p>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">09</span>
+            <span class="what">Rename the two blocked mailboxes</span>
+            <span class="chip spacemail">Spacemail</span>
+            <span class="chip mins">10 min</span>
+          </div>
+          <div class="body">
+            <div class="tablewrap">
+              <table>
+                <thead><tr><th>Mailbox</th><th class="num">Bounce rate</th><th>Clean sends to clear 2%</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">outreach@</td><td class="num">6 / 109 = 5.50%</td><td>~191 more &mdash; about 38 days</td></tr>
+                  <tr><td class="mono">sales@</td><td class="num">3 / 98 = 3.06%</td><td>~52 more &mdash; about 11 days</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p><strong>Renaming <code>outreach@</code> is faster than waiting for it to recover.</strong> Its warm-up is protecting a 5.50% lifetime rate that takes until October to dilute; a fresh address takes 21 days and starts clean. <code>sales@</code> is closer, so it is a genuine toss-up &mdash; decide nearer the time.</p>
+            <p>Pick two names from the same register when you get there. <code>arslan.lone@</code> and <code>a.vuzmal@</code> are the natural pair &mdash; full-name forms are the professional-services standard, and both sit in the top deliverability band. Avoid <code>a.lone@</code>, which reads as <em>alone@</em>.</p>
+            <div class="flag warn">
+              <h4>Keep the old addresses as aliases</h4>
+              <p>Not as mailboxes &mdash; as aliases pointing at the new ones. See the rule below.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="head">
+            <span class="n">10</span>
+            <span class="what">Leave projects@ until last</span>
+            <span class="chip spacemail">Spacemail</span>
+            <span class="chip mins">later</span>
+          </div>
+          <div class="body">
+            <p><code>projects@</code> is the least urgent of the five. It is neutral rather than filtered, it is mid-ramp, and it is currently carrying almost all of your real sending capacity. Rename it once the other four are settled, or leave it &mdash; it is not doing you harm.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="never">
+        <h2><span class="when">The one rule</span>Never delete a mailbox that has sent</h2>
+        <div class="flag stop">
+          <h4>This is the expensive mistake</h4>
+          <p><strong>228 messages are out there</strong> carrying <code>outreach@</code> and <code>sales@</code> as their reply address, and mail is arriving on them right now &mdash; 145 inbound in the last fortnight, 12 threaded to real leads, the most recent today.</p>
+          <p>Delete those mailboxes and every reply to those 228 bounces, permanently. A reply is the entire output of this system: fourteen thousand research runs exist to produce one. Rename, or keep the old address as an alias &mdash; but never delete.</p>
+        </div>
+        <div class="flag">
+          <h4>Why deleting everything would not have helped anyway</h4>
+          <p>Gmail and Microsoft judge <strong>the domain</strong>, not the mailbox. Five new mailboxes on <code>arslanvuzmallone.com</code> look identical to the old five from the receiver's side. Deleting pays the full cost of a fresh start and returns none of the benefit.</p>
+        </div>
+      </section>
+
+      <section id="mine">
+        <h2><span class="when">No action needed</span>What I am doing on my side</h2>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Work</th><th>State</th></tr></thead>
+            <tbody>
+              <tr><td>Recovered contacts from crawls already on disk</td><td><strong>done</strong> &mdash; +1,061 businesses, 1,264 &rarr; 2,325</td></tr>
+              <tr><td>Rewrote every unsent draft into the four-part format</td><td><strong>done</strong> &mdash; 636 rewritten</td></tr>
+              <tr><td>Wired the two new mailboxes into the sending pool</td><td><strong>done</strong> &mdash; SMTP and IMAP verified on all five</td></tr>
+              <tr><td>One-page brief attached to every message, visible in the dashboard</td><td><strong>done</strong></td></tr>
+              <tr><td>Inverted the scorer that preferred addresses which bounce</td><td><strong>done</strong> &mdash; role addresses bounce at 1.30%, named at 8.11%</td></tr>
+              <tr><td>Swap the renamed mailboxes into Titan</td><td>waiting on step 6</td></tr>
+              <tr><td>Open the score gate on 726 leads</td><td>waiting on step 1</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="flag good">
+          <h4>Where this gets you</h4>
+          <p>2,325 contactable businesses, 726 of them ready the moment you say the word, and a bounce rate that falls below the block threshold after roughly a thousand sends to the front-desk addresses recovered today. None of it needs a second domain, and none of it needs money.</p>
+        </div>
+      </section>
+
+      <footer class="end">
+        GET SENDING AGAIN &middot; arslanvuzmallone.com<br>
+        Every figure read live from the production database, the running workers and public DNS &middot; 29 August 2026<br>
+        Total cost of this page: &pound;0
+      </footer>
+
+    </main>
+  </div>
+</div>
+
+<script>
+  // Copy buttons on every pasteable value. DNS records get retyped wrong far
+  // more often than they get mis-copied, so this is the useful affordance here.
+  document.querySelectorAll('.value[data-copy]').forEach(function (box) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'copy';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', function () {
+      var text = box.getAttribute('data-copy') || '';
+      var done = function () {
+        btn.textContent = 'copied';
+        btn.setAttribute('data-done', '1');
+        setTimeout(function () {
+          btn.textContent = 'copy';
+          btn.removeAttribute('data-done');
+        }, 1600);
+      };
+      try {
+        navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+      } catch (e) {
+        fallback(text, done);
+      }
+    });
+    box.appendChild(btn);
+  });
+
+  // Clipboard API is unavailable in some embedded contexts; select the text so
+  // the reader can still copy it by hand rather than being left with a dead button.
+  function fallback(text, done) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done();
+    } catch (e) {
+      /* Leave the button as it was; the value is visible and selectable above it. */
+    }
+  }
+</script>
