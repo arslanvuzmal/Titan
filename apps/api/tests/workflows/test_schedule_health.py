@@ -141,6 +141,30 @@ def test_the_verdict_says_how_far_behind_in_words_a_person_can_act_on() -> None:
     assert "9 days" in assess(frozen, now=NOW).reason
 
 
+def test_the_reason_does_not_claim_more_than_was_actually_observed() -> None:
+    """Planted violation: keep the wording written for the old rule.
+
+    The first version judged the furthest firing and said so -- "every
+    predicted firing is in the past". Reading the soonest instead made that
+    sentence false without making any test fail, and it is the sentence the
+    operator reads in the alert. A watchdog that reports a stall accurately
+    and then describes it wrongly has traded one silent problem for a loud
+    untrue one.
+    """
+    # The live shape: stopped at 14:17, read at 17:03, nine firings still
+    # ahead of it.
+    stopped = observation(
+        next_action_times=tuple(
+            dt.datetime(2026, 9, 7, 14 + n, 17, tzinfo=dt.UTC) for n in range(10)
+        )
+    )
+
+    reason = assess(stopped, now=dt.datetime(2026, 9, 7, 17, 3, tzinfo=dt.UTC)).reason
+
+    assert "every" not in reason.lower()
+    assert "next" in reason.lower() and "3 hours" in reason
+
+
 # ==========================================================================
 # Healing: observing every schedule we own, and reinstalling only the wedged
 # ==========================================================================
@@ -185,10 +209,20 @@ class FakeHandle:
         current = self._client.existing[self._id]
         mutate(FakeUpdateInput(current))
         self._client.updated.append(self._id)
+        # A successful update revives the scheduler, which is what the server
+        # does when the repair takes. `StubbornClient` below models the case
+        # observed live where it does not.
+        if self._client.repair_works:
+            ahead = tuple(NOW + dt.timedelta(hours=n) for n in range(1, 11))
+            self._client.existing[self._id] = FakeDescription(
+                current.schedule, FakeInfo(ahead)
+            )
 
 
 class FakeClient:
     """Enough Temporal to observe schedules and reinstall the wedged ones."""
+
+    repair_works = True
 
     def __init__(self, existing: dict[str, FakeDescription]) -> None:
         self.existing = existing
@@ -349,3 +383,68 @@ def test_the_daily_report_is_checked_hourly_not_daily() -> None:
     report = next(job for job in _jobs() if job.workflow == "DailyReportWorkflow")
 
     assert report.cron.split()[1] == "*", "the hour field must not be fixed"
+
+
+def test_a_schedule_that_stopped_hours_ago_is_wedged_before_the_list_runs_out() -> None:
+    """Planted violation: judge on the furthest predicted firing.
+
+    Taken from the live schedule at 17:03 on 7 September, two hours after it
+    stopped: soonest 14:17, furthest 23:17. Nine of the ten predictions were
+    still in the future, so a rule reading the furthest called it healthy and
+    the watchdog let it sit -- 13 supervisor cycles, nothing healed.
+
+    The error was in the first version of this file, not in the watchdog: the
+    only wedged schedule available to model was one frozen a *week* back,
+    where every prediction had aged into the past, and the test encoded that
+    accident as though it were the signature. A clock that stopped two hours
+    ago looks identical to a healthy one under `max`, and it takes ten hours
+    of an hourly schedule being dead before it does not.
+
+    The soonest is the honest reading: a schedule that is running has its next
+    firing ahead of it, and one whose clock has stopped watches that firing
+    recede.
+    """
+    stopped_at_1417 = observation(
+        next_action_times=tuple(
+            dt.datetime(2026, 9, 7, 14 + n, 17, tzinfo=dt.UTC) for n in range(10)
+        )
+    )
+    now = dt.datetime(2026, 9, 7, 17, 3, tzinfo=dt.UTC)
+
+    assessment = assess(stopped_at_1417, now=now)
+
+    assert assessment.verdict is Verdict.WEDGED
+    assert assessment.behind > dt.timedelta(hours=2)
+
+
+@pytest.mark.asyncio
+async def test_a_repair_that_did_not_take_is_not_reported_as_healed() -> None:
+    """Planted violation: trust the installer and report success blindly.
+
+    Observed live on 7 September. Updating a wedged schedule's spec in place
+    unwedged it at 13:24 and did nothing at all at 17:15 -- same call, same
+    schedule, same code path. The pass still logged "reinstalling" and filed
+    an alert saying the schedule "had stopped and was restarted", which was
+    false, and the daily dedupe then suppressed any further alert.
+
+    A watchdog reporting a repair it did not achieve is worse than one that
+    stays quiet: it converts a visible stall into a closed ticket.
+    """
+    housekeeping = f"titan-housekeeping::{WS}"
+    stuck = described((NOW - dt.timedelta(hours=3),))
+    live = estate(**{housekeeping: stuck})
+
+    class StubbornClient(FakeClient):
+        """Accepts the update and changes nothing -- the observed behaviour."""
+
+        repair_works = False
+
+    client = StubbornClient(live)
+
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
+
+    assert client.updated == [housekeeping], "it must still try"
+    assert result.healed == (), "but it must not claim a repair that did not land"
+    assert [a.schedule_id for a in result.attempted] == [housekeeping]

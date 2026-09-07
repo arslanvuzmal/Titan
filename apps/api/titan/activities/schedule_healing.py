@@ -51,10 +51,36 @@ async def heal_schedules_for(
     result = await heal_wedged_schedules(
         client, workspace_id=workspace_id, task_queue=task_queue, now=now
     )
-    if not result.healed:
+    if not result.healed and not result.attempted:
         return result
 
     async with workspace_unit_of_work(workspace_id) as session:
+        for assessment in result.attempted:
+            # A repair that did not land is the more urgent of the two, and it
+            # gets its own wording. Reporting it as a restart would close the
+            # ticket on a schedule that is still dead -- and the daily dedupe
+            # would then suppress every later warning about it.
+            name = assessment.schedule_id.split("::", 1)[0].removeprefix("titan-")
+            await record_notification(
+                session,
+                workspace_id=workspace_id,
+                kind=NotificationKind.PIPELINE_ALERT,
+                title=f"The {name} schedule is stopped and would not restart",
+                description=(
+                    f"{assessment.reason}. "
+                    "It was reinstalled in place -- the repair that has worked "
+                    "before -- and did not pick its clock back up. This needs a "
+                    "hand: delete the schedule and run `titan schedules` to "
+                    "recreate it. "
+                    "Until then the job is not running at all."
+                ),
+                dedupe_key=(
+                    f"schedule-unfixable:{assessment.schedule_id}:"
+                    f"{now.date().isoformat()}"
+                ),
+                priority=90,
+                now=now,
+            )
         for assessment in result.healed:
             # The job name, not the full schedule id: the id carries a
             # workspace uuid that makes every title unreadable at a glance,

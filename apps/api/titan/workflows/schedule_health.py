@@ -88,20 +88,31 @@ def assess(observation: ScheduleObservation, *, now: dt.datetime) -> Assessment:
             "no firing times offered; nothing to judge",
         )
 
-    # The furthest prediction rather than the soonest. A schedule that is
-    # merely late has one occurrence behind it and nine ahead; one whose clock
-    # has stopped has every one of them behind. Reading the soonest would call
-    # the first kind wedged on every pass.
+    # The *soonest* prediction, against the job's own catch-up window.
+    #
+    # The first version of this read the furthest, reasoning that a stopped
+    # clock has every prediction behind it. That is true only once it has been
+    # stopped for longer than the list spans -- ten hours, for an hourly job --
+    # and the only wedged schedule available to model it on had been frozen a
+    # week. Housekeeping stopped again at 14:17 and at 17:03 still had nine of
+    # its ten firings in the future; the watchdog called it healthy through
+    # thirteen consecutive cycles and healed nothing.
+    #
+    # A schedule that is running has its next firing ahead of it. One whose
+    # clock has stopped watches that firing recede, and the catch-up window is
+    # exactly the grace a late job is entitled to -- thirty minutes for an
+    # hourly job, twenty-three hours for a daily one -- so it separates "a
+    # minute behind" from "not coming" without a number invented here.
     tolerance = catchup_for(observation.cron)
-    furthest = max(observation.next_action_times)
-    behind = now - furthest
+    soonest = min(observation.next_action_times)
+    behind = now - soonest
     if behind > tolerance:
         return Assessment(
             observation.schedule_id,
             Verdict.WEDGED,
             behind,
-            f"every predicted firing is in the past; the furthest is "
-            f"{_readable(behind)} behind",
+            f"its next firing was due {_readable(behind)} ago and has not "
+            f"happened; the schedule's clock has stopped advancing",
         )
     return Assessment(observation.schedule_id, Verdict.HEALTHY, behind, "advancing")
 
@@ -120,7 +131,16 @@ class HealResult:
     """What one pass looked at, and what it put back on the rails."""
 
     checked: int
+    #: Schedules that were wedged and are now advancing again.
     healed: tuple[Assessment, ...]
+    #: Schedules that were wedged, were reinstalled, and did *not* come back.
+    #: Kept apart from `healed` because updating a schedule's spec in place
+    #: unwedged housekeeping at 13:24 on 7 September and did nothing at all to
+    #: it at 17:15 -- the same call on the same schedule. A watchdog that
+    #: reports a repair it did not achieve turns a visible stall into a closed
+    #: ticket, so the two outcomes are counted separately and only one of them
+    #: is called healing.
+    attempted: tuple[Assessment, ...]
     #: Schedules the server could not describe. Counted rather than raised:
     #: one unreadable schedule must not stop the others being checked.
     unreadable: int
@@ -143,6 +163,7 @@ async def heal_wedged_schedules(
     """
     jobs = plan_schedules(workspace_id, task_queue=task_queue)
     healed: list[Assessment] = []
+    attempted: list[Assessment] = []
     unreadable = 0
 
     for job in jobs:
@@ -175,6 +196,33 @@ async def heal_wedged_schedules(
             extra={"schedule_id": job.schedule_id, "reason": assessment.reason},
         )
         await install(client, [job])
-        healed.append(assessment)
 
-    return HealResult(len(jobs), tuple(healed), unreadable)
+        # Read it back rather than trusting the write. The installer returns
+        # success for an update the server accepted, which is not the same
+        # claim as "the scheduler is running again", and the difference is the
+        # whole value of this pass.
+        if await _is_advancing(client, job, now=now):
+            healed.append(assessment)
+        else:
+            logger.error(
+                "schedule did not restart after being reinstalled",
+                extra={"schedule_id": job.schedule_id},
+            )
+            attempted.append(assessment)
+
+    return HealResult(len(jobs), tuple(healed), tuple(attempted), unreadable)
+
+
+async def _is_advancing(client: Any, job: Any, *, now: dt.datetime) -> bool:
+    """Whether the schedule has picked its clock back up since the repair."""
+    try:
+        description = await client.get_schedule_handle(job.schedule_id).describe()
+    except Exception:
+        return False
+    observation = ScheduleObservation(
+        schedule_id=job.schedule_id,
+        paused=description.schedule.state.paused,
+        cron=job.cron,
+        next_action_times=tuple(description.info.next_action_times),
+    )
+    return assess(observation, now=now).verdict is not Verdict.WEDGED
