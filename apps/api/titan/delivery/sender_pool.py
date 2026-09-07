@@ -251,7 +251,16 @@ async def load_slots(
                     WHERE o.workspace_id = :workspace
                       AND o.sender_identity_id = si.id
                       AND o.status = ANY(CAST(:unresolved AS outbox_status[])))
-                                                            AS in_flight
+                                                            AS in_flight,
+                  -- The most recent verdict, whenever it was reached. Not
+                  -- restricted to today: a mailbox blocked yesterday that has
+                  -- not been tried since has no snapshot for today, and reading
+                  -- that absence as "fine" is how it would keep being chosen.
+                  (SELECT h.status FROM sender_health_snapshots h
+                    WHERE h.workspace_id = :workspace
+                      AND h.sender_identity_id = si.id
+                    ORDER BY h.captured_on DESC
+                    LIMIT 1)                                 AS health
                   FROM pool
                   JOIN sender_identities si ON si.id = pool.sender_identity_id
                  WHERE si.workspace_id = :workspace
@@ -270,7 +279,7 @@ async def load_slots(
     resolve = limit_for or _default_limit
     slots: list[MailboxSlot] = []
     for row in rows:
-        excluded = _unavailable_reason(row)
+        excluded = unavailable_reason(row)
         daily_limit = 0 if excluded else resolve(row, now)
         slots.append(
             MailboxSlot(
@@ -285,7 +294,7 @@ async def load_slots(
     return slots
 
 
-def _unavailable_reason(row: Any) -> str | None:
+def unavailable_reason(row: Any) -> str | None:
     """Why this mailbox cannot send at all today.
 
     Deliberately the same conditions ``SenderIdentity.is_ready_to_send``
@@ -295,6 +304,20 @@ def _unavailable_reason(row: Any) -> str | None:
     """
     from titan.intelligence.sender_auth import is_stale
 
+    # Read from the last snapshot, never recomputed here: the worker decides a
+    # mailbox's health in the same transaction as a send, and a second opinion
+    # formed at selection time would disagree with it minutes apart.
+    #
+    # Only ``blocked`` is acted on, and it has to be. Ranking by headroom alone
+    # made a blocked mailbox look like the *best* choice -- it stops sending, so
+    # its ``sent_today`` stays at zero while its configured limit stays at fifty
+    # -- and the pool duly routed the whole queue at the one mailbox guaranteed
+    # to refuse it. On 1 September that was 76 of 87 waiting messages piled onto
+    # two mailboxes with nothing left, while three healthy ones idled.
+    # ``watch`` and ``degraded`` are left alone: those still send, and the
+    # worker's own throttle is the right place to decide how much.
+    if getattr(row, "health", None) == "blocked":
+        return "mailbox health is blocked"
     if not row.is_active:
         return "mailbox is inactive"
     if not row.domain_verified:
@@ -350,4 +373,5 @@ __all__ = [
     "describe",
     "describe_slot",
     "load_slots",
+    "unavailable_reason",
 ]

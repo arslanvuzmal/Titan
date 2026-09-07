@@ -33,7 +33,7 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from temporalio import activity
 
 from titan.db.models import ContactChannel, Lead, Message, OutboxMessage

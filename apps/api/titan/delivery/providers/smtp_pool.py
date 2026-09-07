@@ -83,6 +83,16 @@ class SmtpPoolProvider:
             message_id_domain=_domain_of(account.from_email) or account.smtp.host,
         )
 
+    @property
+    def routable_addresses(self) -> tuple[str, ...]:
+        """Every address this process can authenticate as.
+
+        Read by the outbox worker before it moves a message to a different
+        mailbox: a pool member with no credential here would be chosen, sent to,
+        and refused at the connection, turning a deferral into a failure.
+        """
+        return tuple(self._providers)
+
     # ----------------------------------------------------------------- send
     def _route(self, from_email: str) -> SmtpProvider | None:
         return self._providers.get((from_email or "").strip().lower())

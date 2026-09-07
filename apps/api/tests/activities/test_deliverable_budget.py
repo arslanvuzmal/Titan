@@ -45,7 +45,10 @@ async def _clone_sender(session, workspace_id, source_id: uuid.UUID, label: str)
         spf_ok=True,
         dkim_ok=True,
         dmarc_ok=True,
-        last_verified_at=NOW,
+        # Wall time, not the fixture's frozen clock: a verification dated NOW
+        # is past the 14-day staleness window by the time this runs, and the
+        # mailbox is then excluded as unverified rather than counted.
+        last_verified_at=dt.datetime.now(dt.UTC),
         daily_send_limit=source.daily_send_limit,
         mailing_address=source.mailing_address,
     )

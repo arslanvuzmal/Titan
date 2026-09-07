@@ -114,3 +114,40 @@ def test_warm_up_still_caps_a_healthy_mailbox() -> None:
     )
 
     assert decision.effective == 6
+
+
+# ==========================================================================
+# Saying so
+#
+# ``LimitDecision.explain`` had no reader until the CRM's "today" section
+# needed a sentence next to each mailbox's allowance. The first live mailbox it
+# described was ``outreach@``: blocked, on probation, sending five a day -- and
+# the sentence read "5 of 50 a day; reduced to 0%: health is blocked". Every
+# clause of that is individually true and the whole reads as a bug in the
+# dashboard, which is the worst way for a correct system to present itself.
+# ==========================================================================
+def test_probation_is_named_rather_than_reported_as_a_reduction_to_zero() -> None:
+    decision = daily_limit(50, recent=BLOCKED, days_since_bounce=PROBATION_QUIET_DAYS)
+
+    sentence = decision.explain()
+
+    assert decision.probation is True
+    assert "probation" in sentence
+    assert "0%" not in sentence, (
+        "an allowance of five described as a reduction to nothing"
+    )
+    assert str(PROBATION_VOLUME) in sentence
+
+
+def test_a_mailbox_that_is_not_on_probation_does_not_claim_to_be() -> None:
+    """The flag marks the specific case where probation is the *only* reason
+    the number is above zero. A blocked mailbox still bouncing is paused, and a
+    healthy one was never blocked."""
+    assert daily_limit(50, recent=BLOCKED, days_since_bounce=1).probation is False
+    assert daily_limit(50, recent=(SenderHealth.HEALTHY,)).probation is False
+    assert (
+        daily_limit(
+            50, recent=(SenderHealth.DEGRADED,), days_since_bounce=30
+        ).probation
+        is False
+    ), "a quarter of the ceiling is the health factor, not the probation floor"

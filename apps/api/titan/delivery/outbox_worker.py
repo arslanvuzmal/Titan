@@ -28,8 +28,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-import hashlib
 import datetime as dt
+import hashlib
 import logging
 import os
 import pathlib
@@ -70,7 +70,13 @@ from titan.db.models import (
     Workspace,
 )
 from titan.db.session import get_sessionmaker
-from titan.delivery import adaptive_limits, deliverability, quotas, sender_health
+from titan.delivery import (
+    adaptive_limits,
+    deliverability,
+    quotas,
+    sender_health,
+    sender_pool,
+)
 from titan.delivery.carrier_routing import carriers_for_workspace, route_for_market
 from titan.delivery.providers.base import (
     Attachment,
@@ -748,7 +754,7 @@ class OutboxWorker:
                     session,
                     row,
                     decision.reason_text(),
-                    retry_at=self._next_window_open(ctx),
+                    retry_at=self._next_local_opening(ctx),
                 )
                 return ProcessResult(row.id, "deferred", decision.reason_text())
             await self._block(session, row, decision.reason_text())
@@ -793,9 +799,14 @@ class OutboxWorker:
                 }
                 for s in placement.blocking
             ):
-                # Temporary: volume or reputation. Defer rather than discard.
-                await self._defer(session, row, f"deliverability: {reasons}")
-                return ProcessResult(row.id, "deferred", reasons)
+                # Temporary: volume or reputation. Defer rather than discard --
+                # and all three of these are facts about *this mailbox*, not
+                # about the recipient or the hour, so another mailbox in the
+                # pool may be able to carry it today.
+                recorded = await self._defer_or_repin(
+                    session, row, f"deliverability: {reasons}"
+                )
+                return ProcessResult(row.id, "deferred", recorded)
             await self._block(session, row, f"deliverability: {reasons}")
             return ProcessResult(row.id, "blocked", reasons)
 
@@ -803,8 +814,16 @@ class OutboxWorker:
         # costs nothing from the day's allowance.
         outcome = await self._reserve_quota(session, row, limit)
         if not outcome.granted:
-            await self._defer(session, row, outcome.reason or "quota exhausted")
-            return ProcessResult(row.id, "deferred", outcome.reason)
+            reason = outcome.reason or "quota exhausted"
+            # Only the sender scope is worth moving for. A workspace or campaign
+            # budget is spent from every mailbox equally, and a recipient-domain
+            # limit follows the recipient -- re-pinning against either would just
+            # be the same refusal from a different address.
+            if outcome.exhausted_scope is quotas.QuotaScope.SENDER:
+                reason = await self._defer_or_repin(session, row, reason)
+            else:
+                await self._defer(session, row, reason)
+            return ProcessResult(row.id, "deferred", reason)
 
         try:
             result = await self._provider.send(email)
@@ -1623,6 +1642,56 @@ class OutboxWorker:
             return None
         return opens.astimezone(dt.UTC)
 
+    def _next_quiet_hours_end(self, ctx: SendContext) -> dt.datetime | None:
+        """When quiet hours next end on the recipient's clock.
+
+        None when quiet hours are off, when the recipient has no resolvable
+        clock, or when it is not currently quiet hours for them -- in each case
+        the deferral was for something else and this is not the gate to wait on.
+
+        Without this, quiet hours were the one temporary refusal with no retry
+        time of its own, so it fell through to the next *UTC* window. For a
+        European recipient that is 00:00-01:00 UTC, which is 01:00-03:00 on
+        their clock: still inside quiet hours, deferred again, to the next UTC
+        midnight, forever. It is a closed loop rather than a delay -- every
+        European lead first attempted before 08:00 local was in it, and the
+        oldest one found in production had been going round for nine days
+        without ever being counted as failed.
+        """
+        settings = self._settings
+        if not settings.quiet_hours_enabled:
+            return None
+        local = self._recipient_local_time(ctx)
+        if local is None:
+            return None
+        start, end = settings.quiet_hours_start, settings.quiet_hours_end
+        if start == end:
+            return None
+        hour = local.hour
+        inside = (start <= hour < end) if start < end else (hour >= start or hour < end)
+        if not inside:
+            return None
+        opens = local.replace(hour=end, minute=0, second=0, microsecond=0)
+        if opens <= local:
+            opens += dt.timedelta(days=1)
+        return opens.astimezone(dt.UTC)
+
+    def _next_local_opening(self, ctx: SendContext) -> dt.datetime | None:
+        """The earliest instant both time-of-day gates would let this through.
+
+        The *later* of the two, because each is a floor rather than a schedule:
+        a campaign window opening at 08:00 is no use to a recipient still
+        inside quiet hours, and the end of quiet hours is no use on a day the
+        campaign does not send at all. None when neither gate is what deferred
+        the message, and the caller falls back to the next UTC window.
+        """
+        candidates = [
+            when
+            for when in (self._next_window_open(ctx), self._next_quiet_hours_end(ctx))
+            if when is not None
+        ]
+        return max(candidates) if candidates else None
+
     @staticmethod
     def _recipient_local_time(ctx: SendContext) -> dt.datetime | None:
         """Now, on the recipient's clock, or None when it cannot be resolved.
@@ -1655,6 +1724,116 @@ class OutboxWorker:
         row.next_attempt_at = retry_at or quotas.next_window_start(
             self._now(), row.dedupe_key
         )
+
+    def _routable_addresses(self) -> set[str] | None:
+        """The addresses this worker holds SMTP credentials for.
+
+        None when the provider does not route by address at all (a single-account
+        provider, or the mock), in which case there is nothing to check against.
+        """
+        addresses = getattr(self._provider, "routable_addresses", None)
+        return {a.lower() for a in addresses} if addresses else None
+
+    async def _repin(self, session: AsyncSession, row: OutboxMessage) -> str | None:
+        """Move this message to a mailbox that can still send it today.
+
+        The pool chooses a mailbox when a message is queued, and until now that
+        choice was final. A mailbox that went blocked a week later therefore
+        took its whole backlog down with it: production had 47 messages pinned
+        to a mailbox on a bounce block and 30 more to one capped at five a day,
+        while three healthy mailboxes sat on fifteen unused slots between them.
+        No amount of waiting would have cleared that -- those messages were not
+        queued behind a clock, they were queued behind a mailbox that was never
+        going to open.
+
+        Re-consulted here, at the moment the pinned mailbox actually refuses,
+        rather than on a timer: the refusal *is* the evidence that a routing
+        decision made days ago has expired.
+
+        Only for refusals that are about the mailbox. A recipient inside quiet
+        hours is inside them from every mailbox in the pool, and moving the
+        message would change nothing but the row's updated_at.
+
+        Rewrites the sending identity in the payload as well as the foreign key.
+        The SMTP pool routes on ``from_email``, so a row whose
+        ``sender_identity_id`` moved and whose payload did not would go out over
+        one mailbox's connection bearing another's address -- an SPF failure by
+        construction, and precisely the kind of mismatch the rest of this system
+        exists to prevent. Never moves to a mailbox this worker cannot
+        authenticate as, for the same reason.
+        """
+        from titan.outreach import unsubscribe
+
+        slots = await sender_pool.load_slots(
+            session, row.workspace_id, row.campaign_id, now=self._now()
+        )
+        routable = self._routable_addresses()
+        candidates = [
+            slot
+            for slot in slots
+            if slot.sender_identity_id != row.sender_identity_id
+            and (routable is None or slot.from_email.lower() in routable)
+        ]
+        chosen_id = sender_pool.choose(candidates).chosen_id
+        if chosen_id is None:
+            return None
+        chosen = await session.get(SenderIdentity, chosen_id)
+        if chosen is None:
+            return None
+
+        payload = dict(row.payload or {})
+        previous = payload.get("from_email")
+        recipient = payload.get("to_email") or row.to_email_normalized
+        payload.update(
+            {
+                "from_email": chosen.from_email,
+                "from_name": chosen.from_name,
+                "reply_to": chosen.reply_to_email,
+                **unsubscribe.headers_for(chosen, recipient, self._settings),
+            }
+        )
+        row.payload = payload
+        row.sender_identity_id = chosen.id
+        # The message row carries the same two facts for the CRM to read. Left
+        # behind, it would report the mailbox that refused as the one that sent.
+        await session.execute(
+            update(Message)
+            .where(Message.id == row.message_id)
+            .values(sender_identity_id=chosen.id, from_email=chosen.from_email)
+        )
+        logger.info(
+            "outbox row moved to another mailbox",
+            extra={
+                "outbox_id": str(row.id),
+                "from": previous,
+                "to": chosen.from_email,
+            },
+        )
+        return chosen.from_email
+
+    async def _defer_or_repin(
+        self, session: AsyncSession, row: OutboxMessage, reason: str
+    ) -> str:
+        """Defer a mailbox-specific refusal, trying another mailbox first.
+
+        Returns the reason actually recorded, which says where the message went
+        when it moved. A deferral that silently changed the sending address
+        would make the outbox harder to read than leaving it stuck did.
+        """
+        moved_to = await self._repin(session, row)
+        if moved_to is None:
+            await self._defer(session, row, reason)
+            return reason
+        recorded = f"{reason}; moved to {moved_to}"
+        # Deliberately not `now`: a message that keeps finding mailboxes which
+        # then refuse it should walk the pool once a minute, not spin through it.
+        await self._defer(
+            session,
+            row,
+            recorded,
+            retry_at=self._now() + dt.timedelta(seconds=60),
+        )
+        return recorded
 
     async def _block(
         self, session: AsyncSession, row: OutboxMessage, reason: str

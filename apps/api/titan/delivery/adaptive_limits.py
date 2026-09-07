@@ -115,6 +115,12 @@ class LimitDecision:
     health: SenderHealth
     recovering: bool = False
     warmup_limit: int | None = None
+    #: True when the only reason this mailbox may send anything is the
+    #: probation floor below -- the health factor alone would have given it
+    #: zero. Carried because ``explain`` is otherwise forced to describe a
+    #: mailbox sending five a day as "reduced to 0%", which is the sentence a
+    #: dashboard would print next to the five it is actually sending.
+    probation: bool = False
 
     @property
     def paused(self) -> bool:
@@ -128,7 +134,16 @@ class LimitDecision:
         if self.paused:
             return f"sending paused: mailbox health is {self.health.value}"
         parts = [f"{self.effective} of {self.configured} a day"]
-        if self.recovering:
+        if self.probation:
+            # Said first and said plainly, because it is the whole reason the
+            # number is not zero. "Reduced to 0%" beside an allowance of five
+            # reads as a bug in the dashboard rather than a deliberate remedy.
+            parts.append(
+                f"on probation: health is {self.health.value}, but nothing has "
+                f"hard-bounced recently, so a small allowance runs to let the "
+                f"rate recover"
+            )
+        elif self.recovering:
             parts.append(
                 f"recovering from a recent dip at {self.factor:.0%} of the ceiling"
             )
@@ -206,13 +221,16 @@ def daily_limit(
     # not be re-narrowed by the warm-up bound above. A mailbox blocked *and*
     # mid-warm-up is still allowed its five -- warm-up limits growth, and five
     # is not growth.
+    probation = False
     if (
         health is SenderHealth.BLOCKED
         and configured > 0
         and days_since_bounce is not None
         and days_since_bounce >= PROBATION_QUIET_DAYS
     ):
-        effective = max(effective, min(PROBATION_VOLUME, configured))
+        allowance = min(PROBATION_VOLUME, configured)
+        probation = allowance > effective
+        effective = max(effective, allowance)
 
     return LimitDecision(
         configured=configured,
@@ -221,6 +239,7 @@ def daily_limit(
         health=health,
         recovering=recovering,
         warmup_limit=warmup_limit,
+        probation=probation,
     )
 
 

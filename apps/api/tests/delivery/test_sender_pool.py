@@ -428,7 +428,12 @@ async def _clone_sender(session, workspace_id, source_id: uuid.UUID, label: str)
         spf_ok=True,
         dkim_ok=True,
         dmarc_ok=True,
-        last_verified_at=NOW,
+        # Wall time, not the fixture's frozen clock. Staleness is judged against
+        # the real one, so a verification dated NOW is a month old by the time
+        # this runs and the clone is excluded as unverified -- which is what
+        # made this test fail on every run after 17 August, silently, for a
+        # reason that had nothing to do with pools.
+        last_verified_at=dt.datetime.now(dt.UTC),
         daily_send_limit=source.daily_send_limit,
         mailing_address=source.mailing_address,
     )
