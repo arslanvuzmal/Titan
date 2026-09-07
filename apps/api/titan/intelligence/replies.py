@@ -199,17 +199,44 @@ _BOUNCE_SUBJECTS = (
     ),
 )
 
-#: Permanent failure language in a DSN body. 5.x.x is the RFC 3463 class for
-#: "do not retry"; 4.x.x is temporary and must NOT suppress.
-_HARD_BOUNCE_BODY = (
-    re.compile(r"\b5\.\d{1,3}\.\d{1,3}\b"),
-    re.compile(
-        r"\b(user unknown|no such (user|mailbox|recipient)|"
-        r"recipient address rejected|mailbox (unavailable|not found)|"
-        r"address does not exist|account (has been )?(disabled|closed))\b",
-        re.I,
-    ),
+#: The address itself is wrong, said in words. Authoritative wherever it
+#: appears: a server that tells you the mailbox does not exist has answered the
+#: question whatever code it chose to answer it with -- and they do choose
+#: oddly. One real bounce read ``554 5.7.1 sorry, no mailbox here by that
+#: name``, which is a policy code carrying an address verdict.
+_ADDRESS_IS_WRONG = re.compile(
+    r"\b(user unknown|unknown user|no such (user|mailbox|recipient)|"
+    r"no mailbox here|recipient address rejected|"
+    r"mailbox (unavailable|not found|does not exist)|"
+    r"address (does not exist|could not be found)|"
+    r"account (has been )?(disabled|closed))\b",
+    re.I,
 )
+
+#: A permanent status code that is genuinely about the recipient. 5.x.x is the
+#: RFC 3463 class for "do not retry" and 4.x.x is temporary, but "permanent"
+#: and "the address is bad" are not the same claim, and treating them as one
+#: was wrong in a way that cost real sending capacity.
+#:
+#: **5.7.x is excluded.** It is the security-and-policy class: the message was
+#: refused, which is a verdict on *us*, not a fact about the recipient. On
+#: 1 September a first-party address at a dental practice bounced ``550 5.7.1
+#: [CS] Message blocked`` -- their server had accepted it and was forwarding it
+#: on to a Gmail account when the forwarder's spam filter refused it. Titan read
+#: the 5 and drew two conclusions it had no basis for: it suppressed a working
+#: address permanently, and it counted a content rejection as a hard bounce,
+#: which put the mailbox that sent it over the 2% pause threshold and stopped
+#: the healthiest sender in the estate. One filter's opinion of one message took
+#: out a mailbox.
+#:
+#: A 5.7.x that also names an address problem is still hard, through
+#: :data:`_ADDRESS_IS_WRONG` above.
+_PERMANENT_RECIPIENT_CODE = re.compile(r"\b5\.(?!7\.)\d{1,3}\.\d{1,3}\b")
+
+#: A refusal of the message rather than of the address. Recorded so it is
+#: legible as what it is -- a deliverability signal about content or reputation,
+#: which is a different alarm from a bad list and wants a different response.
+_POLICY_REJECTION = re.compile(r"\b5\.7\.\d{1,3}\b")
 
 #: An explicit request never to be written to again.
 #:
@@ -359,13 +386,24 @@ def classify_reply(
         ):
             if marker:
                 signals.append(name)
-        hard = _any(_HARD_BOUNCE_BODY, body)
+        wrong_address = bool(_ADDRESS_IS_WRONG.search(body))
+        hard = wrong_address or bool(_PERMANENT_RECIPIENT_CODE.search(body))
         if hard:
             signals.append("permanent_failure_code")
+        # Reported even when the address is independently known to be bad, so a
+        # mailbox being refused on policy is visible either way.
+        if _POLICY_REJECTION.search(body):
+            signals.append("policy_rejection")
         return ReplyClassification(
             ReplyKind.BOUNCE,
             tuple(signals),
-            "permanent delivery failure" if hard else "delivery failure, retryable",
+            "permanent delivery failure"
+            if hard
+            else (
+                "message refused on policy, not a bad address"
+                if "policy_rejection" in signals
+                else "delivery failure, retryable"
+            ),
         )
 
     # ---- 4. auto-reply -----------------------------------------------------

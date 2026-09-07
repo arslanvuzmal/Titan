@@ -248,3 +248,87 @@ def test_every_classification_records_which_rule_fired() -> None:
         message(body_text="this is spam"),
     ):
         assert classify_reply(msg).signals
+
+
+# ==========================================================================
+# "Permanent" and "the address is bad" are not the same claim
+# ==========================================================================
+#
+# Every body below is quoted from a bounce this system actually received.
+#
+# The rule that used to run here was "any 5.x.x code means the address is
+# dead". It is one character away from right and it cost a mailbox. A 5.7.x is
+# the security-and-policy class: the message was refused. Reading that as a
+# dead address suppressed a working first-party address permanently, and
+# counted a spam filter's opinion of our copy as a hard bounce -- which pushed
+# the sending mailbox over the 2% pause threshold and stopped it.
+def bounce(body: str) -> InboundMessage:
+    return message(
+        from_email="mailer-daemon@rs5-lon.serverhostgroup.com",
+        subject="Mail delivery failed: returning message to sender",
+        body_text=body,
+        content_type="multipart/report; report-type=delivery-status",
+    )
+
+
+def test_a_filter_refusing_the_message_is_not_a_dead_address() -> None:
+    """1 September, info@thefrederickdentalclinic.com. Their server accepted
+    it and was forwarding to a Gmail account when the forwarder's filter
+    refused it. Nothing was wrong with the address."""
+    result = classify_reply(
+        bounce(
+            "550 5.7.1 [CS] Message blocked. If this is a false positive, "
+            "please report this to your hosting service provider."
+        )
+    )
+
+    assert result.kind is ReplyKind.BOUNCE
+    assert not is_hard_bounce(result), "a working address would be suppressed"
+
+
+def test_a_policy_refusal_says_that_is_what_it_is() -> None:
+    """It is still a deliverability alarm -- just about the message rather than
+    the list, which is a different problem with a different fix."""
+    result = classify_reply(bounce("550 5.7.1 [CS] Message blocked."))
+
+    assert "policy_rejection" in result.signals
+
+
+def test_a_policy_code_carrying_an_address_verdict_is_still_permanent() -> None:
+    """27 August, reception@cavershamheightsdentalpractice.co.uk. Servers pick
+    the code loosely; when one says in words that the mailbox is not there, it
+    has answered the question whatever number it put in front of it."""
+    result = classify_reply(bounce("554 5.7.1 sorry, no mailbox here by that name"))
+
+    assert is_hard_bounce(result)
+
+
+def test_a_genuinely_missing_address_is_still_permanent() -> None:
+    """27 August, info@folddentistry.co.uk. The case the rule is for."""
+    result = classify_reply(
+        bounce(
+            "550 5.1.1 <info@folddentistry.co.uk>: Email address could not be "
+            "found, or was misspelled (G8)"
+        )
+    )
+
+    assert is_hard_bounce(result)
+
+
+def test_exchange_rejecting_the_recipient_is_still_permanent() -> None:
+    """27 August, katie@reading-smiles.co.uk. Microsoft answers a great many
+    things with 5.4.1, but it names the recipient as the problem."""
+    result = classify_reply(
+        bounce("550 5.4.1 Recipient address rejected: Access denied.")
+    )
+
+    assert is_hard_bounce(result)
+
+
+def test_a_full_mailbox_is_still_temporary() -> None:
+    """The direction this rule must never drift: a 4.x.x is a real mailbox."""
+    result = classify_reply(
+        bounce("452 4.2.2 The email account that you tried to reach is over quota.")
+    )
+
+    assert not is_hard_bounce(result)
