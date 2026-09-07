@@ -377,6 +377,18 @@ class Settings(BaseSettings):
     #: database; this is the human behind it, and nothing else knows it.
     operator_email: str | None = None
 
+    #: Whether a measured absence may be written about, or only counted.
+    #:
+    #: False while the population is being measured. Absence findings are
+    #: detected, stored and scored either way -- what this decides is whether
+    #: the composer may build a sentence out of one, which is the moment it
+    #: starts changing what real businesses receive.
+    #:
+    #: The question it exists to answer first: how many leads does selling the
+    #: absence actually make sendable? That number is knowable before the
+    #: message changes, and it should be known.
+    absence_pitching_enabled: bool = False
+
     #: The external watchdog's ping URL, from healthchecks.io or equivalent.
     #:
     #: No process can report its own absence, and the absence is the failure

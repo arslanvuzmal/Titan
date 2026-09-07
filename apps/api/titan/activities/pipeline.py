@@ -62,6 +62,7 @@ from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence import case_studies
+from titan.intelligence.absence import findings_from_gap
 from titan.intelligence.bounce_risk import BounceRisk, assess
 from titan.intelligence.composer import ComposerContext, compose, family_for
 from titan.intelligence.contacts import (
@@ -657,11 +658,36 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
     # it does not. Absence is only read from pages that could actually be read
     # -- see titan.intelligence.modernisation for why that distinction decides
     # whether cookie-walled sites rank first or last.
-    gap = merge_modernisation(
+    profile = merge_modernisation(
         modernisation_profile(_page_signals(url, obs)) for url, obs in page_rows
-    ).gap
+    )
+    gap = profile.gap
 
     detected = [_to_detected(f) for f in findings]
+
+    # What the business does not run, alongside what is broken about its site.
+    #
+    # Until now this profile was one float in ScoringInput: it moved a lead up
+    # the list and never became a sentence, so a business with a clean site
+    # produced nothing to say and could not be written to at all. See
+    # titan.intelligence.absence for why the claim is phrased as what was read
+    # rather than as what they have.
+    #
+    # `no_booking_or_enquiry_path` already covers the site with no contact
+    # route whatsoever, and it is the more urgent sentence, so the absence
+    # module is told when it has fired and stands down on booking.
+    detected.extend(
+        findings_from_gap(
+            profile,
+            pages_read=tuple(url for url, _obs in page_rows),
+            has_contact_path=not any(
+                f.issue_type == "no_booking_or_enquiry_path" for f in detected
+            ),
+            # Staged: counted before it is said. See the setting's own note.
+            pitchable=get_settings().absence_pitching_enabled,
+        )
+    )
+
     evidenced_types = {f.issue_type for f in detected if f.is_pitchable()}
     offers = select_offers(org_snapshot["industry"], evidenced_types)
 
