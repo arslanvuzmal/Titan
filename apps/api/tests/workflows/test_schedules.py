@@ -118,6 +118,11 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # accumulated while the code that fixes them sat unrun. A sweeper that
         # waits for somebody to remember it is a diagnostic, not a repair.
         "HousekeepingWorkflow",
+        # Tells the operator what the day did, every day, without being asked.
+        # Scheduled hourly and self-deduplicating rather than run once at a
+        # fixed hour, because the send windows span Sydney to Vancouver and no
+        # fixed hour is reliably after the last message.
+        "DailyReportWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

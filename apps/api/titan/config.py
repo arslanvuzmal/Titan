@@ -377,6 +377,26 @@ class Settings(BaseSettings):
     #: database; this is the human behind it, and nothing else knows it.
     operator_email: str | None = None
 
+    #: The external watchdog's ping URL, from healthchecks.io or equivalent.
+    #:
+    #: No process can report its own absence, and the absence is the failure
+    #: this estate actually suffers -- five Docker outages and five stalled
+    #: schedules so far, each found days later by a person going looking. The
+    #: daily report pings this after a mail genuinely goes out; if the ping
+    #: stops arriving, the watchdog raises the alarm from outside.
+    #:
+    #: Unset means the ping is skipped and everything else still works, so the
+    #: report can ship before the URL exists.
+    healthcheck_ping_url: str | None = None
+
+    #: Which mailbox the operator's own report is sent from.
+    #:
+    #: Named rather than pooled: this is 1:1 mail to a person who knows the
+    #: sender, not outreach, and it must not be routed by the pool's health
+    #: logic -- a report explaining that every mailbox is blocked cannot be
+    #: held back by every mailbox being blocked.
+    report_from_email: str | None = None
+
     owner_name: str = "Arslan Vuzmal Lone"
     #: Used in message signatures and the portfolio claims a draft may make.
     #: Recovered from the deployed environment along with the smartlead block.

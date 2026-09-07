@@ -299,6 +299,13 @@ class ReleaseHeldResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class DailyReportInput:
+    """One check of whether the day is over and needs reporting."""
+
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class HealSchedulesInput:
     """One pass over the schedules, looking for one whose clock has stopped."""
 
@@ -662,6 +669,7 @@ __all__ = [
     "DiscoverActivityResult",
     "DraftActivityInput",
     "DraftActivityResult",
+    "DailyReportInput",
     "HealSchedulesInput",
     "OrchestratorStatus",
     "PauseSignal",

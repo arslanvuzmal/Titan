@@ -70,6 +70,13 @@ PROVIDER_IMPORT_ALLOWLIST = {
     # Wraps one SmtpProvider per mailbox; it is a provider itself and is
     # listed in PROVIDER_MODULES below, so the rule still covers it.
     "titan/delivery/providers/smtp_pool.py",
+    # The one path that may send without the outbox, and the exception is kept
+    # narrow rather than granted broadly: it takes no recipient argument at
+    # all, reading the operator's own address from settings, so it cannot be
+    # pointed at a prospect. See its module docstring for why the daily report
+    # cannot go through the outbox -- routing it there would make the alarm
+    # depend on the thing it is alarming about.
+    "titan/notify/operator_mail.py",
     "titan/delivery/webhooks.py",  # verification + normalization only
     "titan/workers/outbox.py",  # the outbox worker process entrypoint
     "titan/cli.py",  # health checks and preflight

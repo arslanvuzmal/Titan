@@ -61,6 +61,7 @@ from typing import Any
 from titan.db.enums import CampaignStatus
 from titan.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from titan.workflows.delivery_events import delivery_event_poll_workflow_id
+from titan.workflows.daily_report import DEFAULT_CRON as DAILY_REPORT_CRON
 from titan.workflows.housekeeping import DEFAULT_CRON as HOUSEKEEPING_CRON
 from titan.workflows.housekeeping import housekeeping_workflow_id
 from titan.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
@@ -75,6 +76,7 @@ from titan.workflows.sender_health import sender_health_workflow_id
 from titan.workflows.types import (
     CampaignOrchestratorInput,
     CaptureSenderHealthInput,
+    DailyReportInput,
     HealSchedulesInput,
     PollDeliveryEventsInput,
     PullOptOutsInput,
@@ -259,6 +261,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=CaptureSenderHealthInput(workspace_id=ws),
             task_queue=task_queue,
             note="records each sender's health so a trend exists to respond to",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-daily-report::{ws}",
+            workflow="DailyReportWorkflow",
+            workflow_id=f"daily-report::{ws}",
+            cron=DAILY_REPORT_CRON,
+            arg=DailyReportInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="mails the operator what the day sent, once the day is done",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

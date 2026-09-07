@@ -252,7 +252,7 @@ async def test_an_estate_that_is_advancing_is_left_entirely_alone() -> None:
 
     assert client.updated == []
     assert result.healed == ()
-    assert result.checked == 7
+    assert result.checked == len(_jobs())
 
 
 @pytest.mark.asyncio
@@ -328,3 +328,24 @@ def test_the_supervisors_id_is_stable_so_a_second_one_cannot_start() -> None:
     assert plan_supervisor(WS, task_queue=QUEUE).workflow_id == (
         plan_supervisor(WS, task_queue=QUEUE).workflow_id
     )
+
+
+def test_the_daily_report_is_installed_as_a_schedule() -> None:
+    """It is a cron job, unlike the watchdog: nothing depends on it surviving
+    a wedged scheduler, and W25 now watches it like the other seven."""
+    planned = {job.workflow for job in _jobs()}
+
+    assert "DailyReportWorkflow" in planned
+
+
+def test_the_daily_report_is_checked_hourly_not_daily() -> None:
+    """Planted violation: schedule it once a day.
+
+    "After sending all quota" is a condition, not a clock -- the send windows
+    run from Sydney to Vancouver, so no fixed hour is reliably after the last
+    send. A daily cron would report a day that had not finished, or finish
+    hours after it did.
+    """
+    report = next(job for job in _jobs() if job.workflow == "DailyReportWorkflow")
+
+    assert report.cron.split()[1] == "*", "the hour field must not be fixed"
