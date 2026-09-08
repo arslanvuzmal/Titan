@@ -29,6 +29,7 @@ from titan.db.enums import (
 )
 from titan.intelligence import contacts as contacts_mod
 from titan.intelligence.findings import (
+    MIN_PAGES_FOR_ABSENCE,
     DetectedFinding,
     detect_findings,
 )
@@ -351,11 +352,27 @@ def test_error_page_does_not_trigger_site_wide_rules() -> None:
 
 
 def test_no_booking_path_not_flagged_when_a_form_exists() -> None:
-    """A contact form is an acceptable enquiry path."""
-    assert "no_booking_or_enquiry_path" not in issue_types(detect_findings(crawl(page())))
+    """A contact form is an acceptable enquiry path.
 
-    no_path = page(forms=[], booking_links=[])
-    assert "no_booking_or_enquiry_path" in issue_types(detect_findings(crawl(no_path)))
+    Both cases run over enough pages to clear `MIN_PAGES_FOR_ABSENCE`, so the
+    floor cannot be what decides either of them. The earlier version of this
+    test used a single page: once the floor existed it would have passed the
+    negative case for the wrong reason and failed the positive one, proving
+    nothing about the form rule it is named for.
+    """
+    def site(**overrides):
+        return crawl(
+            *[
+                page(url=f"https://bellrose-dental.test/p{i}",
+                     final_url=f"https://bellrose-dental.test/p{i}", **overrides)
+                for i in range(MIN_PAGES_FOR_ABSENCE)
+            ]
+        )
+
+    assert "no_booking_or_enquiry_path" not in issue_types(detect_findings(site()))
+
+    no_path = site(forms=[], booking_links=[])
+    assert "no_booking_or_enquiry_path" in issue_types(detect_findings(no_path))
 
 
 def test_security_headers_finding_requires_two_missing() -> None:
@@ -1171,3 +1188,86 @@ def test_the_real_ones_survive_alongside_the_noise() -> None:
     """A page that is genuinely gone is still reported when other pages merely
     refused us -- narrowing the rule must not silence it."""
     assert "broken_internal_link" in _statuses_flagged(403, 429, 404)
+
+
+# ==========================================================================
+# Absence claims and the evidence under them
+#
+# The same fault that produced broken_internal_link, in a second shape. That
+# detector asserted a link nobody had seen; these assert that something is
+# missing from a site nobody managed to read. Both say more than was measured,
+# and both are checkable by the recipient in one click.
+#
+# Measured on the live workspace before these existed: 3,062 absence findings
+# rested on two or fewer pages that loaded, and 90 on crawls where not a single
+# page loaded at all.
+# ==========================================================================
+ABSENCE_ISSUE_TYPES = frozenset(
+    {"no_booking_or_enquiry_path", "no_visible_phone_number", "no_structured_data"}
+)
+
+
+def _blank_page(url: str, status: int) -> PageEvidence:
+    """A page with nothing on it, because nothing was read from it."""
+    return page(
+        url=url,
+        final_url=url,
+        http_status=status,
+        depth=1,
+        forms=[],
+        visible_phones=[],
+        visible_emails=[],
+        booking_links=[],
+        structured_data_types=[],
+    )
+
+
+def test_nothing_is_claimed_absent_from_a_site_that_never_answered() -> None:
+    """Planted violation: count error pages as evidence, and this fails.
+
+    The standing check, written to cover the whole family rather than one
+    member. Not one page loaded, so every absence is unmeasured -- and 90
+    findings on the live workspace were exactly this, telling businesses we had
+    found no way to contact them on the evidence that their site refused us.
+    """
+    refused = crawl(*[_blank_page(f"https://x.test/p{i}", 403) for i in range(6)])
+
+    fired = issue_types(detect_findings(refused)) & ABSENCE_ISSUE_TYPES
+
+    assert not fired, f"claimed an absence from a site that never answered: {fired}"
+
+
+def test_nothing_is_claimed_absent_from_pages_the_crawler_invented() -> None:
+    """The 404s the crawler guesses are blank by definition -- no form, no
+    phone, no markup. Counting them lets the addresses we made up vote on what
+    the business publishes, and biases every absence towards firing hardest on
+    the sites we learned least about."""
+    real = page()  # one good homepage: form, phone, structured data
+    guessed = [_blank_page(f"https://bellrose-dental.test/{p}", 404)
+               for p in ("book", "booking", "appointments", "fees")]
+
+    fired = issue_types(detect_findings(crawl(real, *guessed))) & ABSENCE_ISSUE_TYPES
+
+    assert not fired, f"an invented page supported an absence claim: {fired}"
+
+
+def test_one_page_is_too_little_to_say_anywhere() -> None:
+    """"There is no number anywhere a visitor can see" is a claim about the
+    site. One page cannot carry it, however cleanly that page was read."""
+    only_home = _blank_page("https://x.test/", 200)
+
+    fired = issue_types(detect_findings(crawl(only_home)))
+
+    assert "no_visible_phone_number" not in fired
+    assert "no_booking_or_enquiry_path" not in fired
+
+
+def test_a_real_absence_across_enough_pages_is_still_reported() -> None:
+    """Narrowing the rule must not silence it. A site genuinely offering no way
+    to get in touch is the finding this detector exists for."""
+    read = [_blank_page(f"https://x.test/p{i}", 200) for i in range(MIN_PAGES_FOR_ABSENCE)]
+
+    fired = issue_types(detect_findings(crawl(*read)))
+
+    assert "no_booking_or_enquiry_path" in fired
+    assert "no_visible_phone_number" in fired

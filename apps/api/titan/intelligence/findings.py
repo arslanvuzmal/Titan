@@ -279,6 +279,30 @@ def _broken_cta(page: PageEvidence) -> DetectedFinding | None:
 BROKEN_LINK_STATUSES: frozenset[int] = frozenset({404, 410})
 
 
+#: How many pages must have loaded before "anywhere on the site" means anything.
+#:
+#: Three: a homepage and two others. The composer turns these findings into
+#: claims about the whole site -- *"there is no number anywhere a visitor can
+#: see"* -- and one page cannot carry that sentence however cleanly it was
+#: read. Below the floor the finding describes how much of the site we managed
+#: to reach, not how the site is built, and it is asserted to the one person
+#: able to disprove it in a single click.
+#:
+#: Measured on the live workspace before this existed: 177 of 751
+#: no_booking_or_enquiry_path findings and 141 of 488 no_visible_phone_number
+#: findings rested on fewer than three loaded pages -- 251 of them on a single
+#: page.
+#:
+#: `detect_findings` has always passed site rules only the pages that loaded,
+#: so nothing here needs to re-filter error pages; a guard that did was written
+#: first and removed as unreachable. This floor is about how *many* pages were
+#: read, which nothing was checking.
+#:
+#: Not applied to `_no_structured_data`: that one is scoped to "the page" in
+#: the copy as well as in the detector, and a homepage that loaded supports it.
+MIN_PAGES_FOR_ABSENCE = 3
+
+
 def _canonical(url: str) -> str:
     """One spelling per address, so a link and a crawl of it compare equal.
 
@@ -394,7 +418,15 @@ def _broken_internal_links(pages: list[PageEvidence]) -> DetectedFinding | None:
 
 
 def _no_booking_path(pages: list[PageEvidence]) -> DetectedFinding | None:
-    """No way to book or schedule anywhere on the crawled site."""
+    """No way to book or schedule anywhere on the site we could read.
+
+    `pages` is already only the pages that loaded -- `detect_findings` filters
+    site rules that way. What it does not check is how many, and "no booking
+    form anywhere on your site" read off one page is a claim about our crawl
+    wearing the clothes of a claim about their business.
+    """
+    if len(pages) < MIN_PAGES_FOR_ABSENCE:
+        return None
     if any(p.booking_links for p in pages):
         return None
     # A contact form is an acceptable substitute; only fire when there is
@@ -456,6 +488,14 @@ def _high_friction_form(page: PageEvidence) -> DetectedFinding | None:
 
 
 def _no_visible_phone(pages: list[PageEvidence]) -> DetectedFinding | None:
+    """No phone number on any page we could read.
+
+    The strongest over-claim of the three: the copy says "there is no number
+    anywhere a visitor can see", which is about the site, not the sample. 114
+    of these were computed from a single page.
+    """
+    if len(pages) < MIN_PAGES_FOR_ABSENCE:
+        return None
     if any(p.visible_phones for p in pages):
         return None
     home = pages[0]
