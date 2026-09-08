@@ -133,6 +133,9 @@ class HealResult:
     checked: int
     #: Schedules that were wedged and are now advancing again.
     healed: tuple[Assessment, ...]
+    #: Schedules the server could not describe. Counted rather than raised:
+    #: one unreadable schedule must not stop the others being checked.
+    unreadable: int
     #: Schedules that were wedged, were reinstalled, and did *not* come back.
     #: Kept apart from `healed` because updating a schedule's spec in place
     #: unwedged housekeeping at 13:24 on 7 September and did nothing at all to
@@ -140,10 +143,16 @@ class HealResult:
     #: reports a repair it did not achieve turns a visible stall into a closed
     #: ticket, so the two outcomes are counted separately and only one of them
     #: is called healing.
-    attempted: tuple[Assessment, ...]
-    #: Schedules the server could not describe. Counted rather than raised:
-    #: one unreadable schedule must not stop the others being checked.
-    unreadable: int
+    #:
+    #: **Defaulted, and it has to be.** This type crosses a workflow boundary
+    #: and an always-on workflow replays its entire history on every worker
+    #: restart. Added as a required field on 7 September, it killed the
+    #: SupervisorWorkflow outright: the history held results in the old shape,
+    #: every replay failed with `attempted Field required`, and a failed
+    #: workflow task retries for ever. The watchdog was dead for fifteen hours
+    #: -- housekeeping wedged with nothing watching it, 446 drafts went
+    #: unswept, and the estate sent nothing the following morning.
+    attempted: tuple[Assessment, ...] = ()
 
 
 async def heal_wedged_schedules(
@@ -210,7 +219,7 @@ async def heal_wedged_schedules(
             )
             attempted.append(assessment)
 
-    return HealResult(len(jobs), tuple(healed), tuple(attempted), unreadable)
+    return HealResult(len(jobs), tuple(healed), unreadable, tuple(attempted))
 
 
 async def _is_advancing(client: Any, job: Any, *, now: dt.datetime) -> bool:

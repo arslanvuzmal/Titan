@@ -448,3 +448,29 @@ async def test_a_repair_that_did_not_take_is_not_reported_as_healed() -> None:
     assert client.updated == [housekeeping], "it must still try"
     assert result.healed == (), "but it must not claim a repair that did not land"
     assert [a.schedule_id for a in result.attempted] == [housekeeping]
+
+
+def test_a_result_from_before_the_field_existed_still_deserialises() -> None:
+    """Planted violation: make `attempted` a required field.
+
+    This is not hypothetical. `attempted` was added as required on 7 September
+    and the running SupervisorWorkflow died on the spot: its history holds
+    activity results in the old shape, and every replay after the deploy
+    failed with `attempted Field required`. A failed workflow task retries for
+    ever, so the watchdog was dead for fifteen hours -- during which
+    housekeeping wedged with nothing watching it, nothing swept 446 stranded
+    drafts, and the estate sent nothing the next morning.
+
+    An always-on workflow replays its whole history on every worker restart,
+    so any field added to an activity's result type must have a default. The
+    repository already knew this -- the research workflow guards an added
+    activity call behind `workflow.patched()` for the same reason.
+    """
+    from titan.workflows.schedule_health import HealResult
+
+    before = {"checked": 7, "healed": [], "unreadable": 0}
+
+    revived = HealResult(**before)
+
+    assert revived.attempted == ()
+    assert revived.checked == 7
