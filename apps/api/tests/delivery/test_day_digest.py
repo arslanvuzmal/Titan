@@ -200,3 +200,49 @@ def test_a_delivery_count_that_exists_is_still_shown() -> None:
     _, body = compose(report(sent=48, delivered=46), recipients=(), bounces=())
 
     assert "46" in body
+
+
+# ==========================================================================
+# A zero that explains itself
+# ==========================================================================
+def test_an_early_morning_zero_is_not_the_same_as_a_broken_day() -> None:
+    """Planted violation: render the count and nothing else.
+
+    The operator opens this first thing and reads "0". At 07:00 that is
+    normal -- the send windows have not opened. At 17:00 it means nothing ran
+    all day. The panel exists precisely so those two are told apart, and
+    printing a bare number made them identical inside the panel itself.
+    """
+    from titan.delivery.day_digest import day_state
+
+    quiet_morning = report(sent=0, as_of=dt.datetime(2026, 9, 8, 6, 30, tzinfo=dt.UTC))
+    quiet_evening = report(sent=0, as_of=dt.datetime(2026, 9, 8, 18, 0, tzinfo=dt.UTC))
+
+    assert day_state(quiet_morning) != day_state(quiet_evening)
+    assert "not started" in day_state(quiet_morning).lower()
+    assert "nothing" in day_state(quiet_evening).lower()
+
+
+def test_a_day_that_is_sending_says_so_rather_than_counting() -> None:
+    sending = report(sent=46, as_of=dt.datetime(2026, 9, 8, 9, 0, tzinfo=dt.UTC))
+
+    from titan.delivery.day_digest import day_state
+
+    assert "sending" in day_state(sending).lower()
+
+
+def test_a_spent_day_is_finished_not_stalled() -> None:
+    """Planted violation: read a spent quota as a stall.
+
+    Every mailbox at its cap is the system working, and calling it "nothing
+    sent" would raise an alarm on the best possible day.
+    """
+    from titan.delivery.day_digest import day_state
+
+    spent = report(
+        sent=25,
+        mailboxes=(mailbox(sent=25, allowed=25),),
+        as_of=dt.datetime(2026, 9, 8, 15, 0, tzinfo=dt.UTC),
+    )
+
+    assert "spent" in day_state(spent).lower() or "done" in day_state(spent).lower()

@@ -89,6 +89,7 @@ from titan.db.models import (
 )
 from titan.db.session import workspace_session
 from titan.delivery import day_report
+from titan.delivery.day_digest import day_state
 from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from titan.delivery.outbox_worker import ONE_PAGER_NOTE
 from titan.delivery.suppression import is_suppressed
@@ -897,6 +898,10 @@ async def crm_today(
         complained=report.complained,
         failed=report.failed,
         queued=report.queued,
+        state=day_state(report),
+        previous_date=report.previous_date,
+        previous_sent=report.previous_sent,
+        previous_bounced=report.previous_bounced,
         bounce_rate=report.bounce_rate_today,
         hourly=list(report.hourly),
         mailboxes=[

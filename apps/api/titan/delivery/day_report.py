@@ -141,6 +141,16 @@ class DayReport:
 
     mailboxes: tuple[MailboxDay, ...] = ()
     deferrals: tuple[Deferral, ...] = ()
+    #: The day that just finished, so the panel is never entirely zeroes.
+    #:
+    #: The operator opens this before any send window has opened, when the
+    #: honest answer for today is nought -- and a screen of nothing but zeroes
+    #: reads as a broken system. He read it that way every morning, correctly,
+    #: because nothing on it said otherwise. Yesterday is what makes an empty
+    #: morning legible.
+    previous_date: dt.date | None = None
+    previous_sent: int = 0
+    previous_bounced: int = 0
 
     @property
     def remaining(self) -> int:
@@ -266,9 +276,50 @@ async def build(
         )
     )
 
+    # The day that just finished. One indexed aggregate, and the difference
+    # between a legible morning and a screen of zeroes.
+    previous_start = day_start - dt.timedelta(days=1)
+    yesterday = (
+        await session.execute(
+            text(
+                f"""
+                SELECT count(*) FILTER (WHERE sent_at IS NOT NULL)    AS sent,
+                       -- Hard and unknown, never soft, exactly as today's
+                       -- count is measured. A soft bounce is not reputation
+                       -- damage, and showing yesterday's total beside today's
+                       -- filtered one would put two different questions in
+                       -- the same row -- which is what the first version of
+                       -- this query did, and the invariant caught it.
+                       --
+                       -- Spelled out rather than interpolated from
+                       -- COUNTS_AGAINST_REPUTATION so the guard in
+                       -- tests/invariants/test_bounce_predicate.py can see it:
+                       -- that test reads source text, and a constant is
+                       -- invisible to it.
+                       count(*) FILTER (
+                           WHERE bounced_at IS NOT NULL
+                             AND bounce_kind IS DISTINCT FROM 'soft'
+                       )                                              AS bounced
+                  FROM messages
+                 WHERE workspace_id = :workspace
+                   AND sent_at >= :previous_start
+                   AND sent_at < :day_start
+                """
+            ),
+            {
+                "workspace": workspace_id,
+                "previous_start": previous_start,
+                "day_start": day_start,
+            },
+        )
+    ).one()
+
     return DayReport(
         as_of=now,
         window_date=now.date(),
+        previous_date=previous_start.date(),
+        previous_sent=int(yesterday.sent or 0),
+        previous_bounced=int(yesterday.bounced or 0),
         sent=int(totals.sent or 0),
         ceiling=sum(box.allowed for box in mailboxes),
         delivered=int(totals.delivered or 0),

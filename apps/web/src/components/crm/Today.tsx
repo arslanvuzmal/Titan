@@ -250,6 +250,18 @@ export function TodaySection() {
         </p>
       )}
 
+      {/*
+        The sentence before the number, not after it. A bare "0" at seven in
+        the morning and a bare "0" at six in the evening are opposite
+        situations, and rendering them identically is the failure this whole
+        panel exists to prevent -- reproduced inside the panel itself. The
+        operator opened it before any window had opened and read a fault,
+        every day, because nothing said otherwise.
+      */}
+      {data.state && (
+        <p className="mb-3 text-sm font-medium text-slate-700">{data.state}</p>
+      )}
+
       <div className="flex flex-wrap items-end gap-x-8 gap-y-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -265,6 +277,27 @@ export function TodaySection() {
           </p>
         </div>
         <dl className="flex flex-wrap gap-x-7 gap-y-2 text-sm">
+          {/*
+            Yesterday, always. It is what makes an empty morning legible: a
+            screen of nothing but zeroes reads as a broken system whatever the
+            hour, and until the first window opens every figure here is
+            honestly nought.
+          */}
+          {data.previous_date && (
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">
+                Yesterday
+              </dt>
+              <dd className="font-semibold tabular-nums text-slate-900">
+                {data.previous_sent}
+                {data.previous_bounced > 0 && (
+                  <span className="ml-1 font-normal text-slate-500">
+                    ({data.previous_bounced} bounced)
+                  </span>
+                )}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-xs uppercase tracking-wide text-slate-500">Room left</dt>
             <dd className="font-semibold tabular-nums text-slate-900">{data.remaining}</dd>

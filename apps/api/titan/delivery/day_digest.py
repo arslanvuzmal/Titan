@@ -52,6 +52,38 @@ def day_is_over(report: DayReport, *, now: dt.datetime) -> bool:
     return all(box.remaining <= 0 for box in report.mailboxes)
 
 
+#: The hour the earliest market's send window opens, in UTC.
+#:
+#: Sydney is the first of the day and 08:00 there is well before 08:00 UTC, but
+#: what matters here is the operator's own morning: he opens the dashboard at
+#: about seven UTC and everything before then is legitimately quiet. Used only
+#: to tell "the day has not started" from "the day did not happen".
+FIRST_WINDOW_HOUR = 7
+
+
+def day_state(report: DayReport) -> str:
+    """One sentence saying what the number means.
+
+    The panel exists so that a day sending forty and a day sending nothing
+    cannot be mistaken for each other -- and the first version printed a bare
+    count, which made 0 at seven in the morning and 0 at six in the evening
+    look exactly alike. The operator sees the first one every day and reads it
+    as a fault, correctly, because nothing on screen said otherwise.
+
+    Four states, and the zero splits into three of them.
+    """
+    hour = report.as_of.hour
+    if report.sent == 0:
+        if hour < FIRST_WINDOW_HOUR:
+            return "Not started — the first send window has not opened yet"
+        if report.queued:
+            return f"Not started — {report.queued} waiting for a window to open"
+        return "Nothing sent, and nothing waiting to go — worth looking at"
+    if report.remaining <= 0:
+        return f"Today's allowance is spent — {report.sent} sent"
+    return f"Sending — {report.sent} of {report.ceiling} so far"
+
+
 def compose(
     report: DayReport,
     *,
@@ -122,4 +154,4 @@ def compose(
     return subject, "\n".join(lines)
 
 
-__all__ = ["LAST_HOUR", "compose", "day_is_over"]
+__all__ = ["FIRST_WINDOW_HOUR", "LAST_HOUR", "compose", "day_is_over", "day_state"]

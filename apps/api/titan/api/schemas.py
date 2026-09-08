@@ -363,6 +363,16 @@ class TodayOut(BaseModel):
     complained: int
     failed: int
     queued: int
+    #: One sentence saying what the number means, because the number alone
+    #: does not. Zero at seven in the morning and zero at six in the evening
+    #: are opposite situations and were rendered identically; the operator
+    #: read the first as a fault every day, correctly, because nothing on the
+    #: screen said otherwise.
+    state: str = ""
+    #: The day that just finished, so the panel is never entirely zeroes.
+    previous_date: dt.date | None = None
+    previous_sent: int = 0
+    previous_bounced: int = 0
     #: Today's bounce rate, or null when nothing has been sent. A tripwire, not
     #: a verdict -- the thirty-day window governs anything that acts on it.
     bounce_rate: float | None = None

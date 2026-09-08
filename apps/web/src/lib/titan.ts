@@ -387,6 +387,17 @@ export interface Today {
   complained: number;
   failed: number;
   queued: number;
+  /**
+   * One sentence saying what the number means, because the number alone does
+   * not. Zero at seven in the morning and zero at six in the evening are
+   * opposite situations that rendered identically, and the first was read as
+   * a fault every day -- correctly, since nothing on screen said otherwise.
+   */
+  state: string;
+  /** The day that just finished, so the panel is never entirely zeroes. */
+  previous_date: string | null;
+  previous_sent: number;
+  previous_bounced: number;
   /** Null when nothing has been sent. Never 0, which would read as clean. */
   bounce_rate: number | null;
   /** Sends per hour since midnight UTC, 24 buckets. */
