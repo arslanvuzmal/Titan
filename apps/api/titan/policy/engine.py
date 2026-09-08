@@ -65,6 +65,7 @@ class DenyCode(StrEnum):
     RECIPIENT_DOMAIN_BLOCKED = "recipient_domain_blocked"
     SUPPRESSED = "recipient_suppressed"
     NO_EVIDENCE = "no_evidence_backed_claims"
+    EVIDENCE_STALE = "evidence_too_old_to_claim"
     VALIDATION_FAILED = "message_validation_failed"
     APPROVAL_MISSING = "approval_missing"
     APPROVAL_STALE = "approval_does_not_match_draft_version"
@@ -111,6 +112,29 @@ class Decision:
 
     def reason_text(self) -> str:
         return "; ".join(str(d) for d in self.denials) or "allowed"
+
+
+#: How old the evidence behind a claim may be at the moment of sending.
+#:
+#: Every finding is measured once and then quoted to a stranger days or weeks
+#: later. A site that was broken when crawled may have been fixed since, and
+#: the recipient is the one person in the world certain to notice.
+#:
+#: Thirty days, matching `titan.intelligence.cohort.MAX_COHORT_AGE` and the
+#: reputation window, and refused for the same reason that module gives: a
+#: claim built from older crawls describes a business that has moved on.
+#:
+#: This was not a theoretical risk. 406 Dental was told on 3 September that
+#: their booking page was broken, from a crawl made on 6 August; by the time
+#: anybody looked, the one surviving finding about them -- no structured data
+#: -- was false too, because they had added it in the meantime. Every draft
+#: queued when this was written rested on evidence at least 18 days old, and
+#: two thirds of them on evidence over a month old.
+#:
+#: Deliberately a constant rather than a setting. A campaign that could raise
+#: its own staleness limit would raise it the first time the queue went quiet,
+#: which is exactly when the evidence is oldest.
+MAX_EVIDENCE_AGE = dt.timedelta(days=30)
 
 
 @dataclass(slots=True)
@@ -206,6 +230,13 @@ class SendContext:
     recipient_country: str | None = None
     #: Their state or province, used when the calendar recognises it.
     recipient_admin_area: str | None = None
+    #: When the newest evidence behind this message's claims was captured.
+    #:
+    #: None means the caller could not determine it, and denies nothing -- the
+    #: same stance as `recipient_domain_health`: a caller that cannot supply it
+    #: loses a check rather than gaining a refusal. A message with no evidence
+    #: at all is already refused by `NO_EVIDENCE` above.
+    evidence_captured_at: dt.datetime | None = None
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -408,6 +439,16 @@ def evaluate_send(ctx: SendContext) -> Decision:
                     DenyCode.NO_EVIDENCE,
                     f"{ctx.evidence_count} evidence links, campaign requires "
                     f"{max(1, ctx.min_evidence_per_message)}",
+                )
+            )
+    if ctx.evidence_captured_at is not None:
+        age = ctx.now - ctx.evidence_captured_at
+        if age > MAX_EVIDENCE_AGE:
+            denials.append(
+                Denial(
+                    DenyCode.EVIDENCE_STALE,
+                    f"newest evidence was captured {age.days} days ago, "
+                    f"older than the {MAX_EVIDENCE_AGE.days}-day limit",
                 )
             )
     if not ctx.validation_passed:

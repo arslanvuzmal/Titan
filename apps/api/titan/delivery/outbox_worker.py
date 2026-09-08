@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from html import escape as _html_escape
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,7 @@ from titan.db.models import (
     CampaignPolicy,
     Contact,
     ContactChannel,
+    FindingEvidence,
     Lead,
     Message,
     MessageApproval,
@@ -710,6 +711,7 @@ class OutboxWorker:
             ),
             campaign_region=campaign.region,
             evidence_count=_evidence_count(draft),
+            evidence_captured_at=await _newest_evidence_captured_at(session, draft),
             validation_passed=(
                 _still_passes_todays_rules(draft)
                 and _payload_is_the_gated_draft(row, draft)
@@ -1895,14 +1897,54 @@ class OutboxWorker:
         logger.info("outbox worker stopped", extra={"owner": self._owner})
 
 
+def _evidence_ids(draft: MessageDraft) -> set[str]:
+    return {
+        eid
+        for entry in (draft.claim_map or [])
+        for eid in (entry.get("evidence_ids") or [])
+    }
+
+
 def _evidence_count(draft: MessageDraft) -> int:
-    return len(
-        {
-            eid
-            for entry in (draft.claim_map or [])
-            for eid in (entry.get("evidence_ids") or [])
-        }
-    )
+    return len(_evidence_ids(draft))
+
+
+async def _newest_evidence_captured_at(
+    session: AsyncSession, draft: MessageDraft
+) -> dt.datetime | None:
+    """When the freshest thing this message cites was actually observed.
+
+    The newest rather than the oldest, deliberately. A message quotes several
+    findings and is only as current as its most recent look at the site; taking
+    the oldest would refuse a freshly re-crawled lead because one supporting
+    page happened to be read a month before.
+
+    Returns None when nothing can be read -- an unparseable id, no rows, a
+    query that fails. The policy engine denies nothing on None: this check
+    exists to stop a stale claim, and a bug in it must not stop every send.
+    Drafts citing no evidence at all are refused by `NO_EVIDENCE` instead.
+    """
+    ids: set[uuid.UUID] = set()
+    for raw in _evidence_ids(draft):
+        try:
+            ids.add(uuid.UUID(str(raw)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    if not ids:
+        return None
+    try:
+        return await session.scalar(
+            select(func.max(FindingEvidence.captured_at)).where(
+                FindingEvidence.id.in_(ids)
+            )
+        )
+    except Exception:
+        logger.warning(
+            "could not read evidence capture time; not applying the staleness check",
+            extra={"draft_id": str(draft.id)},
+            exc_info=True,
+        )
+        return None
 
 
 def _is_member(value: str) -> bool:

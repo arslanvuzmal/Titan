@@ -19,7 +19,12 @@ from titan.db.enums import (
     LeadStatus,
     VerificationStatus,
 )
-from titan.policy.engine import DenyCode, SendContext, evaluate_send
+from titan.policy.engine import (
+    MAX_EVIDENCE_AGE,
+    DenyCode,
+    SendContext,
+    evaluate_send,
+)
 from titan.policy.modes import Capability, resolve_mode
 
 NOW = dt.datetime(2026, 8, 2, 14, 0, tzinfo=dt.UTC)
@@ -618,3 +623,72 @@ def test_an_address_the_context_does_not_carry_is_not_guessed_at() -> None:
     decision = evaluate_send(sendable_context(recipient_email=None))
 
     assert decision.allowed
+
+
+# ==========================================================================
+# Evidence goes stale
+#
+# Every finding is measured once and quoted to a stranger days or weeks later.
+# The site can be fixed in between, and the recipient is the one person certain
+# to notice. 406 Dental was told on 3 September that their booking page was
+# broken, from a crawl made on 6 August; by the time anybody checked, the one
+# surviving finding about them was false too, because they had fixed it.
+# ==========================================================================
+def test_evidence_older_than_the_limit_is_refused() -> None:
+    """Planted violation: drop the age check and this sends.
+
+    The claim was true when it was measured. That is not the same as being
+    true now, and "now" is when the recipient reads it.
+    """
+    stale = sendable_context(evidence_captured_at=NOW - dt.timedelta(days=31))
+
+    decision = evaluate_send(stale)
+
+    assert not decision.allowed
+    assert DenyCode.EVIDENCE_STALE in {d.code for d in decision.denials}
+
+
+def test_evidence_inside_the_limit_still_sends() -> None:
+    """Narrowing must not stop the pipeline. Evidence a fortnight old is
+    still evidence, and refusing it would empty the queue for no gain."""
+    fresh = sendable_context(evidence_captured_at=NOW - dt.timedelta(days=14))
+
+    assert evaluate_send(fresh).allowed
+
+
+def test_the_boundary_belongs_to_the_fresh_side() -> None:
+    """Exactly at the limit is not yet over it. Stated in a test because the
+    difference between > and >= here is a day of sending."""
+    exact = sendable_context(evidence_captured_at=NOW - MAX_EVIDENCE_AGE)
+
+    assert evaluate_send(exact).allowed
+
+
+def test_an_unknown_capture_time_denies_nothing() -> None:
+    """Fails open, deliberately, and the same way `recipient_domain_health`
+    does: a caller that cannot supply the timestamp loses a check rather than
+    gaining a refusal.
+
+    A bug in the lookup must not stop every send in the estate. A message with
+    no evidence at all is refused by NO_EVIDENCE instead, which is the gate
+    that actually owns that question.
+    """
+    unknown = sendable_context(evidence_captured_at=None)
+
+    decision = evaluate_send(unknown)
+
+    assert decision.allowed
+    assert DenyCode.EVIDENCE_STALE not in {d.code for d in decision.denials}
+
+
+def test_the_reason_names_the_age_and_the_limit() -> None:
+    """An operator reading a blocked row should not have to open the database
+    to find out how old the evidence was."""
+    stale = sendable_context(evidence_captured_at=NOW - dt.timedelta(days=45))
+
+    reason = next(
+        d for d in evaluate_send(stale).denials if d.code is DenyCode.EVIDENCE_STALE
+    )
+
+    assert "45 days" in str(reason)
+    assert str(MAX_EVIDENCE_AGE.days) in str(reason)
