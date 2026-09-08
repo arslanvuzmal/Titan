@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 
 from titan.contracts.evidence import CrawlResult, PageEvidence, finding_fingerprint
 from titan.db.enums import FindingCategory, Severity, VerificationMethod
@@ -278,11 +279,99 @@ def _broken_cta(page: PageEvidence) -> DetectedFinding | None:
 BROKEN_LINK_STATUSES: frozenset[int] = frozenset({404, 410})
 
 
+def _canonical(url: str) -> str:
+    """One spelling per address, so a link and a crawl of it compare equal.
+
+    Scheme and ``www`` are dropped because a link written ``http://x.com/a``
+    and a crawl of ``https://www.x.com/a`` are the same address to everybody
+    except a string comparison. The query is kept: ``?page_id=431`` is a
+    different page from ``?page_id=613``, and both appear in live evidence.
+    """
+    split = urlsplit(url)
+    host = split.netloc.lower().removeprefix("www.")
+    path = split.path.rstrip("/") or "/"
+    return f"{host}{path}" + (f"?{split.query}" if split.query else "")
+
+
+def _linked_urls(pages: list[PageEvidence]) -> set[str]:
+    """Every internal address a *working* page links to, excluding self-links.
+
+    Both exclusions were found by running this against real crawls rather than
+    by reasoning about it, and without either one the rule passes everything it
+    was written to stop.
+
+    **Error pages are not sources.** Most 404s in the wild are soft: the server
+    answers 404 and renders the full site template, navigation and all. Every
+    broken page in the live data carries around 200 nav links for that reason.
+    Treating an error page's markup as evidence of what the site links to means
+    the pages we invented start vouching for each other.
+
+    **A link to the page it sits on proves nothing.** Those same templates
+    carry ``href="#"`` and bare anchors, which resolve against the current
+    address -- so a probed URL that does not exist would mark *itself* as
+    linked. Measured: this alone made 17,441 of 30,440 crawled 404s look
+    genuine, including all six of the paths the crawler had guessed.
+    """
+    linked: set[str] = set()
+    for page in pages:
+        if page.http_status is not None and page.http_status >= 400:
+            continue
+        base = page.final_url or page.url
+        try:
+            here = _canonical(base)
+        except ValueError:
+            continue
+        for link in page.nav_links:
+            if link.is_external:
+                continue
+            href = (link.href or "").strip()
+            if not href or href.startswith("#"):
+                continue
+            try:
+                target = _canonical(urljoin(base, href))
+            except ValueError:
+                # A malformed href is not evidence of anything. Skipped rather
+                # than raised: one unparseable link must not lose the page.
+                continue
+            if target == here:
+                continue
+            linked.add(target)
+    return linked
+
+
 def _broken_internal_links(pages: list[PageEvidence]) -> DetectedFinding | None:
+    """Pages that are gone *and* that something on the site still points at.
+
+    The second half is the whole rule. This detector used to report any crawled
+    page that answered 404, which is not the same question -- because the
+    crawler reaches most of its URLs by guessing them. It tries ``/book``,
+    ``/booking``, ``/appointments``, ``/fees`` and friends against every domain,
+    and on a site that never had those pages all four come back 404.
+
+    The finding that produced said, in the recipient's own inbox: *"The link is
+    still on the page but the address behind it no longer resolves."* There was
+    no link. We had invented the address, failed to find it, and reported the
+    absence as the business's defect.
+
+    Measured on the live workspace before this existed: of 31,399 crawled pages
+    answering 404 or 410, **31,357 sat at depth 1 -- the probe list -- and 37
+    had been reached by following a real link**. 277 messages had gone out
+    carrying the sentence above; 156 of them named a booking path nothing on
+    the site linked to. One went to a practice whose booking worked perfectly.
+
+    So the claim is now verified the way it is worded: some page we read has to
+    carry a link to the address before we will say the link is broken.
+    """
+    linked = _linked_urls(pages)
     broken = [
         (p.url, p.http_status)
         for p in pages
-        if p.http_status is not None and p.http_status in BROKEN_LINK_STATUSES
+        if p.http_status is not None
+        and p.http_status in BROKEN_LINK_STATUSES
+        and (
+            _canonical(p.url) in linked
+            or (p.final_url and _canonical(p.final_url) in linked)
+        )
     ]
     if not broken:
         return None

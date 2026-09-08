@@ -15,6 +15,7 @@ from titan.contracts.evidence import (
     CrawlResult,
     CtaObservation,
     FormObservation,
+    LinkObservation,
     PageEvidence,
     SecurityHeaders,
 )
@@ -221,7 +222,9 @@ def test_alt_text_finding_requires_a_meaningful_proportion() -> None:
 
 
 def test_broken_internal_link_detected() -> None:
-    ok = page()
+    ok = page(
+        nav_links=[LinkObservation(text="Book", href="/missing")],
+    )
     broken = page(
         url="https://bellrose-dental.test/missing",
         final_url="https://bellrose-dental.test/missing",
@@ -230,6 +233,103 @@ def test_broken_internal_link_detected() -> None:
     )
     found = detect_findings(crawl(ok, broken))
     assert "broken_internal_link" in issue_types(found)
+
+
+def test_a_404_nobody_links_to_is_not_a_broken_link() -> None:
+    """Planted violation: report any crawled 404 and this fails.
+
+    The bug this replaces. The crawler reaches most of its URLs by guessing
+    them -- ``/book``, ``/booking``, ``/appointments``, ``/fees`` -- so on a
+    site that never had those pages, all four answer 404 and none of them is a
+    defect. 31,357 of the 31,399 crawled 404s on the live workspace were
+    exactly this, and the sentence they produced told the recipient "the link
+    is still on the page" about an address we had invented.
+    """
+    ok = page(nav_links=[LinkObservation(text="About", href="/about")])
+    guessed = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+        depth=1,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(ok, guessed)))
+
+
+def test_a_relative_link_still_counts_as_a_link() -> None:
+    """Hrefs are written relative far more often than not, and a rule that only
+    matched absolute ones would silently report nothing at all."""
+    ok = page(nav_links=[LinkObservation(text="Book", href="book/")])
+    broken = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" in issue_types(detect_findings(crawl(ok, broken)))
+
+
+def test_the_link_and_the_crawl_may_disagree_about_scheme_and_www() -> None:
+    """A link written http:// to a page crawled at https://www. is the same
+    address to everyone except a string comparison -- and getting this wrong
+    fails closed, reporting nothing, which is the failure that hides."""
+    ok = page(nav_links=[LinkObservation(text="Fees", href="http://bellrose-dental.test/fees")])
+    broken = page(
+        url="https://www.bellrose-dental.test/fees/",
+        final_url="https://www.bellrose-dental.test/fees/",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" in issue_types(detect_findings(crawl(ok, broken)))
+
+
+def test_a_soft_404_does_not_vouch_for_itself() -> None:
+    """Planted violation: let an error page count as a source of links.
+
+    Most 404s in the wild are soft -- the server answers 404 and renders the
+    whole site template, navigation and all. Every broken page in the live data
+    carries around 200 nav links for that reason, and those templates contain
+    ``href="#"``, which resolves against the address of the page it is on.
+
+    So a URL the crawler invented marks *itself* as linked, and the guard above
+    passes it. Measured against real crawls, this one path made 17,441 of
+    30,440 404s look genuine -- including all six of the paths we had guessed
+    for the practice that prompted this.
+    """
+    home = page(nav_links=[LinkObservation(text="About", href="/about")])
+    soft_404 = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+        depth=1,
+        nav_links=[
+            LinkObservation(text="Top", href="#"),
+            LinkObservation(text="Here", href="/book"),
+        ],
+    )
+
+    assert "broken_internal_link" not in issue_types(
+        detect_findings(crawl(home, soft_404))
+    )
+
+
+def test_an_external_link_is_not_ours_to_report() -> None:
+    """Somebody else's dead page is not this business's defect, and offering to
+    fix it is offering to edit a site they do not own."""
+    ok = page(
+        nav_links=[
+            LinkObservation(
+                text="Partner", href="https://elsewhere.test/gone", is_external=True
+            )
+        ]
+    )
+    broken = page(
+        url="https://elsewhere.test/gone",
+        final_url="https://elsewhere.test/gone",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(ok, broken)))
 
 
 def test_error_page_does_not_trigger_site_wide_rules() -> None:
@@ -1007,12 +1107,25 @@ def test_a_digit_prefixed_local_part_is_still_accepted() -> None:
 
 
 def _statuses_flagged(*statuses: int) -> set[str]:
+    """Each status on its own page, with a real link pointing at every one.
+
+    The linking page matters: a broken-link finding now requires that something
+    on the site actually points at the address, so without it these would all
+    come back clean and the status rules below would be proving nothing.
+    """
+    targets = [f"https://x.test/p{i}" for i in range(len(statuses))]
+    linking = page(
+        url="https://x.test/",
+        final_url="https://x.test/",
+        nav_links=[LinkObservation(text=f"p{i}", href=t) for i, t in enumerate(targets)],
+    )
     found = detect_findings(
         crawl(
+            linking,
             *[
-                page(url=f"https://x.test/p{i}", http_status=s)
-                for i, s in enumerate(statuses)
-            ]
+                page(url=t, final_url=t, http_status=s)
+                for t, s in zip(targets, statuses, strict=True)
+            ],
         )
     )
     return {f.issue_type for f in found}
