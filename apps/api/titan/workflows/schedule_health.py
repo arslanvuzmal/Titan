@@ -212,14 +212,66 @@ async def heal_wedged_schedules(
         # whole value of this pass.
         if await _is_advancing(client, job, now=now):
             healed.append(assessment)
+        elif await _recreate(client, job, now=now):
+            logger.warning(
+                "schedule would not restart in place; recreated it",
+                extra={"schedule_id": job.schedule_id},
+            )
+            healed.append(assessment)
         else:
             logger.error(
-                "schedule did not restart after being reinstalled",
+                "schedule did not restart, in place or recreated",
                 extra={"schedule_id": job.schedule_id},
             )
             attempted.append(assessment)
 
     return HealResult(len(jobs), tuple(healed), unreadable, tuple(attempted))
+
+
+async def _recreate(client: Any, job: Any, *, now: dt.datetime) -> bool:
+    """Delete the schedule and put it back. The repair of last resort.
+
+    Reached only after updating in place has demonstrably failed, because this
+    is the more dangerous of the two: deleting loses a schedule's history and
+    counters, and a recreate that fails leaves the job *gone* rather than
+    merely late. A watchdog that can lose a schedule is worse than one that
+    cannot fix it, so the cheap repair is always tried first and its result
+    read back before this is considered.
+
+    It is also, measured over two days, the only repair that reliably works.
+    The in-place update revived housekeeping once and did nothing on three
+    later occasions; recreating it moved the next firing into the future
+    within seconds every time. The counters say why: the scheduler is not
+    frozen but running about forty minutes behind, marking each hourly slot
+    missed as it crawls past, advancing one slot per hour while an hour
+    passes. Rewriting the spec does not move that position. Recreation resets
+    it.
+    """
+    try:
+        await client.delete_schedule(job.schedule_id)
+    except Exception:
+        logger.warning(
+            "could not delete the wedged schedule; leaving it alone",
+            extra={"schedule_id": job.schedule_id},
+            exc_info=True,
+        )
+        return False
+
+    await install(client, [job])
+
+    # One verification, deliberately. `install` catches its own failures and
+    # reports them rather than raising, so the obvious guards -- a try/except,
+    # or a check of the returned outcome -- both sit in front of a read-back
+    # that already answers the same question: a schedule that could not be
+    # recreated is not there to be advancing. Two earlier versions of this
+    # function carried one of those guards each, and a planted violation
+    # walked past both because the read-back caught the case first.
+    #
+    # So the read-back is the only check, and it is the honest one: it asks
+    # the server what state the schedule is actually in rather than what the
+    # call reported. A False here means the job is now absent rather than
+    # merely late, which the caller reports at higher priority.
+    return await _is_advancing(client, job, now=now)
 
 
 async def _is_advancing(client: Any, job: Any, *, now: dt.datetime) -> bool:

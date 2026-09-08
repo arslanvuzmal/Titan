@@ -228,6 +228,7 @@ class FakeClient:
         self.existing = existing
         self.updated: list[str] = []
         self.created: list[str] = []
+        self.deleted: list[str] = []
 
     async def create_schedule(self, schedule_id: str, schedule):
         from temporalio.client import ScheduleAlreadyRunningError
@@ -235,9 +236,20 @@ class FakeClient:
         if schedule_id in self.existing:
             raise ScheduleAlreadyRunningError()
         self.created.append(schedule_id)
+        # A created schedule advances, which is what the server does and what
+        # was measured live: recreating housekeeping moved its next firing
+        # into the future within seconds and reset its counters. Without this
+        # the fake would model a recreate that silently changes nothing, which
+        # is the one behaviour the real server never showed.
+        ahead = tuple(NOW + dt.timedelta(hours=n) for n in range(1, 11))
+        self.existing[schedule_id] = FakeDescription(FakeSchedule(), FakeInfo(ahead))
 
     def get_schedule_handle(self, schedule_id: str) -> FakeHandle:
         return FakeHandle(self, schedule_id)
+
+    async def delete_schedule(self, schedule_id: str) -> None:
+        self.deleted.append(schedule_id)
+        self.existing.pop(schedule_id, None)
 
 
 def described(cron_times, *, paused: bool = False) -> FakeDescription:
@@ -429,6 +441,11 @@ async def test_a_repair_that_did_not_take_is_not_reported_as_healed() -> None:
 
     A watchdog reporting a repair it did not achieve is worse than one that
     stays quiet: it converts a visible stall into a closed ticket.
+
+    Since escalation was added this schedule ends up repaired -- by deletion
+    and recreation, not by the update. What the test still pins is that the
+    update's own success was verified rather than assumed: the escalation is
+    only reachable through a read-back that found it had not worked.
     """
     housekeeping = f"titan-housekeeping::{WS}"
     stuck = described((NOW - dt.timedelta(hours=3),))
@@ -441,13 +458,13 @@ async def test_a_repair_that_did_not_take_is_not_reported_as_healed() -> None:
 
     client = StubbornClient(live)
 
-    result = await heal_wedged_schedules(
-        client, workspace_id=WS, task_queue=QUEUE, now=NOW
-    )
+    await heal_wedged_schedules(client, workspace_id=WS, task_queue=QUEUE, now=NOW)
 
-    assert client.updated == [housekeeping], "it must still try"
-    assert result.healed == (), "but it must not claim a repair that did not land"
-    assert [a.schedule_id for a in result.attempted] == [housekeeping]
+    assert client.updated == [housekeeping], "the cheap repair is tried first"
+    # The in-place result is never taken on trust. That it went on to escalate
+    # is the proof the read-back happened -- without it the pass would have
+    # stopped here and called a dead schedule healed.
+    assert client.deleted == [housekeeping]
 
 
 def test_a_result_from_before_the_field_existed_still_deserialises() -> None:
@@ -474,3 +491,88 @@ def test_a_result_from_before_the_field_existed_still_deserialises() -> None:
 
     assert revived.attempted == ()
     assert revived.checked == 7
+
+
+# ==========================================================================
+# Escalation: when reinstalling in place does not land
+# ==========================================================================
+@pytest.mark.asyncio
+async def test_a_schedule_that_will_not_restart_is_recreated() -> None:
+    """Planted violation: give up after the in-place repair.
+
+    Measured over two days: updating a wedged schedule's spec in place
+    revived housekeeping at 13:24 on 7 September and did nothing at 17:15,
+    nothing at 09:59 on the 8th, and nothing in between. Deleting and
+    recreating it worked immediately every time -- the counters reset and the
+    next firing moved into the future within seconds.
+
+    The reason is visible in the counters: the scheduler is not frozen, it is
+    running about forty minutes behind and marking each hourly slot missed as
+    it crawls past. It advances one slot per hour while an hour passes, so it
+    never catches up, and rewriting the spec does not move its position.
+    Recreating it is the only repair that does.
+    """
+    housekeeping = f"titan-housekeeping::{WS}"
+    live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
+
+    class StubbornClient(FakeClient):
+        repair_works = False
+
+    client = StubbornClient(live)
+
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
+
+    assert client.deleted == [housekeeping], "the in-place repair must be escalated"
+    assert [a.schedule_id for a in result.healed] == [housekeeping]
+    assert result.attempted == (), "recreation landed, so it is not an open failure"
+
+
+@pytest.mark.asyncio
+async def test_a_working_schedule_is_never_deleted() -> None:
+    """Planted violation: escalate before checking the cheap repair worked.
+
+    Deleting loses a schedule's history and counters, and if the recreate
+    failed the job would be gone rather than merely stuck. It is the more
+    dangerous repair and it is only ever reached when the safe one has
+    demonstrably failed.
+    """
+    housekeeping = f"titan-housekeeping::{WS}"
+    live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
+    client = FakeClient(live)  # repair_works is True
+
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
+
+    assert client.deleted == [], "the in-place repair worked; nothing to escalate"
+    assert [a.schedule_id for a in result.healed] == [housekeeping]
+
+
+@pytest.mark.asyncio
+async def test_a_recreate_that_fails_leaves_a_loud_trail() -> None:
+    """Planted violation: swallow a failed recreate.
+
+    This is the one case where the watchdog can make things worse: the
+    schedule has been deleted and putting it back did not work, so the job is
+    now gone rather than late. It must never be reported as healed, and it
+    must be the loudest thing the pass produces.
+    """
+    housekeeping = f"titan-housekeeping::{WS}"
+    live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
+
+    class CannotRecreate(FakeClient):
+        repair_works = False
+
+        async def create_schedule(self, schedule_id: str, schedule):
+            raise RuntimeError("server refused the create")
+
+    client = CannotRecreate(live)
+
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
+
+    assert result.healed == ()
+    assert [a.schedule_id for a in result.attempted] == [housekeeping]
