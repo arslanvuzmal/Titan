@@ -29,6 +29,8 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from titan.workflows.types import (
         EraseExpiredDataInput,
+        ReadmitLeadsInput,
+        ReadmitLeadsResult,
         EraseExpiredDataResult,
         CheckVitalsInput,
         CheckVitalsResult,
@@ -145,6 +147,31 @@ class HousekeepingWorkflow:
             )
         except Exception as error:
             workflow.logger.warning("address re-check skipped: %s", error)
+
+        # Re-admission, first of the three additions and deliberately before
+        # the retention pass: it *returns* leads to the pipeline, and a pass
+        # that erased content before re-admitting would be judging a lead on a
+        # body it had just emptied. Ordering matters more than it looks here.
+        #
+        # Swallowed like the rest. A campaign that could not be re-checked this
+        # hour is re-checked next hour, and the sweep this pass exists for is
+        # worth more than the promotion.
+        try:
+            readmitted: ReadmitLeadsResult = await workflow.execute_activity(
+                "readmit_leads",
+                ReadmitLeadsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                retry_policy=RETRY,
+                result_type=ReadmitLeadsResult,
+            )
+            if readmitted.promoted:
+                workflow.logger.info(
+                    "re-admitted %s lead(s) the gate has moved past; %s still waiting",
+                    readmitted.promoted,
+                    readmitted.remaining,
+                )
+        except Exception as error:
+            workflow.logger.warning("lead re-admission skipped: %s", error)
 
         # Retention, after both repairs and before the vitals. Last of the
         # three because it is the only one that destroys anything: if a pass is

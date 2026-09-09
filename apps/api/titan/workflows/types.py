@@ -254,6 +254,24 @@ class ReopenStaleRunsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReadmitLeadsInput:
+    """One pass of the gate re-check."""
+
+    workspace_id: str
+    #: None takes ``readmission.DEFAULT_BATCH``.
+    batch: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadmitLeadsResult:
+    #: Leads returned to the pipeline because the bar moved past them.
+    promoted: int = 0
+    #: Still parked above their own gate. Reported so a backlog of thousands
+    #: can be watched draining rather than only noticed when it ends.
+    remaining: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class EraseExpiredDataInput:
     """One pass of the retention erasure."""
 

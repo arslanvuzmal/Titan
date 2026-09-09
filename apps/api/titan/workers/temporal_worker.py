@@ -29,6 +29,7 @@ from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
+from titan.activities import readmission as readmission_activities
 from titan.activities import retention as retention_activities
 from titan.activities import reverification as reverification_activities
 from titan.activities import daily_report as daily_report_activities
@@ -120,6 +121,7 @@ async def main() -> None:
             trickle_activities.release_held_contacts,
             *reverification_activities.ALL_REVERIFICATION_ACTIVITIES,
             *retention_activities.ALL_RETENTION_ACTIVITIES,
+            *readmission_activities.ALL_READMISSION_ACTIVITIES,
             *vitals_activities.ALL_VITALS_ACTIVITIES,
             *smartlead_reply_activities.ALL_SMARTLEAD_REPLY_ACTIVITIES,
             *optout_activities.ALL_OPTOUT_ACTIVITIES,
