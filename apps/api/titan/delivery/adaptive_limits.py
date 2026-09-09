@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from titan.delivery.deliverability import BOUNCE_RATE_PAUSE
 from titan.delivery.sender_health import SenderHealth
 
 #: Share of the configured ceiling permitted at each health level.
@@ -105,6 +106,43 @@ RECOVERY_STEP = 0.25
 MIN_ACTIVE_LIMIT = 1
 
 
+#: Hard bounces in a single day that stop the day.
+#:
+#: The reputation window is thirty days long, which is the right length for
+#: judging a mailbox and the wrong length for protecting one. Every block this
+#: estate has taken was a single bad afternoon: outreach@ took five hard
+#: bounces in 48 hours, sales@ took three in one day, and each then served a
+#: month-long block for it while the window rolled past.
+#:
+#: Two, because at any volume this estate actually sends, two hard bounces in a
+#: day is already past the ceiling the thirty-day window enforces -- and the
+#: rate check below says so rather than this number assuming it. Continuing to
+#: send after that is sending into evidence that the list is bad.
+#:
+#: The day is the unit on purpose. It stops at midnight without anybody
+#: intervening, which is what separates it from the thirty-day block it exists
+#: to prevent.
+SAME_DAY_BOUNCE_FLOOR = 2
+
+
+def stop_for_today(*, sent_today: int, bounced_today: int) -> bool:
+    """Whether today's own bounces are already bad enough to stop the day.
+
+    Two conditions, and the floor is the one that matters. A single bounce is
+    noise at any volume; the rate alone would stop a mailbox that sent one
+    message and had it bounce, which says nothing about the list.
+
+    The ceiling is `deliverability.BOUNCE_RATE_PAUSE` rather than a number of
+    its own. Two thresholds for one question drift apart -- the repository
+    already keeps a test to stop exactly that happening to the bounce
+    predicate -- and a same-day rule that disagreed with the thirty-day rule
+    would be a mailbox stopped by one and permitted by the other.
+    """
+    if bounced_today < SAME_DAY_BOUNCE_FLOOR:
+        return False
+    return bounced_today / max(sent_today, 1) >= BOUNCE_RATE_PAUSE
+
+
 @dataclass(frozen=True, slots=True)
 class LimitDecision:
     """The effective daily ceiling, and enough to explain it."""
@@ -121,6 +159,10 @@ class LimitDecision:
     #: mailbox sending five a day as "reduced to 0%", which is the sentence a
     #: dashboard would print next to the five it is actually sending.
     probation: bool = False
+    #: True when the day was stopped by its own bounces rather than by the
+    #: thirty-day verdict. Distinct from `probation` and from a health
+    #: reduction because it clears at midnight and needs no intervention.
+    same_day_stop: bool = False
 
     @property
     def paused(self) -> bool:
@@ -186,6 +228,8 @@ def daily_limit(
     recent: tuple[SenderHealth, ...],
     warmup_limit: int | None = None,
     days_since_bounce: int | None = None,
+    sent_today: int = 0,
+    bounced_today: int = 0,
 ) -> LimitDecision:
     """The effective ceiling for this mailbox today.
 
@@ -232,6 +276,13 @@ def daily_limit(
         probation = allowance > effective
         effective = max(effective, allowance)
 
+    # Last, and it overrides everything above including probation. A mailbox
+    # earning its way back that starts bouncing today is not recovering, and
+    # handing it its five anyway is how a thirty-day block gets renewed.
+    same_day_stop = stop_for_today(sent_today=sent_today, bounced_today=bounced_today)
+    if same_day_stop:
+        effective = 0
+
     return LimitDecision(
         configured=configured,
         effective=effective,
@@ -239,7 +290,8 @@ def daily_limit(
         health=health,
         recovering=recovering,
         warmup_limit=warmup_limit,
-        probation=probation,
+        probation=probation and not same_day_stop,
+        same_day_stop=same_day_stop,
     )
 
 

@@ -313,3 +313,66 @@ async def test_a_broken_sender_pauses_rather_than_failing(db_session, sendable) 
 
     assert provider.delivered_count == 0
     assert [r.outcome for r in results] == ["blocked"]
+
+
+# ==========================================================================
+# The day that poisons the month
+#
+# Every block this estate has taken came from a single bad afternoon, not from
+# slow decay: outreach@ took five hard bounces in 48 hours, sales@ took three
+# in one day. The thirty-day window is the right length for judging a mailbox
+# and the wrong length for protecting one -- by the time it reacts, the damage
+# is already inside it for a month.
+# ==========================================================================
+def test_two_bounces_in_a_day_stop_the_day() -> None:
+    """Planted violation: remove the breaker and sales@ blocks again.
+
+    Three hard bounces on 27 August took sales@ from 1.94% to 2.91% and cost
+    it thirty days. Stopping at the second would have left it under the
+    ceiling entirely.
+    """
+    decision = daily_limit(50, recent=(H.HEALTHY,), sent_today=20, bounced_today=2)
+
+    assert decision.effective == 0
+    assert decision.same_day_stop
+    assert decision.paused
+
+
+def test_one_bounce_is_noise_and_does_not_stop_anything() -> None:
+    """A single bounce at any volume says nothing about the list, and stopping
+    on it would halt a healthy mailbox most days of the week."""
+    decision = daily_limit(50, recent=(H.HEALTHY,), sent_today=20, bounced_today=1)
+
+    assert decision.effective > 0
+    assert not decision.same_day_stop
+
+
+def test_the_breaker_uses_the_same_ceiling_as_the_thirty_day_window() -> None:
+    """Two thresholds for one question drift apart. At high volume two bounces
+    is under the ceiling and must not stop the day."""
+    decision = daily_limit(500, recent=(H.HEALTHY,), sent_today=400, bounced_today=2)
+
+    assert not decision.same_day_stop, "2 in 400 is 0.5%, well under the 2% ceiling"
+    assert decision.effective > 0
+
+
+def test_it_overrides_probation() -> None:
+    """A blocked mailbox earning its way back on five a day, that starts
+    bouncing today, is not recovering. Handing it the five anyway is how a
+    thirty-day block gets renewed the moment it lapses."""
+    decision = daily_limit(
+        50, recent=(H.BLOCKED,), days_since_bounce=30, sent_today=3, bounced_today=2
+    )
+
+    assert decision.effective == 0
+    assert decision.same_day_stop
+    assert not decision.probation, "must not read as recovering while it is bouncing"
+
+
+def test_a_clean_day_is_unaffected() -> None:
+    """The control. Nothing about this may change a mailbox that is fine."""
+    plain = daily_limit(50, recent=(H.HEALTHY,))
+    today = daily_limit(50, recent=(H.HEALTHY,), sent_today=30, bounced_today=0)
+
+    assert plain.effective == today.effective
+    assert not today.same_day_stop

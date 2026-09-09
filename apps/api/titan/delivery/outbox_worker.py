@@ -1084,12 +1084,51 @@ class OutboxWorker:
             None if last_bounce is None else max(0, (now - last_bounce).days)
         )
 
+        # Today's own numbers, for the same-day breaker. The thirty-day window
+        # above judges the mailbox; this protects it. Every block this estate
+        # has taken was one bad afternoon that the window then carried for a
+        # month, so the day has to be able to stop itself.
+        today_row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT
+                      count(*) FILTER (WHERE sent_at >= :midnight) AS sent_today,
+                      count(*) FILTER (
+                        WHERE bounced_at >= :midnight
+                          AND bounced_at IS NOT NULL
+                          AND bounce_kind IS DISTINCT FROM 'soft'
+                      ) AS bounced_today
+                    FROM messages
+                     WHERE workspace_id = :workspace
+                       AND sender_identity_id = :sender
+                    """
+                ),
+                {
+                    "workspace": row.workspace_id,
+                    "sender": row.sender_identity_id,
+                    "midnight": now.replace(hour=0, minute=0, second=0, microsecond=0),
+                },
+            )
+        ).one()
+
         decision = adaptive_limits.daily_limit(
             sender.daily_send_limit,
             recent=(status, *history),
             warmup_limit=warmup_limit,
             days_since_bounce=days_since_bounce,
+            sent_today=int(today_row.sent_today or 0),
+            bounced_today=int(today_row.bounced_today or 0),
         )
+        if decision.same_day_stop:
+            logger.warning(
+                "mailbox stopped for the day by its own bounces",
+                extra={
+                    "sender": str(sender.id),
+                    "sent_today": int(today_row.sent_today or 0),
+                    "bounced_today": int(today_row.bounced_today or 0),
+                },
+            )
         if decision.reduced:
             logger.info(
                 "sender daily limit adapted",
