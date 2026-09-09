@@ -288,6 +288,7 @@
         <li><a href="#log-07">Work log &mdash; 7 September: four silent days</a></li>
         <li><a href="#w25">W25 &mdash; the schedule watchdog</a></li>
         <li><a href="#today">The dashboard answers &ldquo;is it sending?&rdquo;</a></li>
+        <li><a href="#review">Full platform review &mdash; 9 September</a></li>
         <li><a href="#expert">Two hard truths</a></li>
         <li><a href="#decisions">What I need from you</a></li>
       </ol>
@@ -1677,7 +1678,7 @@
             <thead><tr><th>Piece</th><th>What it does</th><th>Why it is separate</th></tr></thead>
             <tbody>
               <tr><td><code>schedule_health.assess</code></td><td>Given one schedule's paused flag, cron and predicted firing times, says wedged or healthy</td><td>Pure &mdash; no Temporal, no database, no clock of its own. The two dangerous cases become testable without a server</td></tr>
-              <tr><td><code>heal_wedged_schedules</code></td><td>Reads the seven schedules this workspace owns, reinstalls the stopped ones</td><td>Repairs through the existing installer, which updates in place and never resumes a paused schedule</td></tr>
+              <tr><td><code>heal_wedged_schedules</code></td><td>Reads the schedules this workspace owns, reinstalls the stopped ones &mdash; and, since 8 September, <strong>deletes and recreates one that will not restart in place</strong></td><td>The in-place update revived housekeeping once and did nothing on three later occasions. The counters say why: the scheduler is not frozen but running ~40 minutes behind, marking each slot missed as it crawls past. Rewriting the spec does not move that position; recreation resets it. The cheap repair is still tried first and read back before this is considered</td></tr>
               <tr><td><code>SupervisorWorkflow</code></td><td>Runs that pass every fifteen minutes, for ever</td><td>The part that has to survive the failure it repairs</td></tr>
             </tbody>
           </table>
@@ -1685,7 +1686,8 @@
 
         <div class="verdict" style="margin:0 0 22px">
           <span class="label">The detection rule, and the two ways it does damage</span>
-          <p>A wedged schedule is judged on <strong>the furthest firing time it predicts, not the soonest.</strong> One that is merely late has a single occurrence behind it and nine ahead; one whose clock has stopped has every one of them behind. Reading the soonest would call an ordinary three-minute delay a fault and reinstall all seven schedules on every pass, for ever &mdash; churn on working machinery, and how a watchdog becomes the thing that needs watching.</p>
+          <p><strong>Corrected 8 September &mdash; this rule was wrong as shipped, and the wrong half is the half I explained most confidently.</strong> It judged a schedule on the <em>furthest</em> firing time it predicts. That is only true of a schedule stopped for longer than the list spans &mdash; ten hours, for an hourly job &mdash; and the only wedged schedule available to model it on had been frozen a week. Housekeeping stopped again at 14:17 and at 17:03 still had nine of its ten predicted firings in the future, so the watchdog called it healthy through <strong>thirteen consecutive cycles and healed nothing.</strong></p>
+          <p>It now reads the <strong>soonest</strong> prediction. A schedule that is running has its next firing ahead of it; one whose clock has stopped watches that firing recede. The concern that made me choose the furthest &mdash; that a three-minute delay would look like a fault &mdash; is answered by the tolerance rather than by which end of the list is read.</p>
           <p>The tolerance comes from each job's own cron rather than a number typed here, reusing <code>catchup_for</code>: hourly jobs get 30 minutes, the daily ramp gets 23 hours. Judging the 06:10 ramp on the hourly tolerance would call it wedged every morning the laptop was shut, and reinstalling it would not have been the repair.</p>
           <p><strong>A paused schedule is never touched.</strong> Pausing stops the clock &mdash; that is what pausing means &mdash; so a paused schedule presents exactly like a wedged one, and it is the single most likely thing to be under a watchdog's nose five minutes after somebody hit pause during an incident. Guarded twice: in the predicate, and end to end.</p>
         </div>
@@ -1736,6 +1738,73 @@
         </div>
 
         <p>Sixteen tests hold it, most of them pinning ways a &ldquo;sent today&rdquo; number goes comfortingly wrong: capacity that pools across mailboxes when it does not, a mailbox stopped by its own DNS reported as merely quiet, yesterday's sends leaking into today, a soft bounce counted against the day, and a rate of exactly 0% on a morning when nothing has been sent at all.</p>
+      </section>
+
+      <!-- =========================== full platform review -->
+      <section id="review">
+        <h2><span class="num">21</span>Full platform review &mdash; 9 September</h2>
+
+        <p class="standfirst">Six areas reviewed against the running code and the production database. <strong>Three were already working and I had assumed otherwise; two were genuinely broken and are now fixed; one is missing and I did not build it.</strong> Seven commits pushed, 3,460 tests passing.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Area</th><th>Verdict</th><th>Evidence</th></tr></thead>
+            <tbody>
+              <tr><td><strong>1. Leads active, with a real problem</strong></td><td>HOLDS</td><td>4,817 leads, every organisation <span class="mono">OPERATIONAL</span>. 3,912 still carry a pitchable finding once the false broken-link type is removed &mdash; 280 lost, 93% survive</td></tr>
+              <tr><td><strong>2. Address verifier</strong></td><td>HARDENED, NOT BOUNCE-PROOF</td><td>Verification is now compulsory before any send. But 72% of probes return <span class="mono">unknown</span>, because Google and Microsoft answer yes to every address</td></tr>
+              <tr><td><strong>3. Mails with attachment</strong></td><td>ALREADY WORKING</td><td>Proved live: <span class="mono">one-pager.pdf</span>, 105,206 bytes, attached at 100% sampling, with the note added to the body</td></tr>
+              <tr><td><strong>4. Dashboard always current</strong></td><td>WORKING</td><td>Thirty-second refresh; today reads 25 of 37. One actively misleading label fixed today</td></tr>
+              <tr><td><strong>5. Sending, replies, follow-ups, retention</strong></td><td>THREE OF FOUR</td><td>Sending, replies and follow-ups all live &mdash; 339 leads have had a follow-up, four deep at most. <strong>Retention is not implemented</strong></td></tr>
+              <tr><td><strong>6. Nightly activity report</strong></td><td>FIXED TODAY</td><td>Was structurally unreachable: eleven runs, nothing sent, no error anywhere. Yesterday's 78 sends would now be mailed</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>The two that were genuinely broken</h3>
+
+        <p><strong>The daily report could never be sent.</strong> It required either the clock past 23:00 or the day's quota fully spent. This runs on a laptop that is closed at night, so the hour was never reached while anything was awake, and the quota never spent because nobody was up to spend it. Eleven runs, nothing sent, and <strong>no error raised anywhere</strong> &mdash; the report was not late, it was unreachable. A day that is simply in the past now counts as over, and the first run of the morning posts yesterday's figures.</p>
+
+        <p><strong>Nothing refused an address nobody had ever checked.</strong> The verification <em>status</em> was always gated; the earlier question of whether anyone had asked at all was not. Five of the eleven hard bounces &mdash; every one of <code>outreach@</code>'s, which cost that mailbox a month of capacity &mdash; went to addresses with no verification record of any kind. Measured before shipping: 174 of 2,490 active channels have none, and <strong>not one of them sits behind a queued draft</strong>, so this blocks nothing that was about to go out.</p>
+
+        <div class="note">
+          <h4>Four things I got wrong during this review, and corrected</h4>
+          <p><strong>&ldquo;Five addresses are queued to bounce.&rdquo;</strong> I recommended suppressing every sibling address at a domain that had already bounced. They turned out to be the <em>correct</em> addresses &mdash; <code>info@</code> at five domains where the departmental or personal mailbox had died. All five domains resolve MX today. Suppressing them would have deleted five good leads and taught the system the opposite of the truth.</p>
+          <p><strong>&ldquo;A risky address was sent anyway.&rdquo;</strong> <code>katie@reading-smiles.co.uk</code> was <span class="mono">published_first_party</span> when it went out, and only downgraded to risky four days later, after the bounce. The gate worked.</p>
+          <p><strong>&ldquo;Zero attachments have ever been sent.&rdquo;</strong> I queried the outbox payload and the draft body. The attachment is added at send time to the outbound message, which is neither. It has been working the whole time.</p>
+          <p><strong>A verification-freshness gate.</strong> I nearly built one. Of the eleven bounces, five had no verification at all, three were verified <em>the same day</em> they were sent, and the oldest was sixteen days &mdash; a freshness limit at any sane value would have prevented none of them.</p>
+        </div>
+
+        <h3>Why bounces cannot be eliminated</h3>
+
+        <p>The ask was a rigid, permanent solution. There is not one, and the reason is structural rather than a gap in the build.</p>
+
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Operator fronting the address</th><th>Probes</th><th>Answer obtained</th></tr></thead>
+            <tbody>
+              <tr><td>google.com</td><td class="mono">319</td><td>unknown</td></tr>
+              <tr><td>outlook.com and protection.outlook.com</td><td class="mono">478</td><td>unknown</td></tr>
+              <tr><td>mimecast, proofpoint, barracuda, zoho</td><td class="mono">74</td><td>unknown</td></tr>
+              <tr><td>Everything else</td><td class="mono">259</td><td><strong>conclusive</strong> &mdash; 206 invalid caught, 38 verified, 15 catch-all</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p>Google and Microsoft <strong>accept every recipient at RCPT</strong> as an anti-harvesting measure. This is not our IP, our code, or our reputation &mdash; there is nothing to get past, because the server says yes to any address you name. Commercial verifiers hit exactly the same wall and answer from historical bounce data gathered across billions of sends. That is a data-scale problem, and this estate has sent 469. <strong>The buildable part is built.</strong></p>
+
+        <p>So the damage is contained instead. Every block this estate has taken came from a single bad afternoon &mdash; <code>outreach@</code> took five hard bounces in 48 hours, <code>sales@</code> three in one day &mdash; and each then served a month while the thirty-day window rolled slowly past it. Two hard bounces in a day now stop that mailbox until midnight. Applied to history, <code>sales@</code> would have stopped at its second and stayed at 1.94%: <strong>under the ceiling, never blocked.</strong></p>
+
+        <h3>The gap I did not close</h3>
+        <p><strong>Data retention is not implemented.</strong> The <span class="mono">body_retained_until</span> column exists on every message and nothing has ever set it &mdash; 0 of 807. Nothing expires message bodies, contact records, or crawl evidence. For a system holding scraped contact details of UK businesses that is a live GDPR exposure rather than a tidiness question, and it is the one item on the list I did not build today.</p>
+
+        <h3>When 250 a day</h3>
+        <p>250 is exactly the configured ceiling &mdash; five mailboxes at fifty each. Two clocks run independently. The twenty-day warm-up ramp finishes for the youngest mailboxes on <strong>20 September</strong>; the blocks clear separately as bounces age out of the rolling thirty-day window, <code>outreach@</code> around the 16th and <code>sales@</code> around the 27th. <strong>That last one sets the date: 27 September 2026</strong> &mdash; assuming no new hard bounces, and a machine that stays on. Yesterday's 21&frac12;-hour outage cost a full day of ramp.</p>
+        <p>One caveat is worth more than the date. 250 sends a day needs 250 sendable drafts a day, and there are currently <strong>three</strong>. Lead supply, not mailbox capacity, is what binds first.</p>
+
+        <div class="note">
+          <h4>The number that matters more than any of the above</h4>
+          <p><strong>469 messages sent. Zero human replies.</strong> Five auto-acknowledgements prove delivery works; nobody has written back. 156 of those messages told a business its booking page was broken when it was not &mdash; a claim the recipient could disprove in a single click. The detectors are corrected and the false drafts are held, but the reply rate is the measurement that decides whether any of the rest of this matters.</p>
+        </div>
       </section>
 
       <!-- =========================== 7 -->
@@ -1836,9 +1905,9 @@
       <footer class="colophon">
         TITAN-OS &middot; AUTONOMY PROGRAMME<br>
         Diagnosed live against the running stack &middot; 12 containers up<br>
-        All figures read from the production database and worker logs &middot; last updated 7 September 2026<br>
-        Score gate at 55 &middot; 5 mailboxes live, 3 of them healthy &middot; 2,031 reachable leads against a 1,250 reserve<br>
-        Four days without a send, root-caused and fixed &middot; 48 sent, 18 research runs, one soft bounce &middot; W25 shipped
+        All figures read from the production database and worker logs &middot; last updated 9 September 2026<br>
+        Full platform review &middot; 7 commits pushed &middot; 3,460 tests passing &middot; 5 mailboxes, 2 healthy, 2 recovering on probation<br>
+        29,797 invented findings removed &middot; 343 drafts held &middot; 469 sent, 0 human replies &middot; retention still unbuilt
       </footer>
 
     </main>
