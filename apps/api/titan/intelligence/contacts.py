@@ -17,6 +17,8 @@ Which is why provenance is stored per address rather than inferred from shape.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import re
 from dataclasses import dataclass
 
@@ -432,6 +434,40 @@ def is_never_contact(email: str) -> bool:
 
 def is_role_address(email: str) -> bool:
     return normalize_email(email).partition("@")[0] in ROLE_LOCAL_PARTS
+
+
+def preferred_replacement(current: str, alternatives: Sequence[str]) -> str | None:
+    """A generic role address that should be written to instead of ``current``.
+
+    :func:`rank_contacts` already prefers role addresses -- but it runs once,
+    at discovery, and the lead keeps whatever address was known that day. A
+    better one found by a later crawl is never reconsidered, and the lead goes
+    on being written to at the worse address for as long as it exists.
+
+    That is not hypothetical. ``info@parklanedentalcare.ca`` was stored on 28
+    August; on 3 September the estate wrote to ``dr.ladha@parklanedentalcare.ca``
+    -- the dentist's own name -- and it hard-bounced, taking that mailbox to
+    exactly the 2% ceiling and blocking it. The right address had been sitting
+    against the same lead for six days.
+
+    Only ever an upgrade into the role band, never a swap within it. A role
+    address is already the preferred choice and reshuffling between equals
+    would make the recipient depend on crawl order. Deterministic for the same
+    reason :func:`contact_preference` is: a retry must write to the same person.
+
+    Callers pass only addresses that are active and permitted to send, because
+    this ranks preference and knows nothing about eligibility.
+    """
+    if not current or is_role_address(current):
+        return None
+    better = sorted(
+        {
+            normalize_email(a)
+            for a in alternatives
+            if a and is_role_address(a) and normalize_email(a) != normalize_email(current)
+        }
+    )
+    return better[0] if better else None
 
 
 def looks_like_a_guess(email: str) -> bool:

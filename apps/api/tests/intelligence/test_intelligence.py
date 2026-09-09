@@ -1271,3 +1271,56 @@ def test_a_real_absence_across_enough_pages_is_still_reported() -> None:
 
     assert "no_booking_or_enquiry_path" in fired
     assert "no_visible_phone_number" in fired
+
+
+# ==========================================================================
+# The better address that arrived later
+#
+# rank_contacts prefers role addresses, but it runs once at discovery. A lead
+# keeps whatever was known that day, and a better address found by a later
+# crawl is never reconsidered.
+#
+# info@parklanedentalcare.ca was stored on 28 August. On 3 September the estate
+# wrote to dr.ladha@parklanedentalcare.ca -- the dentist's own name -- and it
+# hard-bounced, taking that mailbox to exactly the 2% ceiling and blocking it.
+# ==========================================================================
+def test_a_role_address_replaces_a_personal_one() -> None:
+    """Planted violation: keep the address chosen at discovery, and the send
+    that blocked arslan@ happens again."""
+    assert (
+        contacts_mod.preferred_replacement(
+            "dr.ladha@parklanedentalcare.ca", ["info@parklanedentalcare.ca"]
+        )
+        == "info@parklanedentalcare.ca"
+    )
+
+
+def test_a_role_address_is_never_swapped_for_another() -> None:
+    """A role address is already the preferred choice. Reshuffling between
+    equals would make the recipient depend on which crawl ran first."""
+    assert (
+        contacts_mod.preferred_replacement("info@x.test", ["hello@x.test", "contact@x.test"])
+        is None
+    )
+
+
+def test_nothing_is_offered_when_no_alternative_is_better() -> None:
+    """Another personal address is not an upgrade, and swapping to one would
+    be churn dressed as a fix."""
+    assert (
+        contacts_mod.preferred_replacement("dr.ladha@x.test", ["j.smith@x.test", "sarah@x.test"])
+        is None
+    )
+
+
+def test_the_choice_is_deterministic() -> None:
+    """A retry must write to the same person. Crawl order must not decide who
+    receives the message."""
+    # A genuinely non-role address. `bookings@` would not do: it is in
+    # ROLE_LOCAL_PARTS, so it is already in the preferred band and correctly
+    # never swapped -- which is what the first version of this test tripped on.
+    alts = ["hello@x.test", "contact@x.test", "info@x.test"]
+    first = contacts_mod.preferred_replacement("dr.ladha@x.test", alts)
+
+    assert first == contacts_mod.preferred_replacement("dr.ladha@x.test", list(reversed(alts)))
+    assert first == "contact@x.test", "lowest sorted role address, not crawl order"

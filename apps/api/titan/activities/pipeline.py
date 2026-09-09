@@ -26,6 +26,7 @@ from temporalio import activity
 from titan.config import get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
+    verification_permits_sending,
     ContactSource,
     DraftStatus,
     Industry,
@@ -69,6 +70,7 @@ from titan.intelligence.contacts import (
     DiscoveredContact,
     check_contact_eligibility,
     extract_contacts_from_pages,
+    preferred_replacement,
     rank_contacts,
 )
 from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
@@ -1558,6 +1560,13 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
     )
 
     async with workspace_unit_of_work(workspace_id) as session:
+        # The address was chosen when this lead was researched, and a later
+        # crawl may since have found a better one. Re-asked here rather than
+        # trusted, because ranking runs once and the lead keeps whatever was
+        # known that day -- info@parklanedentalcare.ca had been stored for six
+        # days when the estate wrote to the dentist by name and hard-bounced.
+        channel_id = await _best_channel_for(session, channel_id)
+
         draft = MessageDraft(
             workspace_id=workspace_id,
             lead_id=uuid.UUID(request.lead_id),
@@ -1817,3 +1826,53 @@ __all__ = [
     "resolve_contact",
     "score_lead",
 ]
+
+
+async def _best_channel_for(session: Any, channel_id: uuid.UUID) -> uuid.UUID:
+    """The chosen channel, or a generic role address at the same contact.
+
+    Only ever an upgrade out of a personal or departmental local part and into
+    the role band; :func:`preferred_replacement` refuses everything else. The
+    alternatives offered to it are already narrowed to addresses that are
+    active and permitted to send, so a "better" address is never one the gate
+    would refuse.
+
+    Falls back to the original channel on anything unexpected. A better address
+    is an improvement, not a requirement, and a lookup that fails must not stop
+    the draft being written.
+    """
+    try:
+        current = await session.get(ContactChannel, channel_id)
+        if current is None:
+            return channel_id
+        rows = (
+            (
+                await session.execute(
+                    select(ContactChannel).where(
+                        ContactChannel.contact_id == current.contact_id,
+                        ContactChannel.is_active.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        eligible = {
+            row.normalized_value: row.id
+            for row in rows
+            if verification_permits_sending(row.verification_status, row.source)
+        }
+        better = preferred_replacement(current.normalized_value, list(eligible))
+        if better is None:
+            return channel_id
+        logger.info(
+            "using a better contact address than the one chosen at research",
+            extra={"from": current.normalized_value, "to": better},
+        )
+        return eligible[better]
+    except Exception:
+        logger.warning(
+            "could not re-rank contact channels; keeping the researched address",
+            exc_info=True,
+        )
+        return channel_id
