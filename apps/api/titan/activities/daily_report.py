@@ -76,7 +76,22 @@ async def send_daily_report_for(
         report = await day_report.build(session, workspace_id, now=now)
 
     if not day_is_over(report, now=now):
-        return DailyReportResult(False, "the day is not over yet")
+        # Today is still running, so look back one day before giving up.
+        #
+        # Without this the report is unreachable on a machine that sleeps. The
+        # estate runs on a laptop: the day ends at 23:00 with nothing awake to
+        # notice, the quota never spends because nobody is up to spend it, and
+        # the next morning this function is asked about a fresh day that is
+        # also not over. Eleven runs, nothing sent, and no error anywhere --
+        # the operator asked twice why no mail had arrived.
+        #
+        # One day back and no further. A week of unsent reports arriving at
+        # once is noise, and the figures for last Tuesday change nothing now.
+        yesterday = now - dt.timedelta(days=1)
+        async with workspace_session(workspace_id) as session:
+            report = await day_report.build(session, workspace_id, now=yesterday)
+        if not day_is_over(report, now=now):
+            return DailyReportResult(False, "the day is not over yet")
 
     async with workspace_unit_of_work(workspace_id) as session:
         claim = await record_notification(

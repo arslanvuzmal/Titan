@@ -59,6 +59,7 @@ from titan.db.models import (
     CampaignPolicy,
     Contact,
     ContactChannel,
+    ContactVerification,
     FindingEvidence,
     Lead,
     Message,
@@ -712,6 +713,7 @@ class OutboxWorker:
             campaign_region=campaign.region,
             evidence_count=_evidence_count(draft),
             evidence_captured_at=await _newest_evidence_captured_at(session, draft),
+            contact_ever_verified=await _has_been_verified(session, channel.id),
             validation_passed=(
                 _still_passes_todays_rules(draft)
                 and _payload_is_the_gated_draft(row, draft)
@@ -1934,6 +1936,38 @@ class OutboxWorker:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=delay)
         logger.info("outbox worker stopped", extra={"owner": self._owner})
+
+
+async def _has_been_verified(session: AsyncSession, channel_id: uuid.UUID) -> bool | None:
+    """Whether any verification has ever been recorded for this address.
+
+    Not how recent, and not what it concluded -- only that somebody asked. The
+    conclusion is already governed by `contact_verification`; this is the
+    weaker, earlier question of whether the address was ever put in front of
+    the risk engine at all.
+
+    That gap was real. Five of the eleven hard bounces this estate has taken --
+    every one of outreach@'s, which cost it a month -- went to addresses with no
+    verification row of any kind, sent in early August before the check existed.
+    Nothing refused them, because nothing was asking.
+
+    Returns None on an unreadable lookup, which denies nothing: a bug here must
+    not stop every send, and the statuses above still govern what may go out.
+    """
+    try:
+        found = await session.scalar(
+            select(ContactVerification.id)
+            .where(ContactVerification.channel_id == channel_id)
+            .limit(1)
+        )
+        return found is not None
+    except Exception:
+        logger.warning(
+            "could not read verification history; not applying the check",
+            extra={"channel_id": str(channel_id)},
+            exc_info=True,
+        )
+        return None
 
 
 def _evidence_ids(draft: MessageDraft) -> set[str]:

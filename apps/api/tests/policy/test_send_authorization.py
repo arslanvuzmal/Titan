@@ -692,3 +692,38 @@ def test_the_reason_names_the_age_and_the_limit() -> None:
 
     assert "45 days" in str(reason)
     assert str(MAX_EVIDENCE_AGE.days) in str(reason)
+
+
+# ==========================================================================
+# An address nobody ever checked
+#
+# Five of the eleven hard bounces this estate has taken -- every one of
+# outreach@'s, which cost that mailbox a month of capacity -- went to addresses
+# with no verification row of any kind. They were sent in early August, before
+# the check existed. Nothing refused them because nothing was asking.
+# ==========================================================================
+def test_an_address_never_checked_is_refused() -> None:
+    """Planted violation: drop the check and the sends that blocked outreach@
+    are permitted again."""
+    unchecked = sendable_context(contact_ever_verified=False)
+
+    decision = evaluate_send(unchecked)
+
+    assert not decision.allowed
+    assert DenyCode.CONTACT_NEVER_CHECKED in {d.code for d in decision.denials}
+
+
+def test_a_checked_address_still_sends() -> None:
+    """The check is that somebody asked, not what they concluded. What the
+    answer was is already governed by contact_verification."""
+    assert evaluate_send(sendable_context(contact_ever_verified=True)).allowed
+
+
+def test_an_unreadable_history_denies_nothing() -> None:
+    """Fails open on None, like every other optional field here. A bug in the
+    lookup must not stop the estate, and the verification *status* checks above
+    still govern what may go out."""
+    decision = evaluate_send(sendable_context(contact_ever_verified=None))
+
+    assert decision.allowed
+    assert DenyCode.CONTACT_NEVER_CHECKED not in {d.code for d in decision.denials}

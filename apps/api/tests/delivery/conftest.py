@@ -25,6 +25,7 @@ from titan.db.enums import (
     WorkspaceRole,
 )
 from titan.db.models import (
+    ContactVerification,
     Campaign,
     CampaignPolicy,
     Contact,
@@ -192,6 +193,23 @@ async def build_sendable(
         discovered_at=NOW,
         verification_status=VerificationStatus.PUBLISHED_FIRST_PARTY,
         confidence=0.9,
+    )
+    session.add(channel)
+    await session.flush()
+    # The record of having asked. The send gate refuses an address with no
+    # verification history at all -- five of this estate's eleven hard bounces
+    # went to addresses nobody had ever checked -- so a fixture that omits it
+    # is building a lead the gate is right to refuse, not a sendable one.
+    session.add(
+        ContactVerification(
+            workspace_id=workspace_id,
+            channel_id=channel.id,
+            provider="fixture",
+            result=VerificationStatus.PUBLISHED_FIRST_PARTY,
+            mx_present=True,
+            detail={"check": "fixture"},
+            verified_at=NOW,
+        )
     )
     lead = Lead(
         workspace_id=workspace_id,

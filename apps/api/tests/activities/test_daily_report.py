@@ -122,8 +122,15 @@ async def test_a_day_that_sent_nothing_still_produces_a_mail(db_session, workspa
     assert "nothing" in subject.lower()
 
 
-async def test_nothing_is_sent_before_the_day_is_over(db_session, workspace):
-    """Planted violation: ignore day_is_over and mail on every pass."""
+async def test_today_is_never_reported_before_it_is_over(db_session, workspace):
+    """Planted violation: ignore day_is_over and mail today's half-finished
+    figures on every pass.
+
+    Stated as "which day was reported" rather than "was anything sent",
+    because since the catch-up exists a run at noon legitimately posts
+    *yesterday*. Asserting silence would now pass for the wrong reason and stop
+    saying anything about today's gate, which is what this is named for.
+    """
     await build_sendable(db_session, workspace)
     mailer = FakeMailer()
 
@@ -131,8 +138,28 @@ async def test_nothing_is_sent_before_the_day_is_over(db_session, workspace):
         workspace_id=workspace, now=NOON, mailer=mailer, pinger=FakePinger()
     )
 
-    assert mailer.sent == []
-    assert await reports_filed(db_session, workspace) == 0
+    for _to, subject, _body in mailer.sent:
+        assert NOON.date().isoformat() not in subject, "reported a day still running"
+
+
+async def test_yesterday_is_posted_on_the_first_run_of_the_new_day(db_session, workspace):
+    """Planted violation: only ever consider today, and the report becomes
+    unreachable on a machine that sleeps.
+
+    The estate runs on a laptop that is closed at night. The day ends at 23:00
+    with nothing awake to notice and the quota unspent because nobody was up to
+    spend it, so eleven runs sent nothing and no error was raised anywhere.
+    """
+    await build_sendable(db_session, workspace)
+    mailer = FakeMailer()
+
+    await send_daily_report_for(
+        workspace_id=workspace, now=NOON, mailer=mailer, pinger=FakePinger()
+    )
+
+    assert len(mailer.sent) == 1
+    _to, subject, _body = mailer.sent[0]
+    assert (NOON - dt.timedelta(days=1)).date().isoformat() in subject
 
 
 async def test_a_failed_send_does_not_burn_the_day(db_session, workspace):

@@ -38,10 +38,24 @@ LAST_HOUR = 23
 def day_is_over(report: DayReport, *, now: dt.datetime) -> bool:
     """Whether there is nothing more this day can send.
 
-    Two ways to be finished, and both are needed. Every mailbox having spent
-    its allowance is the operator's own phrasing -- "after sending all quota".
-    The clock is the backstop for the day that never gets there.
+    Three ways to be finished. Every mailbox having spent its allowance is the
+    operator's own phrasing -- "after sending all quota". The clock is the
+    backstop for the day that never gets there.
+
+    The third is the one that made this work at all. The first two both assume
+    the estate is still running when the day ends, and it is not: this runs on
+    a laptop that is closed at night. On 8 September the whole stack was off
+    from 15:15 until 12:43 the next day, and in eleven runs this function had
+    never once returned True -- the hour was never >= 23 while anything was
+    watching, and the quota never spent because there was nobody up to spend
+    it. The report was never late. It was structurally unreachable.
+
+    So a day that is simply *in the past* is over. That is true whether or not
+    anybody was awake to see it end, and it is what lets the morning's first
+    run post yesterday's figures.
     """
+    if report.window_date < now.date():
+        return True
     if now.hour >= LAST_HOUR:
         return True
     # `all()` over an empty pool is True, which would call a workspace with no

@@ -297,3 +297,42 @@ def test_probation_defaults_off() -> None:
     to a type that is already being constructed elsewhere breaks the callers
     that have not been updated."""
     assert mailbox().probation is False
+
+
+# ==========================================================================
+# The report that could never be sent
+#
+# `day_is_over` had two exits and both assumed the estate was still running
+# when the day ended. It is not: this runs on a laptop that gets closed. On 8
+# September the whole stack was off from 15:15 until 12:43 the next day, and
+# across eleven runs the report had never once been sent -- the hour was never
+# >= 23 while anything was awake, and the quota never spent because nobody was
+# up to spend it. Not late. Unreachable.
+# ==========================================================================
+def test_a_day_in_the_past_is_over() -> None:
+    """Planted violation: judge only the clock and today's quota, and the
+    report goes back to never being sent on a machine that sleeps."""
+    yesterday = report(window_date=dt.date(2026, 9, 6), sent=12)
+
+    assert day_is_over(yesterday, now=NOON)
+
+
+def test_today_is_still_not_over_at_noon() -> None:
+    """The guard that makes the above safe. Yesterday being reportable must not
+    make today reportable -- a report at noon would state a half-finished day
+    as if it were the total."""
+    today = report(window_date=NOON.date(), sent=12)
+
+    assert not day_is_over(today, now=NOON)
+
+
+def test_a_past_day_is_over_even_with_allowance_left() -> None:
+    """The quota is irrelevant once the day has ended. Unspent allowance on a
+    day that is gone is exactly what the report exists to tell somebody."""
+    unfinished = report(
+        window_date=dt.date(2026, 9, 6),
+        sent=3,
+        mailboxes=(mailbox(sent=3, allowed=25),),
+    )
+
+    assert day_is_over(unfinished, now=NOON)

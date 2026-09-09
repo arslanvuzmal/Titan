@@ -66,6 +66,7 @@ class DenyCode(StrEnum):
     SUPPRESSED = "recipient_suppressed"
     NO_EVIDENCE = "no_evidence_backed_claims"
     EVIDENCE_STALE = "evidence_too_old_to_claim"
+    CONTACT_NEVER_CHECKED = "contact_address_was_never_checked"
     VALIDATION_FAILED = "message_validation_failed"
     APPROVAL_MISSING = "approval_missing"
     APPROVAL_STALE = "approval_does_not_match_draft_version"
@@ -230,6 +231,14 @@ class SendContext:
     recipient_country: str | None = None
     #: Their state or province, used when the calendar recognises it.
     recipient_admin_area: str | None = None
+    #: Whether this address has ever been through a verification check.
+    #:
+    #: None means the caller could not determine it and denies nothing, the
+    #: same stance as every other optional field here. False is a positive
+    #: statement that no check exists, and that is refused: five of the eleven
+    #: hard bounces this estate has taken went to addresses with no
+    #: verification record at all.
+    contact_ever_verified: bool | None = None
     #: When the newest evidence behind this message's claims was captured.
     #:
     #: None means the caller could not determine it, and denies nothing -- the
@@ -441,6 +450,13 @@ def evaluate_send(ctx: SendContext) -> Decision:
                     f"{max(1, ctx.min_evidence_per_message)}",
                 )
             )
+    if ctx.contact_ever_verified is False:
+        denials.append(
+            Denial(
+                DenyCode.CONTACT_NEVER_CHECKED,
+                "no verification has ever been recorded for this address",
+            )
+        )
     if ctx.evidence_captured_at is not None:
         age = ctx.now - ctx.evidence_captured_at
         if age > MAX_EVIDENCE_AGE:
