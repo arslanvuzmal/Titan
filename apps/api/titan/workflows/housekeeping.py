@@ -28,6 +28,8 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from titan.workflows.types import (
+        EraseExpiredDataInput,
+        EraseExpiredDataResult,
         CheckVitalsInput,
         CheckVitalsResult,
         ReleaseHeldInput,
@@ -143,6 +145,35 @@ class HousekeepingWorkflow:
             )
         except Exception as error:
             workflow.logger.warning("address re-check skipped: %s", error)
+
+        # Retention, after both repairs and before the vitals. Last of the
+        # three because it is the only one that destroys anything: if a pass is
+        # going to be cut short by a worker restart, the sweep and the re-check
+        # are the ones worth having run.
+        #
+        # Swallowed like the others. A retention pass that cannot reach the
+        # database must not be recorded as a housekeeping failure -- the drafts
+        # it swept are still swept -- and the erasure is idempotent, so the
+        # next hour simply does it.
+        try:
+            erased: EraseExpiredDataResult = await workflow.execute_activity(
+                "erase_expired_data",
+                EraseExpiredDataInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                retry_policy=RETRY,
+                result_type=EraseExpiredDataResult,
+            )
+            if erased.leads_examined:
+                workflow.logger.info(
+                    "erased content for %s lead(s) past the retention window: "
+                    "%s draft(s), %s page(s); %s kept because they replied",
+                    erased.leads_examined,
+                    erased.drafts_erased,
+                    erased.pages_erased,
+                    erased.kept_for_reply,
+                )
+        except Exception as error:
+            workflow.logger.warning("retention pass skipped: %s", error)
 
         # Last, and deliberately after both repairs: the vitals should describe
         # the pipeline as it stands once this pass has done what it can, not as

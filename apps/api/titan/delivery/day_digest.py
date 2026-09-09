@@ -103,6 +103,7 @@ def compose(
     *,
     recipients: tuple[tuple[str, str, str], ...],
     bounces: tuple[tuple[str, str, str], ...],
+    alarms: tuple[tuple[str, int, str], ...] = (),
 ) -> tuple[str, str]:
     """The subject and body of the day's mail.
 
@@ -110,6 +111,16 @@ def compose(
     is (address, kind, reason). Both are passed in rather than queried here so
     this stays a function of its inputs and the wording can be tested without a
     database.
+
+    ``alarms`` is (kind, count, newest title) for everything still open in the
+    operator queue, and it is the reason this mail is worth sending at all.
+
+    Every failure this estate had on 9 September was already detected and had
+    already filed a notification: the wedged schedule, the blocked mailboxes,
+    the stalled campaigns. 646 of them were sitting unread, and the operator
+    found out about each one by asking. A system that notices everything and
+    tells nobody is not autonomous, it is just well instrumented -- so the
+    day's mail now carries what needs a person, not only what happened.
     """
     date = report.window_date.isoformat()
     if report.sent == 0:
@@ -153,6 +164,14 @@ def compose(
         lines += ["", "WHY THE REST IS WAITING"]
         for held in report.deferrals:
             lines.append(f"  {held.count:>4}  {held.reason}")
+
+    if alarms:
+        # First after the mailboxes, deliberately. This is the section that
+        # exists to be acted on; the sending figures are context for it.
+        total = sum(count for _kind, count, _title in alarms)
+        lines += ["", f"NEEDS YOU ({total})"]
+        for kind, count, newest in alarms:
+            lines.append(f"  {count:>4}  {kind:<22} {newest}")
 
     if bounces:
         lines += ["", "BOUNCES"]

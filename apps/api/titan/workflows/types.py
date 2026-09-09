@@ -254,6 +254,29 @@ class ReopenStaleRunsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class EraseExpiredDataInput:
+    """One pass of the retention erasure."""
+
+    workspace_id: str
+    #: None takes ``retention.DEFAULT_BATCH``. Bounded because this runs beside
+    #: work that matters more in the same hourly pass.
+    batch: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class EraseExpiredDataResult:
+    #: Leads past the window with no reply, and what was emptied for them.
+    leads_examined: int = 0
+    drafts_erased: int = 0
+    pages_erased: int = 0
+    #: Leads deliberately left alone because somebody there wrote back.
+    #: Reported rather than silently skipped: "we erase everyone who ignored
+    #: us" and "we erase everyone" are different policies, and the difference
+    #: belongs in the numbers.
+    kept_for_reply: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class ReverifyContactsInput:
     """One pass of the stored-address re-check."""
 

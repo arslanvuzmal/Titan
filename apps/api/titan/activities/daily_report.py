@@ -109,8 +109,11 @@ async def send_daily_report_for(
     async with workspace_session(workspace_id) as session:
         recipients = await _recipients(session, workspace_id, report.window_date)
         bounces = await _bounces(session, workspace_id, report.window_date)
+        alarms = await _alarms(session, workspace_id)
 
-    subject, body = compose(report, recipients=recipients, bounces=bounces)
+    subject, body = compose(
+        report, recipients=recipients, bounces=bounces, alarms=alarms
+    )
 
     try:
         await mailer(to=_operator_address(), subject=subject, body=body)
@@ -141,6 +144,43 @@ async def send_daily_report_for(
 
 def _operator_address() -> str:
     return get_settings().operator_email or ""
+
+
+async def _alarms(session, workspace_id: uuid.UUID) -> tuple[tuple[str, int, str], ...]:
+    """Everything still open in the operator queue, grouped by kind.
+
+    Grouped rather than listed. 607 of the 646 open on 9 September were the
+    same `campaign_stalled` notice repeating hourly, and a mail that pasted
+    them one per line would be deleted unread -- which is exactly how the queue
+    got to 646 in the first place.
+
+    Ordered by count so the loudest is first, with the newest title as the
+    example, because a count alone says something is wrong and the title says
+    what.
+
+    Failures here are swallowed by the caller's own try/except around the send:
+    a report that lists the day's sends and omits the alarms is worth far more
+    than no report, and this section must never be the reason the mail does not
+    go out.
+    """
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT kind, count(*) AS n,
+                       (ARRAY_AGG(title ORDER BY created_at DESC))[1] AS newest
+                  FROM tasks
+                 WHERE workspace_id = :ws
+                   AND status = 'open'
+                 GROUP BY kind
+                 ORDER BY n DESC
+                 LIMIT 12
+                """
+            ),
+            {"ws": workspace_id},
+        )
+    ).all()
+    return tuple((str(k), int(n), str(t or "")[:80]) for k, n, t in rows)
 
 
 async def _recipients(
