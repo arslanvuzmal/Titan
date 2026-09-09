@@ -59,7 +59,7 @@ from titan.workflows.verification import SenderVerificationWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
 
-RESEARCH_QUEUE = "titan-research"
+from titan.workflows.queues import MAINTENANCE_QUEUE, RESEARCH_QUEUE  # noqa: E402
 
 
 async def connect() -> Client:
@@ -137,6 +137,35 @@ async def main() -> None:
         graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),
     )
 
+    # A second worker, same process, for the repair passes.
+    #
+    # The activities are identical -- they are simply reachable on a queue the
+    # crawl backlog cannot occupy. 281 research workflows started at once on 9
+    # September left the hourly housekeeping pass queued behind them and it did
+    # not run; the pass that repairs a saturated pipeline has to be able to run
+    # while the pipeline is saturated, which is close to the only time it
+    # matters.
+    #
+    # Concurrency of two, deliberately low. This is bounded database work and a
+    # handful of address re-checks; the point is a lane that is always open,
+    # not a second pool of capacity competing with the crawler for the same
+    # machine.
+    maintenance = Worker(
+        client,
+        task_queue=MAINTENANCE_QUEUE,
+        activities=[
+            *stranded_activities.ALL_STRANDED_ACTIVITIES,
+            stale_run_activities.reopen_stale_research_runs,
+            trickle_activities.release_held_contacts,
+            *reverification_activities.ALL_REVERIFICATION_ACTIVITIES,
+            *retention_activities.ALL_RETENTION_ACTIVITIES,
+            *readmission_activities.ALL_READMISSION_ACTIVITIES,
+            *vitals_activities.ALL_VITALS_ACTIVITIES,
+        ],
+        max_concurrent_activities=2,
+        graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),
+    )
+
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -149,6 +178,7 @@ async def main() -> None:
         "temporal worker starting",
         extra={
             "task_queue": RESEARCH_QUEUE,
+            "maintenance_queue": MAINTENANCE_QUEUE,
             "temporal_host": settings.temporal_host,
             "workflows": [
                 "LeadResearchWorkflow",
@@ -160,7 +190,7 @@ async def main() -> None:
     )
 
     try:
-        async with worker:
+        async with worker, maintenance:
             await stop.wait()
     finally:
         await dispose_engine()

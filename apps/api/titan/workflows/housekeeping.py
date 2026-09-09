@@ -27,6 +27,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
+    from titan.workflows.queues import MAINTENANCE_QUEUE
     from titan.workflows.types import (
         EraseExpiredDataInput,
         ReadmitLeadsInput,
@@ -76,6 +77,7 @@ class HousekeepingWorkflow:
             "reopen_stale_research_runs",
             ReopenStaleRunsInput(workspace_id=request.workspace_id),
             start_to_close_timeout=TIMEOUT,
+            task_queue=MAINTENANCE_QUEUE,
             retry_policy=RETRY,
             result_type=ReopenStaleRunsResult,
         )
@@ -89,6 +91,7 @@ class HousekeepingWorkflow:
             "sweep_stranded_drafts",
             request,
             start_to_close_timeout=TIMEOUT,
+            task_queue=MAINTENANCE_QUEUE,
             retry_policy=RETRY,
             result_type=SweepStrandedResult,
         )
@@ -107,6 +110,7 @@ class HousekeepingWorkflow:
                 "release_held_contacts",
                 ReleaseHeldInput(workspace_id=request.workspace_id),
                 start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
                 retry_policy=RETRY,
                 result_type=ReleaseHeldResult,
             )
@@ -135,6 +139,7 @@ class HousekeepingWorkflow:
                 "reverify_contacts",
                 ReverifyContactsInput(workspace_id=request.workspace_id),
                 start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
                 retry_policy=RETRY,
                 result_type=ReverifyContactsResult,
             )
@@ -161,6 +166,7 @@ class HousekeepingWorkflow:
                 "readmit_leads",
                 ReadmitLeadsInput(workspace_id=request.workspace_id),
                 start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
                 retry_policy=RETRY,
                 result_type=ReadmitLeadsResult,
             )
@@ -187,6 +193,7 @@ class HousekeepingWorkflow:
                 "erase_expired_data",
                 EraseExpiredDataInput(workspace_id=request.workspace_id),
                 start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
                 retry_policy=RETRY,
                 result_type=EraseExpiredDataResult,
             )
@@ -214,6 +221,7 @@ class HousekeepingWorkflow:
                 "check_pipeline_vitals",
                 CheckVitalsInput(workspace_id=request.workspace_id),
                 start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
                 retry_policy=RETRY,
                 result_type=CheckVitalsResult,
             )
