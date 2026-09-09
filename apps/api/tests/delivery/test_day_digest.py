@@ -246,3 +246,54 @@ def test_a_spent_day_is_finished_not_stalled() -> None:
     )
 
     assert "spent" in day_state(spent).lower() or "done" in day_state(spent).lower()
+
+
+# ==========================================================================
+# "Blocked" and "sending" are both true at once
+#
+# A mailbox over its bounce ceiling that has been quiet for a week is cleared
+# for a few sends a day -- adaptive_limits' probation. The classifier still
+# says BLOCKED, correctly: the rate really is over the ceiling. Showing only
+# that word made a recovering estate read as a stopped one, and cost a morning
+# hunting an outage that was not there.
+# ==========================================================================
+def test_a_probation_mailbox_is_marked_as_such() -> None:
+    """Planted violation: drop the field and the screen has only one word for
+    two different situations."""
+    box = mailbox(health="blocked", allowed=5, sent=2, probation=True)
+
+    assert box.probation
+    assert box.health == "blocked", "the verdict itself must not be softened"
+
+
+def test_probation_does_not_change_what_the_mailbox_may_send() -> None:
+    """The whole safety argument for this field.
+
+    `health` drives the adaptive limit factor. Relabelling a BLOCKED mailbox
+    would move it to WATCH, whose 0.6 factor hands it thirty sends a day
+    instead of five -- so the flag is presentation and nothing else, and the
+    allowance beside it has to be unchanged.
+    """
+    plain = mailbox(health="blocked", allowed=5, sent=2)
+    flagged = mailbox(health="blocked", allowed=5, sent=2, probation=True)
+
+    assert plain.allowed == flagged.allowed
+    assert plain.remaining == flagged.remaining
+    assert plain.sending == flagged.sending
+
+
+def test_a_blocked_mailbox_not_on_probation_is_not_flagged() -> None:
+    """Under the quiet-days floor there is no allowance, and calling that
+    "recovering" would be the same lie pointing the other way."""
+    box = mailbox(health="blocked", allowed=0, sent=0)
+
+    assert not box.probation
+    assert not box.sending
+
+
+def test_probation_defaults_off() -> None:
+    """It crosses a serialisation boundary into the CRM, so it needs a default
+    for the same reason HealResult's `attempted` did -- a required field added
+    to a type that is already being constructed elsewhere breaks the callers
+    that have not been updated."""
+    assert mailbox().probation is False

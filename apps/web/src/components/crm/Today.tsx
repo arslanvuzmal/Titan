@@ -130,8 +130,24 @@ function Mailbox({ box }: { box: MailboxDay }) {
           )}
           {/* No tone override: the health word carries its own colour from the
               shared vocabulary, so `blocked` reads the same here as it does on
-              any other screen. */}
-          <Badge>{box.health}</Badge>
+              any other screen.
+
+              `recovering` is the one substitution, and it replaces a word that
+              was actively misleading. A mailbox on probation is BLOCKED by the
+              classifier and sending five a day at the same time; showing only
+              the first read as "stopped" and sent the operator looking for an
+              outage that was not there. The verdict itself is unchanged --
+              `title` still carries it, and softening the classifier would have
+              changed the allowance rather than the wording. */}
+          <Badge
+            title={
+              box.probation
+                ? `classifier says ${box.health}; sending on the probation allowance`
+                : undefined
+            }
+          >
+            {box.probation ? 'recovering' : box.health}
+          </Badge>
           <span className="text-sm font-semibold tabular-nums text-slate-900">
             {box.sent}
             <span className="font-normal text-slate-400"> / {box.allowed}</span>

@@ -360,6 +360,17 @@ export interface MailboxDay {
   warmup_days: number;
   note: string;
   reasons: string[];
+  /**
+   * True when the mailbox is over its bounce ceiling *and* cleared to send a
+   * few a day anyway, because nothing has hard-bounced in a week.
+   *
+   * `health` still reads `blocked`, and correctly: the rate really is over the
+   * ceiling, and softening it would change the send volume rather than the
+   * wording. This flag exists so the screen can say the other true thing --
+   * that the mailbox is sending — instead of showing a word that reads as
+   * stopped next to a mailbox quietly earning its way back.
+   */
+  probation: boolean;
 }
 
 /** Why messages are waiting, in the gate's own words. */

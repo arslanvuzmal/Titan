@@ -69,6 +69,12 @@ const STATUS_TONE: Record<string, keyof typeof TONES> = {
   watch: 'warn',
   degraded: 'warn',
   blocked: 'bad',
+  // A mailbox over its bounce ceiling that is nonetheless cleared for a few
+  // sends a day. Amber rather than red on purpose: the reputation really is
+  // bad, but the mailbox is sending, and `bad` next to a row that sent five
+  // messages this week is what made a recovering estate look like a stopped
+  // one. The number beside the badge says how few.
+  recovering: 'warn',
   unknown: 'neutral',
   // draft / campaign
   approved: 'good',
@@ -84,14 +90,19 @@ const STATUS_TONE: Record<string, keyof typeof TONES> = {
 export function Badge({
   children,
   tone,
+  title,
 }: {
   children: React.ReactNode;
   tone?: keyof typeof TONES;
+  /** Hover text. Used where the badge shows one true word and another true
+      word is being kept available rather than hidden. */
+  title?: string;
 }) {
   const key = typeof children === 'string' ? children.toLowerCase() : '';
   const resolved = tone ?? STATUS_TONE[key] ?? 'neutral';
   return (
     <span
+      title={title}
       className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${TONES[resolved]}`}
     >
       {typeof children === 'string' ? children.replace(/_/g, ' ') : children}

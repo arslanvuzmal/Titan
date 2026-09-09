@@ -334,6 +334,10 @@ class MailboxDayOut(BaseModel):
     warmup_days: int
     note: str
     reasons: list[str] = Field(default_factory=list)
+    #: True when the mailbox is over its bounce ceiling *and* cleared to send a
+    #: few a day anyway. Both facts are true and read as opposites, so the
+    #: screen showing one has to show the other.
+    probation: bool = False
 
 
 class DeferralOut(BaseModel):

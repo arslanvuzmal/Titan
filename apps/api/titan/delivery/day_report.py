@@ -88,6 +88,18 @@ class MailboxDay:
     note: str
     #: The classifier's words, when it had any. Empty for a healthy mailbox.
     reasons: tuple[str, ...] = ()
+    #: Whether the probation allowance is what this mailbox is sending on.
+    #:
+    #: True means `health` is BLOCKED *and* the mailbox is nonetheless cleared
+    #: for a few sends a day, because nothing has hard-bounced in a week. The
+    #: two facts are both true and read as opposites, so the surface that shows
+    #: one has to show the other.
+    #:
+    #: Presentation only. `health` deliberately still says "blocked" -- see the
+    #: snapshot comment in `outbox_worker`: softening the verdict would move the
+    #: mailbox to WATCH, whose 0.6 factor hands it thirty sends a day instead of
+    #: five. This field changes the word on the screen, never the allowance.
+    probation: bool = False
 
     @property
     def remaining(self) -> int:
@@ -446,6 +458,10 @@ async def _mailboxes(
                 queued=int(row.queued or 0),
                 health=(recent[0] if recent else SenderHealth.UNKNOWN).value,
                 health_as_of=as_of,
+                # An excluded mailbox is not on probation whatever the throttle
+                # worked out: it may not send at all, and calling that
+                # "recovering" would be the same lie in the other direction.
+                probation=bool(decision.probation) and not excluded,
                 warmup_day=(
                     None
                     if warmup is None

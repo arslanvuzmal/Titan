@@ -920,6 +920,7 @@ async def crm_today(
                 warmup_days=box.warmup_days,
                 note=box.note,
                 reasons=list(box.reasons),
+                probation=box.probation,
             )
             for box in report.mailboxes
         ],
