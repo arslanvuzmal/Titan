@@ -50,7 +50,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from titan.db.enums import Industry
 from titan.intelligence.case_studies import CaseStudy
-from titan.intelligence.message_validator import sentences
+from titan.intelligence.message_validator import (
+    PITCH_MAX_WORDS,
+    PITCH_MIN_WORDS,
+    sentences,
+)
 from titan.intelligence.references import Reference, references_for
 from titan.intelligence.vernacular import (
     Engine,
@@ -70,18 +74,11 @@ FALLBACK_GREETING = "Hi there"
 
 #: The band the message has to land in, before the signature.
 #:
-#: Widened twice: to 120-200 when the structure went from four parts to six,
-#: and again to 180-320 when the message had to explain the defect and the
-#: repair rather than name them. A sentence saying "I can fix that" fits in
-#: any band; one a reader can picture the work from does not. Six parts
-#: -- observation, consequence, experience, relevance, ask -- cannot be said in
-#: ninety words without one of them becoming a clause, and a clause is how the
-#: experience sentence turns back into "businesses like yours". Under the floor
-#: a part has gone missing; over the ceiling it is asking for reading time it
-#: has not earned. The validator enforces this on the assembled body -- the
-#: numbers live here because this is the module that has to hit them.
-PITCH_MIN_WORDS = 180
-PITCH_MAX_WORDS = 320
+#: Imported from the validator rather than declared here, and re-exported below
+#: so callers reading ``composer.PITCH_MAX_WORDS`` keep working. Both modules
+#: used to declare it with a comment asking a human to keep them in step; the
+#: reasoning, and the reason the duplication is gone, is in
+#: ``titan.intelligence.message_validator``.
 
 
 class FindingLike(Protocol):
@@ -954,9 +951,6 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     # 2b. What is mechanically wrong. Sits directly under the observation
     #     because it is the same fact explained, not a new one.
     problem = _PROBLEM_DETAIL.get(finding.issue_type, "")
-    # 4b. Why that consequence matters now. A claim about how people behave,
-    #     never a statistic about this recipient's business.
-    context = _CONTEXT_REGISTERS[index % len(_CONTEXT_REGISTERS)]
     # 5b. What the repair actually is. Named work, not an offer of help.
     solution = _SOLUTION_DETAIL.get(finding.issue_type, "")
     # 5c. What they get once it is done. The other half of the consequence
@@ -964,6 +958,30 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     #     stranger, and asks them to feel bad enough to reply. This is a
     #     conditional about their own site, so it is a claim and it is mapped.
     upside = _UPSIDE_DETAIL.get(finding.issue_type, "")
+
+    # 4b, dropped on 10 September. Worth saying why rather than deleting it
+    # quietly, because the register text is still here and still good.
+    #
+    # It was a sentence about how people behave in general -- "in 2026 this is
+    # doing the work a receptionist used to do, and a failure at this point
+    # costs you the enquiry outright". True, and nothing a reader can check,
+    # act on, or disagree with. It is the one paragraph in the message that
+    # carried no claim-map entry, and that is the tell rather than a technicality:
+    # it asserted nothing about this business because there was nothing about
+    # this business in it. 32 words of throat-clearing between the consequence
+    # and the repair, on a message measured at 292.
+    #
+    # The upside above was considered for the same cut and kept. It restates
+    # the consequence with the sign flipped, which is the argument for removing
+    # it, but it is also the only paragraph that tells the reader what they get
+    # rather than what they have lost -- a deliberate earlier decision, guarded
+    # by its own tests, and there is no evidence in 417 sends and one reply that
+    # would justify overturning it on taste. Length alone is not that evidence.
+    #
+    # ``_CONTEXT_REGISTERS`` is kept rather than deleted: the decision is that
+    # the paragraph does not earn its space, not that the copy is bad, and a
+    # future test of that decision needs the text to test with.
+    context = ""
     # 5. Why that is relevant, carrying the one link the rules permit. It sits
     #    here rather than in the signature because a link is only worth a click
     #    once the reader has been told why it is relevant to them.

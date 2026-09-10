@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from titan.intelligence import composer as C
 from titan.intelligence import message_validator as mv
 from titan.intelligence.case_studies import CaseStudy
 from titan.intelligence.composer import (
@@ -445,3 +446,72 @@ class TestTheOnePager:
         body = _compose(one_pager_url=self.URL).body.lower()
         for word in ("attached", "attachment", "please find enclosed"):
             assert word not in body
+
+
+class TestItStoppedClearingItsThroat:
+    """The generic-context paragraph, dropped 10 September.
+
+    It said the same thing to every recipient in every industry -- "in 2026
+    this is doing the work a receptionist used to do" -- and it was the only
+    paragraph in the message carrying no claim-map entry. That is the tell
+    rather than a technicality: it asserted nothing about this business because
+    there was nothing about this business in it.
+
+    Measured over 413 delivered messages the old structure averaged 277 words.
+    """
+
+    @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
+    def test_the_generic_context_sentence_is_gone(self, issue_type: str) -> None:
+        """Planted violation: keep a paragraph nobody can act on.
+
+        Asserted against the registers themselves rather than a quoted string,
+        so editing the copy cannot quietly reintroduce it.
+        """
+        body = _compose(issue_type).body
+        for register in C._CONTEXT_REGISTERS:
+            assert register not in body, f"{issue_type} still renders a context register"
+
+    @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
+    def test_every_message_still_lands_in_the_band(self, issue_type: str) -> None:
+        """The floor is a structural guarantee, not a style preference.
+
+        Under it, one of observation, mechanism, consequence, repair, credential
+        or ask has gone missing. Dropping a paragraph is only safe if the rest
+        still clear the floor -- which is the whole reason the floor moved with
+        the structure rather than after it.
+        """
+        composed = _compose(issue_type)
+        assert mv.PITCH_MIN_WORDS <= composed.pitch_words <= mv.PITCH_MAX_WORDS
+
+    @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
+    def test_it_still_validates(self, issue_type: str) -> None:
+        """Removing a paragraph must not orphan a claim or break the rules."""
+        composed = _compose(issue_type)
+        assert _validate(composed).passed, f"{issue_type} no longer validates"
+
+    def test_the_parts_that_earn_their_space_are_all_still_there(self) -> None:
+        """What was kept, stated as a test so a later trim has to argue with it.
+
+        The upside was considered for the same cut and kept: it restates the
+        consequence with the sign flipped, which is the argument against it, but
+        it is the only paragraph telling the reader what they get rather than
+        what they have lost. There is no evidence in 417 sends and one reply
+        that would justify overturning that on taste.
+        """
+        composed = _compose("broken_primary_cta")
+        kinds = {entry["claim"].rsplit(":", 1)[-1] for entry in composed.claim_map}
+
+        assert "mechanism" in kinds, "the paragraph that proves we looked"
+        assert "business_impact" in kinds, "what it costs them"
+        assert "remediation" in kinds, "what the repair actually is"
+        assert "upside" in kinds, "what they get once it is done"
+
+    def test_the_band_has_exactly_one_definition(self) -> None:
+        """Two constants that must agree are one constant.
+
+        Both modules used to declare it, each with a comment asking a human to
+        keep them in step. When they drifted, the validator refused everything
+        the composer wrote -- 628 drafts failed their own generator's rules.
+        """
+        assert C.PITCH_MIN_WORDS is mv.PITCH_MIN_WORDS
+        assert C.PITCH_MAX_WORDS is mv.PITCH_MAX_WORDS

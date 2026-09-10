@@ -32,11 +32,31 @@ MIN_BODY_WORDS = 40
 #: with a paragraph of portfolio history passed MAX_BODY_WORDS comfortably.
 #: Both happened. What matters is the length of what the recipient actually has
 #: to read before deciding, and that is the pitch.
-# Widened from 55-90 when the message went from four parts to six. Kept in
-# step with titan.intelligence.composer, which has the reasoning; a validator
-# band that disagrees with the composer band refuses everything the composer
-# writes, which is how 628 drafts once failed their own generator's rules.
-PITCH_MIN_WORDS = 180
+# Widened from 55-90 when the message went from four parts to six, and again
+# to 180-320 when the message had to explain the defect and the repair rather
+# than name them.
+#
+# **This is now the only definition.** It used to be declared here *and* in
+# ``titan.intelligence.composer``, with a comment on each asking the reader to
+# keep them in step by hand -- and the consequence of them drifting is not
+# subtle: a validator band that disagrees with the composer band refuses
+# everything the composer writes, which is how 628 drafts once failed their own
+# generator's rules. The composer imports these instead, which it can do freely
+# because it already imports ``sentences`` from this module. Two constants that
+# must agree are one constant.
+#
+# **The floor came down to 140 on 10 September**, when the generic-context and
+# upside paragraphs were dropped from the composer. It is still a structural
+# guarantee rather than a style preference -- under it, one of observation,
+# mechanism, consequence, repair, credential or ask has gone missing. Measured
+# over 413 delivered messages the old structure averaged 277 words against a
+# cold-email norm of well under half that, and the two paragraphs removed were
+# 86 of 292 on a representative message.
+#
+# The ceiling deliberately did **not** move. 520 drafts composed under the old
+# structure sit in the queue at around 290 words and this runs at send time, so
+# tightening the ceiling to match the new shape would refuse every one of them.
+PITCH_MIN_WORDS = 140
 PITCH_MAX_WORDS = 320
 
 

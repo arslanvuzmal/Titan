@@ -1170,6 +1170,37 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 }
 
 
+def lead_rank(issue_type: str, page_url: str | None) -> int:
+    """Which findings deserve to be the one thing a message says.
+
+    A message says one thing, so the finding that leads decides what the
+    message *is*. Three tiers, and the middle one is the correction made on
+    10 September:
+
+    0. **Conversion.** Somebody tried to buy and could not -- a dead booking
+       button, a contact form nobody can complete, no phone number on a site
+       that sells by phone, a broken link on a money path.
+    1. **Automation.** ``no_booking_or_enquiry_path``: there is no way to book
+       or enquire at all. Nothing is broken, so it is not a conversion defect,
+       but it is the most legible thing this system can tell a business and the
+       only pitch an owner can act on without a developer.
+    2. **Quality.** Everything else -- alt text, console errors, headers,
+       structured data. True, cheap to detect, and invisible to the person
+       paying the bills.
+
+    The original key was ``0 if CONVERSION else 1``, which put tier 1 and tier 2
+    in the same bucket and then broke the tie on confidence. An absence is
+    inferred and an alt-text check is certain, so the absence lost every time:
+    **912 such findings in the estate led 9 messages out of 413.**
+    """
+    engine = engine_for(issue_type, page_url)
+    if engine is Engine.CONVERSION:
+        return 0
+    if engine is Engine.AUTOMATION:
+        return 1
+    return 2
+
+
 async def _rephrase(
     composed: Any,
     *,
@@ -1413,9 +1444,24 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
     # Conversion defects first, because they are the only findings that
     # describe a person who tried to buy and could not. Severity and confidence
     # break the tie inside each group, which is what they were always good for.
+    #
+    # **Three tiers, not two.** The original key was ``0 if CONVERSION else 1``,
+    # which put ``no_booking_or_enquiry_path`` -- the single most legible thing
+    # this system can tell a business, that there is no way for anyone to book
+    # or enquire at all -- in the same bucket as a missing alt attribute. It
+    # then lost the tie on confidence, because an alt-text check is certain and
+    # an absence is inferred. Measured over every message ever sent: 912 such
+    # findings in the estate led 9 messages, while the pitch that has no defect
+    # to point at, only a gap, is the one an owner can act on without a
+    # developer. It sits above quality and below conversion because a business
+    # taking bookings by telephone is not broken -- see ``_OPERATIONAL`` in
+    # ``vernacular`` -- and a live conversion defect is still the more urgent
+    # of the two.
+    # The tiers themselves are in ``lead_rank``, at module level so the
+    # ordering can be tested without standing up an activity.
     pitchable.sort(
         key=lambda f: (
-            0 if engine_for(f.issue_type, f.page_url) is Engine.CONVERSION else 1,
+            lead_rank(f.issue_type, f.page_url),
             _SEVERITY_ORDER.get(f.severity, 9),
             -float(f.confidence or 0.0),
         )
