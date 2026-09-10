@@ -40,7 +40,7 @@ from titan.delivery.inbound import IngestResult, ingest_inbound
 from titan.delivery.mailbox import Mailbox, ParsedEmail, RawMessage, parse_email
 from titan.intelligence.contacts import normalize_email
 from titan.intelligence.replies import InboundMessage
-from titan.notify.operator import push_notification
+from titan.notify.operator import mail_notification, push_notification
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,10 @@ class CollectionResult:
     suppressed: int = 0
     #: Operator notifications recorded this cycle.
     notified: int = 0
+    #: Of those, how many reached the operator's inbox. Distinct from
+    #: ``notified`` on purpose: one is a row in the CRM, the other is somebody
+    #: actually being told, and for months only the first existed.
+    mailed: int = 0
     #: Replies that asked for a call, each of which opened a proposed meeting.
     #: The number worth reporting upwards: it is the campaign's actual output.
     meetings_opened: int = 0
@@ -130,6 +134,11 @@ class ReplyCollector:
             "stopped_sequences": 0,
             "suppressed": 0,
             "notified": 0,
+            #: Notifications that reached the operator's inbox rather than only
+            #: the CRM. Counted separately from `notified` because they are
+            #: different guarantees: one is a row, the other is somebody's
+            #: attention.
+            "mailed": 0,
             "meetings_opened": 0,
         }
         errors: list[str] = []
@@ -183,6 +192,7 @@ class ReplyCollector:
                             "stopped_sequences": result.stopped_sequences,
                             "suppressed": result.suppressed,
                             "notified": result.notified,
+                            "mailed": result.mailed,
                             "meetings_opened": result.meetings_opened,
                         },
                     )
@@ -243,9 +253,15 @@ class ReplyCollector:
         if result.meeting_id is not None:
             counts["meetings_opened"] += 1
 
-        # After the commit, never inside it. The row is the guarantee; this is
-        # the convenience on top, and it involves an HTTP call to a host that
-        # may be having a bad minute.
+        # After the commit, never inside it. The row is the guarantee; these
+        # are the convenience on top, and each involves a network call to a
+        # host that may be having a bad minute. Neither raises.
+        #
+        # Mail first: it is the channel that is actually configured, and the
+        # one a person reads. The webhook has never had a URL and returns
+        # immediately without one.
+        if await mail_notification(result.notification):
+            counts["mailed"] += 1
         await push_notification(result.notification)
         return True
 

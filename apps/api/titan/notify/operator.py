@@ -187,6 +187,87 @@ async def record_notification(
     )
 
 
+#: The notifications that reach the operator by mail the moment they happen.
+#:
+#: A person replying is the only thing this system produces that is worth
+#: interrupting somebody for, and until now nothing did: a reply wrote a row to
+#: ``tasks`` and waited to be noticed. The webhook push is the other channel and
+#: it has never been configured, so in practice a genuine reply surfaced in the
+#: next daily report -- up to a day after the person wrote.
+#:
+#: All three human classes are here, including the refusal. "A reply from the
+#: lead" means a person answered, and being told promptly that somebody said no
+#: is worth as much as being told they said yes: it is the difference between
+#: closing a thread and wondering about it. Bounces, auto-replies, unsubscribes
+#: and every operational alarm stay out -- none of them is a person, and a
+#: channel that fires for machines is a channel that gets filtered.
+MAILED_INSTANTLY = frozenset(
+    {
+        NotificationKind.CLIENT_AGREED,
+        NotificationKind.REPLY_NEEDS_READING,
+        NotificationKind.REPLY_DECLINED,
+    }
+)
+
+
+async def mail_notification(notification: OperatorNotification | None) -> bool:
+    """Mail the operator about a reply, immediately. Never raises.
+
+    Call *after* the transaction commits, for the reason
+    :func:`record_notification` gives: a mail about a reply that was rolled
+    back is worse than a late one.
+
+    **Sends at most once per reply, and that is the insert's doing rather than
+    this function's.** ``record_notification`` returns ``None`` when the dedupe
+    key already existed, so a folder re-read or a provider retry produces no
+    notification here and therefore no second mail.
+
+    Unlike :meth:`OperatorNotification.as_push_text`, this carries the body. The
+    push withholds it because a chat webhook copies a prospect's words into a
+    third-party system nobody told them about; this goes to the operator's own
+    mailbox, which is where the reply itself already arrived, so quoting it adds
+    no exposure and is the whole point -- an alert that only says "you have a
+    reply" is a prompt to go and look, not an answer.
+    """
+    if notification is None or notification.kind not in MAILED_INSTANTLY:
+        return False
+
+    from titan.notify.operator_mail import mail_the_operator
+
+    body = notification.description or "(no body was captured)"
+    lead = f"\nLead: {notification.lead_id}" if notification.lead_id else ""
+    rule = "-" * min(len(notification.title), 60)
+    try:
+        await mail_the_operator(
+            subject=f"Reply: {notification.title}"[:200],
+            body=(
+                f"{notification.title}\n{rule}\n\n"
+                f"{body}\n{lead}\n"
+                f"Received: {notification.created_at:%Y-%m-%d %H:%M UTC}\n"
+                f"Task: {notification.task_id}\n"
+            ),
+        )
+    except Exception as exc:
+        # Dropped, not retried, and never allowed to reach the caller. The task
+        # row is the durable record; this is the fast path on top of it, and an
+        # unreachable mail server must not fail an ingest that already
+        # succeeded.
+        logger.warning(
+            "could not mail the operator about a reply; it is still in the CRM",
+            extra={
+                "error_code": type(exc).__name__,
+                "kind": notification.kind.value,
+                "task_id": str(notification.task_id),
+            },
+        )
+        return False
+    logger.info(
+        "operator mailed about a reply",
+        extra={"kind": notification.kind.value, "task_id": str(notification.task_id)},
+    )
+    return True
+
+
 async def push_notification(notification: OperatorNotification | None) -> bool:
     """Best-effort push to the configured chat webhook. Never raises.
 
@@ -237,6 +318,8 @@ async def push_notification(notification: OperatorNotification | None) -> bool:
 
 __all__ = [
     "DUE_WITHIN",
+    "MAILED_INSTANTLY",
+    "mail_notification",
     "PRIORITY",
     "NotificationKind",
     "OperatorNotification",
