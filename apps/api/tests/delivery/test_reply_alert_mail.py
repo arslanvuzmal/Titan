@@ -171,3 +171,45 @@ async def test_every_mailed_kind_is_a_human_reply() -> None:
         NotificationKind.REPLY_DECLINED,
     }
     assert op.NotificationKind.WEEKLY_REPORT not in MAILED_INSTANTLY
+
+
+# ------------------------------------- it has to be a reply to *us*, from *them*
+@pytest.mark.parametrize("kind", sorted(MAILED_INSTANTLY, key=lambda k: k.value))
+async def test_mail_that_matched_no_lead_never_interrupts(kind, mailer) -> None:
+    """Planted violation: mail on the class alone, ignoring attribution.
+
+    Measured on the live estate the morning after this alert shipped: of the
+    fifteen messages classified as a human reply, eleven matched no outbound
+    message and no lead. They were other people's cold pitches arriving in the
+    outreach mailboxes -- a sales-tooling vendor, a mail-hosting vendor, three
+    lead-list brokers -- plus three delivery tests the operator had answered
+    himself.
+
+    Mailing on those is how a channel worth stopping for becomes one that gets
+    skimmed, and the reply that mattered gets skimmed with it.
+    """
+    assert await mail_notification(notification(kind, lead_id=None)) is False
+    assert mailer.sent == []
+
+
+async def test_an_unattributed_reply_is_still_recorded_elsewhere(mailer) -> None:
+    """The gate is on the inbox, not on the database.
+
+    ``ingest_inbound`` deliberately records mail it cannot attribute: an
+    unrecognised sender can still be an unsubscribe, and a message that matches
+    nothing today may match once a threading gap is closed. This function is
+    the last step, long after that row is committed, so declining to mail
+    cannot remove anything -- it only declines to interrupt.
+    """
+    quiet = notification(NotificationKind.REPLY_NEEDS_READING, lead_id=None)
+
+    assert await mail_notification(quiet) is False
+    assert quiet.task_id is not None, "the durable record is untouched by this path"
+
+
+async def test_a_lead_that_did_reply_is_unaffected_by_the_gate(mailer) -> None:
+    """The narrowing must not cost the case it was built for."""
+    real = notification(NotificationKind.CLIENT_AGREED, lead_id=uuid.uuid4())
+
+    assert await mail_notification(real) is True
+    assert len(mailer.sent) == 1

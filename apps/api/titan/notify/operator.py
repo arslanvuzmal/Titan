@@ -222,6 +222,11 @@ async def mail_notification(notification: OperatorNotification | None) -> bool:
     key already existed, so a folder re-read or a provider retry produces no
     notification here and therefore no second mail.
 
+    **Only for mail attributed to a lead.** A notification with no ``lead_id``
+    matched no outbound message and no known contact, which in an outreach
+    mailbox almost always means inbound cold pitch rather than a prospect
+    answering. It is still recorded; it is not worth an interruption.
+
     Unlike :meth:`OperatorNotification.as_push_text`, this carries the body. The
     push withholds it because a chat webhook copies a prospect's words into a
     third-party system nobody told them about; this goes to the operator's own
@@ -230,6 +235,30 @@ async def mail_notification(notification: OperatorNotification | None) -> bool:
     reply" is a prompt to go and look, not an answer.
     """
     if notification is None or notification.kind not in MAILED_INSTANTLY:
+        return False
+
+    # An unattributed message is not a reply, whatever it was classified as.
+    #
+    # The collector records everything that arrives and says why: an
+    # unrecognised sender can still be an unsubscribe, and a reply that matched
+    # nothing today may match once a threading gap is fixed. That is right for
+    # the database. It is wrong for the inbox. A message that matched no
+    # outbound message and no lead is, in practice, somebody else's cold pitch
+    # landing in an outreach mailbox -- eleven of the last fifteen were exactly
+    # that, from senders like a sales-tooling vendor and a lead-list broker.
+    #
+    # Mailing on those trains the operator to skim the channel, and the whole
+    # value of this alert is that it is worth stopping for. The task row still
+    # exists either way, so nothing is lost -- it is triaged in the CRM with
+    # the rest of the unattributed mail rather than interrupting a day.
+    if notification.lead_id is None:
+        logger.debug(
+            "reply matched no lead; recorded but not mailed",
+            extra={
+                "kind": notification.kind.value,
+                "task_id": str(notification.task_id),
+            },
+        )
         return False
 
     from titan.notify.operator_mail import mail_the_operator
