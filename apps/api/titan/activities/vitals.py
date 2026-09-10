@@ -22,7 +22,7 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
@@ -34,11 +34,12 @@ from titan.db.models import (
     SenderIdentity,
 )
 from titan.db.session import workspace_unit_of_work
-from titan.models.gateway import ModelGateway
-from titan.models.providers import build_providers
 from titan.delivery import adaptive_limits
+from titan.delivery.bounces import COUNTS_AGAINST_REPUTATION
 from titan.delivery.sender_health import SenderHealth
 from titan.intelligence.vitals import check, read_vitals, render
+from titan.models.gateway import ModelGateway
+from titan.models.providers import build_providers
 from titan.notify.operator import NotificationKind, record_notification
 from titan.providers import smartlead
 from titan.workflows.types import CheckVitalsInput, CheckVitalsResult
@@ -163,7 +164,8 @@ async def _models_answer(
         return True, ""
 
     broken = [
-        f"  {e['task']:<13} {e.get('provider', '?')}:{e.get('model_id', '?')}" + NEWLINE
+        f"  {e['task']:<13} {e.get('provider', '?')}:{e.get('model_id', '?')}"
+        + NEWLINE
         + f"      {e.get('detail') or e.get('status', 'failed')}"
         for e in report["routes"]
         if e.get("status") != "ok"
@@ -192,6 +194,33 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
             .all()
         )
 
+        # When each mailbox last hard-bounced, by the same definition the
+        # gate and the day report use, so all three agree about what a bounce
+        # is. One query rather than one per sender.
+        #
+        # This is not decoration: ``daily_limit`` grants probation only to a
+        # blocked mailbox that has been quiet for PROBATION_QUIET_DAYS, and it
+        # reads that from ``days_since_bounce``. Omitting the argument makes it
+        # None, which grants nothing -- so a mailbox the gate is letting send
+        # its five was reported here as sending zero. Latent while anything has
+        # bounced recently, and wrong precisely when somebody is watching a
+        # blocked mailbox for signs of recovery.
+        last_bounce = {
+            row.sender_identity_id: row.bounced_at
+            for row in (
+                await session.execute(
+                    text(
+                        "SELECT m.sender_identity_id, max(m.bounced_at) AS bounced_at "
+                        "FROM messages m "
+                        "WHERE m.workspace_id = :workspace "
+                        f"  AND {COUNTS_AGAINST_REPUTATION} "
+                        "GROUP BY m.sender_identity_id"
+                    ),
+                    {"workspace": workspace_id},
+                )
+            ).all()
+        }
+
         capacity = 0
         sending = 0
         for sender in senders:
@@ -216,10 +245,19 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
                 .all()
             )
             recent = tuple(SenderHealth(row.status) for row in history)
+            bounced_at = last_bounce.get(sender.id)
             decision = adaptive_limits.daily_limit(
                 sender.daily_send_limit,
                 recent=recent,
                 warmup_limit=history[0].warmup_limit if history else None,
+                # The argument whose absence made this a second opinion rather
+                # than the same computation. None means "never bounced, or
+                # nobody looked", and grants no probation -- which is right for
+                # a mailbox that really has no bounce behind it and wrong for
+                # one that simply was not asked.
+                days_since_bounce=(
+                    (now - bounced_at).days if bounced_at is not None else None
+                ),
             )
             capacity += decision.effective
             if decision.effective > 0:
