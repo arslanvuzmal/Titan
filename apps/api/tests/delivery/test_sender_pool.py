@@ -515,3 +515,107 @@ async def test_the_report_query_does_not_cross_workspaces(db_session, workspace)
         await db_session.rollback()
         await db_session.execute(delete(Workspace).where(Workspace.id == other_id))
         await db_session.commit()
+
+
+# ==========================================================================
+# Probation and the deadlock it exists to break
+#
+# `adaptive_limits.PROBATION_VOLUME` grants a blocked-but-quiet mailbox five
+# sends a day, on the argument that "a mailbox quarantined by the reputation
+# gate must not also be throttled to the floor by its own quarantine, or it
+# could never send its way back out". The pool then refused to route anything
+# to a mailbox whose health reads `blocked` -- and probation applies only to
+# mailboxes whose health reads `blocked`. The allowance was real, the gate
+# would have honoured it, and nothing was ever offered to it.
+#
+# Measured on 2026-09-10: outreach@ and sales@ had been quiet 24 and 14 days,
+# were each allowed five, and each had nothing queued. Neither could recover,
+# because recovery is demonstrated by sending cleanly.
+# ==========================================================================
+class _Row:
+    """The columns `unavailable_reason` and `_default_limit` actually read."""
+
+    def __init__(self, **kw) -> None:
+        self.daily_send_limit = kw.pop("daily_send_limit", 50)
+        self.is_active = kw.pop("is_active", True)
+        self.domain_verified = kw.pop("domain_verified", True)
+        self.spf_ok = kw.pop("spf_ok", True)
+        self.dkim_ok = kw.pop("dkim_ok", True)
+        self.dmarc_ok = kw.pop("dmarc_ok", True)
+        self.last_verified_at = kw.pop("last_verified_at", dt.datetime.now(dt.UTC))
+        # Warm-up finished long ago, deliberately. A mailbox with no first send
+        # is on day one and allowed five -- the same number probation grants --
+        # so leaving it unset would make these tests pass for the wrong reason.
+        self.first_send_at = kw.pop(
+            "first_send_at", dt.datetime.now(dt.UTC) - dt.timedelta(days=90)
+        )
+        self.health = kw.pop("health", "healthy")
+        self.last_bounce_at = kw.pop("last_bounce_at", None)
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _quiet_for(days: int) -> dt.datetime:
+    return dt.datetime.now(dt.UTC) - dt.timedelta(days=days)
+
+
+def test_a_blocked_mailbox_that_has_earned_probation_is_routable() -> None:
+    """Planted violation: exclude on `health == "blocked"` alone.
+
+    This is the deadlock. Recovery is demonstrated by sending cleanly, so a
+    mailbox that may not be sent anything can never recover, and `blocked`
+    becomes permanent for a mailbox whose list was cleaned weeks ago.
+    """
+    row = _Row(health="blocked", last_bounce_at=_quiet_for(24))
+
+    assert sender_pool.unavailable_reason(row) is None
+
+
+def test_a_blocked_mailbox_still_bouncing_stays_unroutable() -> None:
+    """The other direction, and the more expensive one. Probation is earned by
+    a quiet week, not granted by being blocked."""
+    row = _Row(health="blocked", last_bounce_at=_quiet_for(1))
+
+    assert sender_pool.unavailable_reason(row) == "mailbox health is blocked"
+
+
+def test_a_mailbox_blocked_without_any_bounce_stays_unroutable() -> None:
+    """Blocked with nothing bouncing behind it was blocked for another reason --
+    failed authentication, or complaints -- and neither is repaired by sending
+    five more."""
+    row = _Row(health="blocked", last_bounce_at=None)
+
+    assert sender_pool.unavailable_reason(row) == "mailbox health is blocked"
+
+
+def test_probation_is_ranked_on_the_five_it_earned_not_the_fifty_it_has() -> None:
+    """Planted violation: let a probation mailbox keep its configured ceiling.
+
+    Ranking is by headroom, and a blocked mailbox stops sending, so its
+    `sent_today` stays at zero while its configured limit stays at fifty --
+    which makes it look like the emptiest mailbox in the pool. That is how 76
+    of 87 waiting messages landed on two mailboxes with nothing left on
+    1 September.
+    """
+    row = _Row(health="blocked", last_bounce_at=_quiet_for(24))
+
+    assert sender_pool._default_limit(row, dt.datetime.now(dt.UTC)) == 5
+
+
+def test_a_healthy_mailbox_is_unaffected_by_any_of_this() -> None:
+    row = _Row(health="healthy", last_bounce_at=_quiet_for(24))
+
+    assert sender_pool.unavailable_reason(row) is None
+    assert sender_pool._default_limit(row, dt.datetime.now(dt.UTC)) == 50
+
+
+def test_authentication_still_outranks_probation() -> None:
+    """Probation is a remedy for a reputation block. It is not a way past an
+    unverified domain, which is not negotiable by health."""
+    row = _Row(
+        health="blocked",
+        last_bounce_at=_quiet_for(24),
+        domain_verified=False,
+    )
+
+    assert sender_pool.unavailable_reason(row) == "sending domain is not verified"

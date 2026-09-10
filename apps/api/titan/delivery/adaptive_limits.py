@@ -125,6 +125,36 @@ MIN_ACTIVE_LIMIT = 1
 SAME_DAY_BOUNCE_FLOOR = 2
 
 
+def probation_allowance(
+    health: SenderHealth,
+    *,
+    configured: int,
+    days_since_bounce: int | None,
+) -> int | None:
+    """How many sends a blocked mailbox has earned back, or ``None`` for none.
+
+    Extracted so the *selection* side can ask the same question the gate does.
+    It could not, and the result was the deadlock this constant exists to
+    break, rebuilt one layer up: :func:`titan.delivery.sender_pool.
+    unavailable_reason` refused to route anything to a mailbox whose health
+    reads ``blocked``, and probation applies only to mailboxes whose health
+    reads ``blocked``. So the allowance was real, the gate would have honoured
+    it, and no message was ever offered to it.
+
+    Measured on 2026-09-10: ``outreach@`` and ``sales@`` had been quiet 24 and
+    14 days, were each allowed five, and each had nothing queued. Neither could
+    recover, because recovery is demonstrated by sending cleanly and neither
+    was ever given anything to send.
+    """
+    if health is not SenderHealth.BLOCKED:
+        return None
+    if configured <= 0:
+        return None
+    if days_since_bounce is None or days_since_bounce < PROBATION_QUIET_DAYS:
+        return None
+    return min(PROBATION_VOLUME, configured)
+
+
 def stop_for_today(*, sent_today: int, bounced_today: int) -> bool:
     """Whether today's own bounces are already bad enough to stop the day.
 
@@ -265,14 +295,11 @@ def daily_limit(
     # not be re-narrowed by the warm-up bound above. A mailbox blocked *and*
     # mid-warm-up is still allowed its five -- warm-up limits growth, and five
     # is not growth.
+    allowance = probation_allowance(
+        health, configured=configured, days_since_bounce=days_since_bounce
+    )
     probation = False
-    if (
-        health is SenderHealth.BLOCKED
-        and configured > 0
-        and days_since_bounce is not None
-        and days_since_bounce >= PROBATION_QUIET_DAYS
-    ):
-        allowance = min(PROBATION_VOLUME, configured)
+    if allowance is not None:
         probation = allowance > effective
         effective = max(effective, allowance)
 
@@ -297,6 +324,7 @@ def daily_limit(
 
 __all__ = [
     "HEALTH_FACTORS",
+    "probation_allowance",
     "MIN_ACTIVE_LIMIT",
     "RECOVERY_LOOKBACK_DAYS",
     "RECOVERY_START",

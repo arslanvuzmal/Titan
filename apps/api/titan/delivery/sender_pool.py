@@ -42,6 +42,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.db.enums import OutboxStatus
+from titan.delivery.bounces import COUNTS_AGAINST_REPUTATION
 
 #: Outbox rows that still expect to send. A row in one of these states has
 #: already been promised to its mailbox and must count against it, or a large
@@ -193,7 +194,7 @@ async def load_slots(
     rows = (
         await session.execute(
             text(
-                """
+                f"""
                 WITH pool AS (
                     SELECT cs.sender_identity_id
                       FROM campaign_senders cs
@@ -260,7 +261,15 @@ async def load_slots(
                     WHERE h.workspace_id = :workspace
                       AND h.sender_identity_id = si.id
                     ORDER BY h.captured_on DESC
-                    LIMIT 1)                                 AS health
+                    LIMIT 1)                                 AS health,
+                  -- Read for exactly one purpose: whether a blocked mailbox
+                  -- has been quiet long enough to be worth offering work to.
+                  -- The same definition the gate uses, and the same the day
+                  -- report uses, so all three agree about what a bounce is.
+                  (SELECT max(m.bounced_at) FROM messages m
+                    WHERE m.workspace_id = :workspace
+                      AND m.sender_identity_id = si.id
+                      AND {COUNTS_AGAINST_REPUTATION})        AS last_bounce_at
                   FROM pool
                   JOIN sender_identities si ON si.id = pool.sender_identity_id
                  WHERE si.workspace_id = :workspace
@@ -316,7 +325,7 @@ def unavailable_reason(row: Any) -> str | None:
     # two mailboxes with nothing left, while three healthy ones idled.
     # ``watch`` and ``degraded`` are left alone: those still send, and the
     # worker's own throttle is the right place to decide how much.
-    if getattr(row, "health", None) == "blocked":
+    if getattr(row, "health", None) == "blocked" and _probation_for(row) is None:
         return "mailbox health is blocked"
     if not row.is_active:
         return "mailbox is inactive"
@@ -354,12 +363,53 @@ def _default_limit(row: Any, now: dt.datetime) -> int:
     from titan.delivery import deliverability
 
     configured = int(row.daily_send_limit or 0)
+
+    # A mailbox on probation is ranked on what it has actually earned back.
+    #
+    # This is not decoration. Ranking is by headroom, and a blocked mailbox
+    # stops sending, so its `sent_today` stays at zero while its configured
+    # limit stays at fifty -- which made it look like the emptiest mailbox in
+    # the pool. That is how 76 of 87 waiting messages landed on two mailboxes
+    # with nothing left on 1 September. Excluding blocked outright fixed it and
+    # broke probation; returning five fixes both, because five really is all it
+    # may send.
+    earned = _probation_for(row)
+    if earned is not None:
+        return earned
+
     warmup = deliverability.warmup_limit(
         first_send_at=row.first_send_at,
         now=now,
         target=configured,
     )
     return configured if warmup is None else min(configured, warmup)
+
+
+def _probation_for(row: Any) -> int | None:
+    """The probation allowance this row has earned, asked of the gate's own rule."""
+    from titan.delivery import adaptive_limits
+    from titan.delivery.sender_health import SenderHealth
+
+    raw = getattr(row, "health", None)
+    if raw is None:
+        return None
+    try:
+        health = SenderHealth(raw)
+    except ValueError:
+        return None
+    last_bounce = getattr(row, "last_bounce_at", None)
+    if last_bounce is None:
+        days: int | None = None
+    else:
+        now = dt.datetime.now(dt.UTC)
+        if last_bounce.tzinfo is None:
+            last_bounce = last_bounce.replace(tzinfo=dt.UTC)
+        days = max(0, (now - last_bounce).days)
+    return adaptive_limits.probation_allowance(
+        health,
+        configured=int(getattr(row, "daily_send_limit", 0) or 0),
+        days_since_bounce=days,
+    )
 
 
 __all__ = [

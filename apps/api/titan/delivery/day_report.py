@@ -411,7 +411,21 @@ async def _mailboxes(
                   (SELECT max(m.bounced_at) FROM messages m
                     WHERE m.workspace_id = :workspace
                       AND m.sender_identity_id = si.id
-                      AND {COUNTS_AGAINST_REPUTATION})          AS last_bounce_at
+                      AND {COUNTS_AGAINST_REPUTATION})          AS last_bounce_at,
+                  -- Selected because `sender_pool.unavailable_reason` reads it.
+                  --
+                  -- It was not, and the function does its lookup with
+                  -- `getattr(row, "health", None)`, so the check that excludes
+                  -- an unroutable mailbox silently did nothing here while doing
+                  -- its job in the pool. The page and the pool then disagreed
+                  -- about capacity, which is the one thing this module's
+                  -- docstring promises cannot happen. Calling the same function
+                  -- is not enough; it has to be given what it reads.
+                  (SELECT h.status FROM sender_health_snapshots h
+                    WHERE h.workspace_id = :workspace
+                      AND h.sender_identity_id = si.id
+                    ORDER BY h.captured_on DESC
+                    LIMIT 1)                                    AS health
                   FROM sender_identities si
                  WHERE si.workspace_id = :workspace
                  ORDER BY si.from_email
