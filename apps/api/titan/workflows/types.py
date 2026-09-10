@@ -210,6 +210,37 @@ class CollectRepliesResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExpireAlarmsInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ExpireAlarmsResult:
+    expired: int = 0
+    #: Everything still open afterwards, human tasks included. The number that
+    #: says whether the queue is actually being worked.
+    still_open: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class PingWatchdogInput:
+    """Nothing. The watchdog is per-installation, not per-workspace.
+
+    Carried as a dataclass anyway because every other activity on this queue
+    takes one, and a signature that is the odd one out is a signature somebody
+    has to look up.
+    """
+
+
+@dataclasses.dataclass(frozen=True)
+class PingWatchdogResult:
+    #: False when no URL is configured, which is the shipped state and not a
+    #: failure. Distinguished from a failed ping so the log can say which.
+    pinged: bool = False
+    reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class CheckVitalsInput:
     """One pass over a workspace's pulse."""
 

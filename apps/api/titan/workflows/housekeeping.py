@@ -29,12 +29,16 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from titan.workflows.queues import MAINTENANCE_QUEUE
     from titan.workflows.types import (
-        EraseExpiredDataInput,
-        ReadmitLeadsInput,
-        ReadmitLeadsResult,
-        EraseExpiredDataResult,
         CheckVitalsInput,
         CheckVitalsResult,
+        EraseExpiredDataInput,
+        EraseExpiredDataResult,
+        ExpireAlarmsInput,
+        ExpireAlarmsResult,
+        PingWatchdogInput,
+        PingWatchdogResult,
+        ReadmitLeadsInput,
+        ReadmitLeadsResult,
         ReleaseHeldInput,
         ReleaseHeldResult,
         ReopenStaleRunsInput,
@@ -234,6 +238,63 @@ class HousekeepingWorkflow:
             )
         except Exception as exc:
             workflow.logger.warning("vitals check failed: %s", str(exc)[:300])
+
+        # The queue the alarms land in, swept after they are raised.
+        #
+        # After the vitals rather than before, so an alarm this pass has
+        # just filed is never closed by the same pass that filed it. Only
+        # machine alarms are touched; a reply is a person waiting, and the
+        # sixteen sitting unread are exactly what this makes visible again.
+        #
+        # Swallowed like the rest. Housekeeping that repaired the pipeline
+        # must not be recorded as failed because a tidy-up could not run.
+        try:
+            closed: ExpireAlarmsResult = await workflow.execute_activity(
+                "expire_stale_alarms",
+                ExpireAlarmsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
+                retry_policy=RETRY,
+                result_type=ExpireAlarmsResult,
+            )
+            if closed.expired:
+                workflow.logger.info(
+                    "closed %s stale alarm(s); %s task(s) still open",
+                    closed.expired,
+                    closed.still_open,
+                )
+        except Exception as error:
+            workflow.logger.warning("alarm expiry skipped: %s", error)
+
+        # Truly last, and the only step whose point is that it did *not* run.
+        #
+        # Every other guard in this workflow runs inside the process it is
+        # watching, so none of them can report the one failure that has
+        # actually happened: the machine being off. Nothing went out on 4, 5 or
+        # 6 September and nobody knew until somebody looked. An external
+        # watchdog notices the silence instead, and this is the sound it
+        # listens for.
+        #
+        # After the repairs rather than before, so a pass that died halfway
+        # through does not report a clean hour. Swallowed like the rest: a
+        # watchdog that cannot be reached is a monitoring problem, and it must
+        # not be recorded as a housekeeping failure.
+        try:
+            ping: PingWatchdogResult = await workflow.execute_activity(
+                "ping_watchdog",
+                PingWatchdogInput(),
+                start_to_close_timeout=timedelta(seconds=30),
+                task_queue=MAINTENANCE_QUEUE,
+                # One attempt. The next pass is an hour away and a dead man's
+                # switch tolerates a missed beat far better than it tolerates a
+                # retry storm against a monitoring endpoint.
+                retry_policy=RetryPolicy(maximum_attempts=1),
+                result_type=PingWatchdogResult,
+            )
+            if not ping.pinged and ping.reason:
+                workflow.logger.info("watchdog not pinged: %s", ping.reason)
+        except Exception as exc:
+            workflow.logger.warning("watchdog ping skipped: %s", str(exc)[:200])
 
         return swept
 

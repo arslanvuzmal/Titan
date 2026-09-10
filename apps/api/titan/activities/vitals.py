@@ -42,7 +42,14 @@ from titan.models.gateway import ModelGateway
 from titan.models.providers import build_providers
 from titan.notify.operator import NotificationKind, record_notification
 from titan.providers import smartlead
-from titan.workflows.types import CheckVitalsInput, CheckVitalsResult
+from titan.workflows.types import (
+    CheckVitalsInput,
+    CheckVitalsResult,
+    ExpireAlarmsInput,
+    ExpireAlarmsResult,
+    PingWatchdogInput,
+    PingWatchdogResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +327,76 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
     )
 
 
-ALL_VITALS_ACTIVITIES = [check_pipeline_vitals]
+@activity.defn(name="expire_stale_alarms")
+async def expire_stale_alarms_activity(
+    request: ExpireAlarmsInput,
+) -> ExpireAlarmsResult:
+    """Close the machine alarms nobody is going to read. Never a reply.
+
+    ``tasks`` was write-only: 648 rows, every one ``open``, the oldest from
+    16 August, 607 of them the same ``campaign_stalled`` alarm. Nothing in the
+    codebase had ever written a status other than "open", so the queue that
+    exists to be worked could only ever grow -- and a queue nobody can read is
+    a queue where the sixteen genuine replies sitting in it are invisible.
+
+    The split between what expires and what does not is in
+    ``titan.notify.task_expiry``; the short version is that an alarm re-fires
+    while it is still true and a person does not.
+    """
+    from titan.notify.task_expiry import expire_stale_alarms
+
+    workspace_id = uuid.UUID(request.workspace_id)
+    async with workspace_unit_of_work(workspace_id) as session:
+        report = await expire_stale_alarms(
+            session, workspace_id=workspace_id, now=dt.datetime.now(dt.UTC)
+        )
+    return ExpireAlarmsResult(expired=report.expired, still_open=report.still_open)
+
+
+@activity.defn(name="ping_watchdog")
+async def ping_watchdog(_: PingWatchdogInput) -> PingWatchdogResult:
+    """Tell an external watchdog the stack is still up. Hourly.
+
+    **Titan cannot report that Titan is down.** Every alarm in this module runs
+    inside the process it is watching, so the one failure mode none of them can
+    reach is the machine being off -- which is the failure mode that has
+    actually happened. Nothing went out on 4, 5 or 6 September and nobody knew
+    until somebody looked.
+
+    A ping already existed, attached to the daily report. That is the right
+    signal for "the report went out" and the wrong one for "the stack is up":
+    it fires once a day, so the detection window is about twenty-six hours, and
+    a three-day outage is still two days old before anyone hears. This runs on
+    the hourly housekeeping pass instead, which takes the window to roughly two
+    hours with no new schedule and no new machinery.
+
+    Both pings may point at the same check. Extra pings never trip a dead man's
+    switch -- only their absence does -- so the daily one becomes a harmless
+    second heartbeat rather than something to remove.
+
+    A no-op until ``TITAN_HEALTHCHECK_PING_URL`` is set, which is the shipped
+    state: the wiring lands before the URL exists, so turning it on later is a
+    configuration change and not a deployment.
+    """
+    from titan.activities.daily_report import healthcheck_pinger
+
+    if not get_settings().healthcheck_ping_url:
+        return PingWatchdogResult(pinged=False, reason="no url configured")
+    try:
+        await healthcheck_pinger()
+    except Exception as exc:
+        # Swallowed here as well as by the workflow. A watchdog that cannot be
+        # reached is a watchdog problem; failing the housekeeping pass over it
+        # would let a monitoring outage stop the repairs being monitored.
+        logger.warning("watchdog ping failed: %s", str(exc)[:200])
+        return PingWatchdogResult(pinged=False, reason=f"{type(exc).__name__}")
+    return PingWatchdogResult(pinged=True)
+
+
+ALL_VITALS_ACTIVITIES = [
+    check_pipeline_vitals,
+    expire_stale_alarms_activity,
+    ping_watchdog,
+]
 
 __all__ = ["ALL_VITALS_ACTIVITIES", "check_pipeline_vitals"]
