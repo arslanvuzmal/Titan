@@ -245,6 +245,18 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
         )
     followups_due = sum(1 for result in scan if result.due)
 
+    # Which step each due lead is owed, keyed by lead. The scan is the only
+    # caller of ``plan_followup``, so it is the only thing in the system that
+    # knows *which* message a lead is next owed rather than merely that one is
+    # owed. Selection below reads ``next_action_at``, which carries the "when"
+    # and not the "which"; without this map the orchestrator sorted follow-ups
+    # to the front of the cycle and then started every one of them as an opener.
+    due_steps = {
+        str(result.lead_id): result.step_number
+        for result in scan
+        if result.due and result.step_number is not None
+    }
+
     # Two claims on this cycle, and the budget is whichever is larger.
     #
     # `fuel_budget` answers "how much new research tops the tank up"; `remaining`
@@ -274,6 +286,7 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             min_score=min_score,
             limit=budget,
             now=now,
+            due_steps=due_steps,
         )
         pool = await _pool_size(session, campaign_id=campaign_id)
 
@@ -408,6 +421,7 @@ async def _select_leads(
     min_score: int,
     limit: int,
     now: dt.datetime,
+    due_steps: dict[str, int] | None = None,
 ) -> list[PlannedLead]:
     """Choose which leads to work, follow-ups before new ones.
 
@@ -435,9 +449,27 @@ async def _select_leads(
         )
     ).all()
 
+    # ``due_steps`` counts from one, because a sequence step is a position in a
+    # list a person wrote. ``PlannedLead.step_number`` counts from zero, because
+    # zero is the opener. The single subtraction that reconciles them lives
+    # here; everything downstream carries the zero-based number unchanged.
+    #
+    # **A lead the scan did not reach is left for the next cycle rather than
+    # guessed at.** ``next_action_at`` says a follow-up is due without saying
+    # which one, and a wrong guess sends somebody the message they already had.
+    # The scan is bounded at 200 leads per campaign, so this is close to
+    # unreachable in practice -- and when it is reached, waiting an hour costs
+    # nothing that sending the wrong step would not cost more.
+    steps = due_steps or {}
     planned = [
-        PlannedLead(lead_id=str(lead.id), seed_url=_seed_url(domain), kind="followup")
+        PlannedLead(
+            lead_id=str(lead.id),
+            seed_url=_seed_url(domain),
+            kind="followup",
+            step_number=steps[str(lead.id)] - 1,
+        )
         for lead, domain in due_followups
+        if str(lead.id) in steps
     ]
 
     remaining = limit - len(planned)

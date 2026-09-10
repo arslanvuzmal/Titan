@@ -353,6 +353,12 @@ class CampaignOrchestratorWorkflow:
                     # own prior work rather than crawling and drafting again.
                     run_key=f"{request.campaign_id}:{lead.lead_id}:{self._cycles}",
                     seed_url=lead.seed_url,
+                    # The planner already worked out whether this lead is owed
+                    # an opener or a follow-up, and which one. Dropping it here
+                    # is what made the "followup" tag decorative: the plan
+                    # ordered follow-ups first and then asked for four hundred
+                    # openers.
+                    step_number=lead.step_number,
                 ),
                 id=research_workflow_id(
                     request.workspace_id, request.campaign_id, lead.lead_id

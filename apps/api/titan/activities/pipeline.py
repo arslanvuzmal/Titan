@@ -46,6 +46,7 @@ from titan.db.models import (
     ContactChannel,
     ContactVerification,
     CrawlRun,
+    EmailSequence,
     FindingEvidence,
     Lead,
     LeadScore,
@@ -56,6 +57,7 @@ from titan.db.models import (
     Page,
     ResearchRun,
     SenderIdentity,
+    SequenceStep,
     SolutionRecommendation,
     Workspace,
 )
@@ -1567,11 +1569,21 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         # days when the estate wrote to the dentist by name and hard-bounced.
         channel_id = await _best_channel_for(session, channel_id)
 
+        # Which step of the sequence this is. Resolved here rather than passed
+        # in because the step rows belong to the campaign and can be edited
+        # between the workflow starting and the draft landing.
+        sequence_step_id = await _sequence_step_for(
+            session,
+            campaign_id=uuid.UUID(request.campaign_id),
+            step_number=request.step_number,
+        )
+
         draft = MessageDraft(
             workspace_id=workspace_id,
             lead_id=uuid.UUID(request.lead_id),
             campaign_id=uuid.UUID(request.campaign_id),
             contact_channel_id=channel_id,
+            sequence_step_id=sequence_step_id,
             idempotency_key=request.idempotency_key,
             status=(
                 DraftStatus.AWAITING_APPROVAL
@@ -1595,11 +1607,14 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             # the caller's static label -- every draft ever written carried
             # "first_observation", so the column recorded nothing.
             #
-            # The sequence step is not lost with it: ``variant`` carries
-            # ":step2" and the request's own key never varied by step anyway.
-            # What is gained is the ability to ask whether conversion messages
-            # out-reply quality ones, which is the only reason to have split
-            # them.
+            # An earlier revision of this comment claimed the sequence step was
+            # "not lost with it" because ``variant`` carries ":step2". That was
+            # wrong, and expensively so: the composer only appends ":step2" when
+            # ``step_number`` is non-zero, nothing ever passed a non-zero
+            # ``step_number``, and no variant in the estate has ever contained
+            # the substring. The step is now carried by ``sequence_step_id``
+            # above, which is a foreign key rather than a string somebody has to
+            # remember to parse.
             template_key=composed.template_key or request.template_key,
             # The composer picked this from the lead id and has always done so.
             # Recording it is what turns a real assignment into a measurable one.
@@ -1826,6 +1841,52 @@ __all__ = [
     "resolve_contact",
     "score_lead",
 ]
+
+
+async def _sequence_step_for(
+    session: Any, *, campaign_id: uuid.UUID, step_number: int
+) -> uuid.UUID | None:
+    """Which row of the campaign's sequence this draft is, if any.
+
+    Recording this is what makes the sequence a sequence. Without it
+    :meth:`titan.delivery.followup_scheduler.FollowUpScheduler._plan_for`
+    computes an empty ``completed`` set for every lead, so
+    :func:`titan.intelligence.sequencing.plan_followup` picks ``remaining[0]``
+    -- step one, ``delay_days=0`` -- and calls it due, forever. Measured on the
+    live estate before this was written: 6,064 drafts, none carrying a step,
+    5,000 of them superseded, and 344 of 375 contacted leads sitting on exactly
+    one delivered message with steps two through four never once composed.
+
+    **The two numbering schemes are off by one and the mapping is here.**
+    ``DraftActivityInput.step_number`` counts from zero because zero is the
+    opener; ``sequence_steps.step_number`` counts from one because it is a
+    position in a list a human wrote. Everything downstream reads the row, so
+    this is the only place the two have to be reconciled.
+
+    Returns ``None`` -- and must never raise -- when the campaign has no active
+    sequence or has not defined this step. A campaign without a sequence still
+    sends openers, and that is not a reason to lose the draft the model was
+    just paid for.
+    """
+    step_id = (
+        await session.execute(
+            select(SequenceStep.id)
+            .join(EmailSequence, EmailSequence.id == SequenceStep.sequence_id)
+            .where(
+                EmailSequence.campaign_id == campaign_id,
+                EmailSequence.is_active.is_(True),
+                SequenceStep.step_number == step_number + 1,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if step_id is None:
+        logger.info(
+            "no active sequence step for this draft; it will not advance a sequence",
+            extra={"campaign_id": str(campaign_id), "step_number": step_number},
+        )
+    return step_id
 
 
 async def _best_channel_for(session: Any, channel_id: uuid.UUID) -> uuid.UUID:

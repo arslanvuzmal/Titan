@@ -371,6 +371,11 @@ class LeadResearchWorkflow:
                 research_run_id=research_run_id,
                 contact_channel_id=contact.eligible_channel_id,
                 idempotency_key=f"{request.run_key}:draft",
+                # Opener or follow-up, decided by the planner and carried
+                # through unchanged. The composer reads it to require a finding
+                # no earlier step has cited, and the activity resolves it to a
+                # ``sequence_step_id`` so the sequence can actually advance.
+                step_number=request.step_number,
             ),
             start_to_close_timeout=MODEL_TIMEOUT,
             retry_policy=MODEL_RETRY,

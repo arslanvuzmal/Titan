@@ -14,7 +14,11 @@ from unittest import mock
 
 import pytest
 from sqlalchemy import select
-from titan.activities.orchestration import _read_fuel, plan_campaign_cycle
+from titan.activities.orchestration import (
+    _read_fuel,
+    _select_leads,
+    plan_campaign_cycle,
+)
 from titan.db.enums import (
     CampaignStatus,
     ContactSource,
@@ -314,6 +318,79 @@ async def test_planning_runs_the_follow_up_scan(db_session, workspace):
         # Either a due date or a recorded reason for there not being one. Null
         # with no explanation is the state that meant nothing was ever owed.
         assert lead.next_action_at is not None or lead.status_reason is not None
+
+
+async def test_a_due_follow_up_is_planned_as_the_step_it_is(db_session, workspace):
+    """Planted violation: tag the lead "followup" and start it as an opener.
+
+    ``_select_leads`` sorted follow-ups to the front of every cycle and set
+    ``kind="followup"`` on them -- a field written in one place and read in
+    none. The orchestrator then built ``ResearchLeadInput`` without a step, so
+    ``generate_draft`` composed message one. The prioritisation was real and
+    the thing it prioritised was a duplicate opener.
+
+    The number carried here is zero-based because zero is the opener;
+    ``sequence_steps.step_number`` is one-based because it is a position in a
+    list a person wrote. This is the boundary where the two meet.
+    """
+    fixture = await build_sendable(db_session, workspace)
+
+    async with workspace_unit_of_work(workspace) as session:
+        lead = await session.get(Lead, fixture.lead_id)
+        lead.status = LeadStatus.CONTACTED
+        lead.last_contacted_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        lead.next_action_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
+
+    async with workspace_unit_of_work(workspace) as session:
+        planned = await _select_leads(
+            session,
+            campaign_id=fixture.campaign_id,
+            min_score=0,
+            limit=10,
+            now=dt.datetime.now(dt.UTC),
+            # The scan's own numbering: step 2 is the first follow-up.
+            due_steps={str(fixture.lead_id): 2},
+        )
+
+    followups = [p for p in planned if p.lead_id == str(fixture.lead_id)]
+    assert followups, "a lead past its next_action_at is owed a follow-up"
+    assert followups[0].kind == "followup"
+    assert followups[0].step_number == 1, (
+        "sequence step 2 is draft step 1; sending step 0 would re-open with the "
+        "message this business already received"
+    )
+
+
+async def test_a_follow_up_the_scan_did_not_reach_waits(db_session, workspace):
+    """Fails closed, like every other branch of the sequencing decision.
+
+    ``next_action_at`` says a follow-up is due; it does not say which one. The
+    scan is the only caller of ``plan_followup`` and so the only thing that
+    knows. Absent that answer the lead is left for the next cycle rather than
+    guessed at -- an hour's delay against sending somebody the message they
+    already had.
+    """
+    fixture = await build_sendable(db_session, workspace)
+
+    async with workspace_unit_of_work(workspace) as session:
+        lead = await session.get(Lead, fixture.lead_id)
+        lead.status = LeadStatus.CONTACTED
+        lead.last_contacted_at = dt.datetime.now(dt.UTC) - dt.timedelta(days=10)
+        lead.next_action_at = dt.datetime.now(dt.UTC) - dt.timedelta(hours=1)
+
+    async with workspace_unit_of_work(workspace) as session:
+        planned = await _select_leads(
+            session,
+            campaign_id=fixture.campaign_id,
+            min_score=0,
+            limit=10,
+            now=dt.datetime.now(dt.UTC),
+            due_steps={},
+        )
+
+    assert not [
+        p for p in planned if p.lead_id == str(fixture.lead_id) and p.kind == "followup"
+    ], "an unmapped lead must not be planned as a follow-up of unknown step"
 
 
 async def add_reachable_leads(

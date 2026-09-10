@@ -344,6 +344,70 @@ def cmd_backfill_costs(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def cmd_backfill_steps(args: argparse.Namespace) -> int:
+    """Attach already-delivered drafts to the sequence step they actually were.
+
+    Prints what it would do and changes nothing unless ``--apply`` is given.
+
+    ``sequence_step_id`` was never written by ``generate_draft``, so the
+    follow-up scheduler read an empty ``completed`` set for every lead and
+    re-offered step one forever. Fixing the writer only fixes new drafts; the
+    leads already contacted still look untouched, and the scheduler would open
+    with the message those businesses already received.
+
+    Run ``titan sequences`` first. This matches drafts against a campaign's
+    *active* sequence, so a campaign that has none contributes nothing and its
+    leads stay stranded.
+    """
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from titan.db.models import Workspace
+    from titan.db.session import get_sessionmaker
+    from titan.outreach.sequence_backfill import apply as apply_backfill
+    from titan.outreach.sequence_backfill import survey
+
+    async def run() -> int:
+        async with get_sessionmaker()() as session:
+            query = select(Workspace.id, Workspace.slug).where(
+                Workspace.id == _uuid.UUID(args.workspace)
+                if _looks_like_uuid(args.workspace)
+                else Workspace.slug == args.workspace
+            )
+            row = (await session.execute(query)).first()
+        if row is None:
+            print(f"no workspace matched {args.workspace!r}")
+            return 1
+        workspace_id, slug = row
+
+        report = await (apply_backfill if args.apply else survey)(workspace_id)
+
+        print(f"Delivered drafts carrying no sequence step, in {slug}")
+        print()
+        if report.is_noop:
+            print("  none -- every delivered draft already knows its step.")
+            return 0
+
+        for step_number in sorted(report.by_step):
+            count = report.by_step[step_number]
+            label = "opener" if step_number == 1 else f"follow-up {step_number - 1}"
+            print(f"  step {step_number}  {count:>5}  ({label})")
+        print()
+        print(
+            f"  {report.drafts_matched} draft(s) across {report.leads_affected} lead(s)"
+        )
+        print()
+        if report.applied:
+            print("Applied. Those leads can now be offered the step they are next owed.")
+        else:
+            print("PLAN (nothing was changed). Re-run with --apply to write it.")
+        return 0
+
+    configure_event_loop()
+    return asyncio.run(run())
+
+
 def cmd_check_providers(_: argparse.Namespace) -> int:
     """Live health check. Makes real calls; reports what actually happened."""
     settings = get_settings()
@@ -2518,6 +2582,21 @@ def main() -> int:
         ),
     )
     backfill_parser.set_defaults(func=cmd_backfill_costs)
+
+    steps_parser = sub.add_parser(
+        "backfill-steps",
+        help="attach delivered drafts to the sequence step they were",
+    )
+    steps_parser.add_argument("--workspace", default="titan")
+    steps_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "carry it out. Without this the command prints what it would "
+            "attach and changes nothing."
+        ),
+    )
+    steps_parser.set_defaults(func=cmd_backfill_steps)
 
     args = parser.parse_args()
     return int(args.func(args))

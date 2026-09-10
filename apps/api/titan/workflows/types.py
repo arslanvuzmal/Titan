@@ -46,6 +46,11 @@ class ResearchLeadInput:
     #: Stable across retries; used to derive every downstream idempotency key.
     run_key: str
     seed_url: str | None = None
+    #: Which message of the sequence to compose: 0 the opener, 1+ a follow-up.
+    #: Passed to ``generate_draft`` unchanged. Defaulted so every existing
+    #: caller -- the CLI, the re-draft script, the tests -- keeps asking for an
+    #: opener without being edited.
+    step_number: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -520,6 +525,13 @@ class PlannedLead:
     #: "new" or "followup". Recorded so the orchestrator's own logs explain the
     #: mix without a join, and so follow-ups can be prioritised.
     kind: str = "new"
+    #: Which message this is for the lead: 0 the opener, 1+ a follow-up.
+    #:
+    #: Carried rather than re-derived downstream. ``kind`` alone said a
+    #: follow-up was owed without saying *which*, so the orchestrator sorted
+    #: follow-ups to the front of the cycle and then started them as openers --
+    #: the tag was written in one place and read in none.
+    step_number: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
