@@ -342,12 +342,20 @@ async def rewrite_message(
         except Exception as exc:
             logger.info(
                 "sentence rewrite unavailable; keeping the deterministic text",
-                extra={"error_code": type(exc).__name__},
+                extra={"error_code": type(exc).__name__, "error": str(exc)[:500]},
             )
+            # The *reason*, not just the class name. Every draft written between
+            # 26 August and 10 September recorded the string "model unavailable:
+            # ModelError" and nothing else, so fifteen days of drafts carried a
+            # record of the failure that could not identify it. The cause -- two
+            # models retired by NVIDIA on the same morning, an OpenRouter
+            # account at zero credits -- was one f-string away and thrown out
+            # every time. A diagnostic that cannot name the fault is a log line
+            # pretending to be one.
             return RewriteOutcome(
                 message=message,
                 rewritten=False,
-                detail=f"model unavailable: {type(exc).__name__}",
+                detail=f"model unavailable: {type(exc).__name__}: {str(exc)[:400]}",
             )
 
         candidate = (parsed.sentence or "").strip()

@@ -325,6 +325,15 @@ class ModelGateway:
             attempts.extend(self._fallbacks(route))
 
         last_error: Exception | None = None
+        #: Every attempt that failed, as "provider:model -- reason".
+        #:
+        #: Only the last error used to survive, and that is how five dead
+        #: routes read as one line: the message path fell from OpenRouter
+        #: (402, no credits) to NVIDIA (410, model retired) and reported the
+        #: second, so the account problem was invisible behind the routing
+        #: problem. Different causes need different fixes; a chain that
+        #: reports one of them sends an operator to the wrong place.
+        failures: list[str] = []
         for index, candidate in enumerate(attempts):
             # The cap follows the route. A cheap task that has fallen all the
             # way through to the premium provider is still a premium call, and
@@ -335,12 +344,16 @@ class ModelGateway:
                     self._check_premium_share()
                 except BudgetExceededError as exc:
                     last_error = exc
+                    failures.append(f"{candidate.provider}:{candidate.model_id} -- {exc}")
                     continue
 
             breaker = self._breakers.setdefault(candidate.provider, CircuitBreaker())
             if not breaker.allow(self._now()):
                 last_error = CircuitOpenError(
                     f"circuit open for provider {candidate.provider!r}"
+                )
+                failures.append(
+                    f"{candidate.provider}:{candidate.model_id} -- circuit open"
                 )
                 continue
 
@@ -359,6 +372,7 @@ class ModelGateway:
                 # output. That is not a provider fault, so the breaker is left
                 # alone -- otherwise one bad prompt removes a healthy provider.
                 last_error = exc
+                failures.append(f"{candidate.provider}:{candidate.model_id} -- {exc}")
                 logger.warning(
                     "model returned schema-invalid output",
                     extra={"provider": candidate.provider, "model": candidate.model_id},
@@ -367,6 +381,7 @@ class ModelGateway:
             except (ModelError, TimeoutError, OSError) as exc:
                 breaker.record_failure(self._now())
                 last_error = exc
+                failures.append(f"{candidate.provider}:{candidate.model_id} -- {exc}")
                 logger.warning(
                     "model call failed",
                     extra={
@@ -421,7 +436,8 @@ class ModelGateway:
             # schema" and "the provider is down" call for different responses.
             raise last_error
         raise ModelError(
-            f"all providers failed for task {task.value}: {last_error}"
+            f"all {len(attempts)} route(s) failed for task {task.value}: "
+            + "; ".join(failures or [str(last_error)])
         ) from last_error
 
     async def _call_with_repair(
@@ -586,11 +602,33 @@ class ModelGateway:
 
     # ------------------------------------------------------------ validation
     async def validate_models(self) -> dict[str, Any]:
-        """Check every configured route against the provider's live catalogue.
+        """Call every configured route and report which ones answer.
 
-        This is the answer to "do not hardcode assumed model IDs": the defaults
-        in config.py are placeholders, and this command is how an operator finds
-        out before a campaign does.
+        **It calls. It does not look the name up.** This check used to ask only
+        whether ``route.model_id`` appeared in the provider's catalogue, and on
+        2026-09-10 all five configured routes were dead while that check would
+        have cleared three of them:
+
+        =========================================  ==========================
+        failure                                    in the catalogue?
+        =========================================  ==========================
+        ``nvidia`` retired the model (HTTP 410)    no -- would have caught it
+        ``openrouter`` had zero credits (402)      yes
+        the free tier went paid (404 "unavailable  yes
+        for free")
+        the model was overloaded (503)             yes
+        =========================================  ==========================
+
+        A name in a catalogue is not a model you may call. Billing, free-tier
+        policy and capacity all sit between the two, and each of them killed a
+        route here. So the check spends one small completion per route --
+        five calls, a few seconds, once an hour -- and answers the question an
+        operator actually has, which is whether a draft written now would get a
+        model or fall back to silence.
+
+        The catalogue is still read, but only to *explain* a failure: "not in
+        the catalogue" and "in the catalogue and refusing you" send an operator
+        to completely different places.
         """
         report: dict[str, Any] = {"routes": [], "ok": True}
         for task in ModelTask:
@@ -614,25 +652,77 @@ class ModelGateway:
                 continue
 
             try:
-                catalogue = await provider.list_models()
+                response = await provider.complete(
+                    model_id=route.model_id,
+                    system=_PROBE_SYSTEM,
+                    user=_PROBE_USER,
+                    json_schema=None,
+                    # Generous for a one-word reply, because a reasoning model
+                    # spends the budget thinking first and a tight cap makes a
+                    # healthy route look broken -- the same trap that made the
+                    # rewriter's 200-token cap discard every rewrite.
+                    max_tokens=_PROBE_MAX_TOKENS,
+                    temperature=0.0,
+                    timeout_seconds=float(
+                        self._settings.model_gateway_timeout_seconds
+                    ),
+                )
             except Exception as exc:
-                entry["status"] = "catalogue_unavailable"
-                entry["detail"] = f"{type(exc).__name__}: {exc}"
+                entry["status"] = "call_failed"
+                entry["detail"] = await self._explain_failure(provider, route, exc)
                 report["ok"] = False
                 report["routes"].append(entry)
                 continue
 
-            if route.model_id in catalogue:
+            if (response.text or "").strip():
                 entry["status"] = "ok"
             else:
-                entry["status"] = "model_not_found"
-                entry["detail"] = (
-                    f"{route.model_id!r} is not in {route.provider}'s catalogue "
-                    f"({len(catalogue)} models available)"
-                )
+                # A 200 with nothing in it. Rare, and it fails a real call just
+                # as completely as a 500 does, so it is not "ok".
+                entry["status"] = "empty_response"
+                entry["detail"] = "the provider answered with no content"
                 report["ok"] = False
             report["routes"].append(entry)
         return report
+
+    async def _explain_failure(
+        self, provider: ChatProvider, route: Route, exc: Exception
+    ) -> str:
+        """Say whether the model is gone or merely refusing us.
+
+        Both arrive as an exception from the same call; they send an operator to
+        different places -- a route to change versus an account to top up -- and
+        only the catalogue separates them.
+        """
+        detail = f"{type(exc).__name__}: {exc}"
+        try:
+            catalogue = await provider.list_models()
+        except Exception:
+            return detail
+        if route.model_id in catalogue:
+            return (
+                f"{detail} -- the model is in {route.provider}'s catalogue, so "
+                "this is an account or capacity problem, not a wrong name"
+            )
+        return (
+            f"{detail} -- {route.model_id!r} is no longer in "
+            f"{route.provider}'s catalogue of {len(catalogue)} models, "
+            "so the route needs changing"
+        )
+
+
+#: What :meth:`ModelGateway.validate_models` sends to prove a route answers.
+#:
+#: Deliberately trivial and free of a JSON schema: the question is whether the
+#: provider will serve this model to this account at all, and a schema failure
+#: would confuse "the route is dead" with "this model formats JSON badly".
+_PROBE_SYSTEM = "Reply with exactly one word."
+_PROBE_USER = "Reply with the word: ready"
+
+#: Room to think before answering. A reasoning model spends its budget on
+#: thinking tokens first and emits nothing under a tight cap, so a small number
+#: here would report every healthy reasoning route as ``empty_response``.
+_PROBE_MAX_TOKENS = 512
 
 
 _PRICE_HINTS: dict[str, float] = {

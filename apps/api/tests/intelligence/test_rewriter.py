@@ -284,6 +284,32 @@ async def test_a_model_outage_keeps_the_deterministic_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_outage_is_recorded_with_its_reason() -> None:
+    """Planted violation: record ``type(exc).__name__`` and drop the message.
+
+    Every draft written between 26 August and 10 September carried the string
+    "model unavailable: ModelError" and nothing more, so fifteen days of drafts
+    held a record of the failure that could not identify it. The cause was in
+    the exception the whole time: NVIDIA had retired two models at 09:00 on the
+    26th and the OpenRouter account had no credit. A diagnostic that cannot
+    name the fault is not a diagnostic.
+    """
+    from titan.intelligence.rewriter import rewrite_message
+
+    outcome = await rewrite_message(
+        message(),
+        gateway=StubGateway(
+            RuntimeError("all 2 route(s) failed: nvidia:x -- HTTP 410: end of life")
+        ),
+        domain="harborline.co.uk",
+        observed_value="HTTP 404",
+    )
+
+    assert "410" in outcome.detail, "the provider's reason must survive"
+    assert "end of life" in outcome.detail
+
+
+@pytest.mark.asyncio
 async def test_the_sentence_travels_in_the_untrusted_channel() -> None:
     """It is built from the prospect's page, which can contain instructions."""
     from titan.intelligence.rewriter import rewrite_message

@@ -270,8 +270,43 @@ async def test_repeated_failures_open_the_circuit() -> None:
     assert len(provider.calls) == calls_before
 
 
+@pytest.mark.asyncio
+async def test_a_failed_call_reports_every_route_it_tried() -> None:
+    """Planted violation: raise only the last error.
+
+    The message route fell from OpenRouter (402, the account had no credit) to
+    NVIDIA (410, the model was retired) and reported the second. Two faults,
+    two different fixes, and the one an operator saw sent them to change a
+    model ID while the real problem was a billing page.
+    """
+    primary = MockChatProvider(catalogue=["mock/model-a"])
+    primary.fail_times = 99
+    spare = MockChatProvider(catalogue=["spare/model-z"])
+    spare.fail_times = 99
+    gw = ModelGateway(
+        {"mock": primary, "spare": spare},
+        settings(model_route_research="spare:spare/model-z"),
+    )
+
+    with pytest.raises(ModelError) as raised:
+        await gw.complete_typed(ModelTask.MESSAGE, Finding, bundle())
+
+    message = str(raised.value)
+    assert "mock:mock/model-a" in message
+    assert "spare:spare/model-z" in message, (
+        "the fallback route's failure must survive into the message; only the "
+        "last error used to, which hid the first cause behind the second"
+    )
+
+
 # ==========================================================================
-# Model catalogue validation
+# Model route validation
+#
+# The theme: a route is validated by calling it. Checking the name against a
+# catalogue is what this used to do, and on 2026-09-10 every configured route
+# was dead while that check would have cleared three of the five -- the model
+# was listed and the provider still refused to serve it, for want of credit,
+# for want of a free tier, or for want of capacity.
 # ==========================================================================
 @pytest.mark.asyncio
 async def test_validate_models_flags_a_missing_model() -> None:
@@ -284,7 +319,61 @@ async def test_validate_models_flags_a_missing_model() -> None:
     statuses = {r["task"]: r["status"] for r in report["routes"]}
     assert statuses["extraction"] == "ok"
     # model-b is configured for the premium route but absent from the catalogue.
-    assert statuses["premium"] == "model_not_found"
+    assert statuses["premium"] == "call_failed"
+
+    premium = next(r for r in report["routes"] if r["task"] == "premium")
+    assert "no longer in" in premium["detail"], (
+        "a route that failed because the model is gone must say so -- "
+        "changing the route and topping up an account are different jobs"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_route_that_is_listed_but_refuses_is_not_ok() -> None:
+    """Planted violation: check the catalogue instead of calling the model.
+
+    This is the regression that cost fifteen days. ``anthropic/claude-sonnet-4``
+    was in OpenRouter's catalogue the whole time and answered every request
+    with 402 "requires more credits"; ``minimax/minimax-m3:free`` was listed
+    and answered 404 "unavailable for free". A validator that reads catalogues
+    reports both as healthy.
+    """
+    provider = MockChatProvider(catalogue=["mock/model-a", "mock/model-b"])
+    provider.fail_times = 99  # listed, and refusing every call
+    gw = ModelGateway({"mock": provider}, settings())
+    report = await gw.validate_models()
+
+    assert report["ok"] is False
+    assert all(r["status"] == "call_failed" for r in report["routes"])
+    premium = next(r for r in report["routes"] if r["task"] == "premium")
+    assert "catalogue" in premium["detail"], (
+        "a route that is present and refusing must be named as an account or "
+        "capacity problem, not sent to change a model ID that is correct"
+    )
+
+
+@pytest.mark.asyncio
+async def test_validation_actually_calls_the_model() -> None:
+    """The whole point. A catalogue read costs one request and proves nothing
+    about whether this account may call this model."""
+    provider = MockChatProvider(catalogue=["mock/model-a", "mock/model-b"])
+    gw = ModelGateway({"mock": provider}, settings())
+    await gw.validate_models()
+
+    assert provider.calls, "validate_models must call each route, not list them"
+    called = {c["model_id"] for c in provider.calls}
+    assert called == {"mock/model-a", "mock/model-b"}
+
+
+@pytest.mark.asyncio
+async def test_a_route_answering_with_nothing_is_not_ok() -> None:
+    """A 200 with an empty body fails a real call as completely as a 500."""
+    provider = MockChatProvider(responses=[""] * 5)
+    gw = ModelGateway({"mock": provider}, settings())
+    report = await gw.validate_models()
+
+    assert report["ok"] is False
+    assert all(r["status"] == "empty_response" for r in report["routes"])
 
 
 @pytest.mark.asyncio

@@ -143,19 +143,66 @@ class Settings(BaseSettings):
     cloudflare_api_token: SecretStr | None = None
 
     #: Model IDs are configuration, never hardcoded assumptions. They are
-    #: validated against the live provider catalogue by `titan validate-models`.
-    model_route_extraction: str = "nvidia:meta/llama-3.1-8b-instruct"
-    model_route_research: str = "nvidia:nvidia/llama-3.3-nemotron-super-49b-v1"
-    model_route_verification: str = "gemini:gemini-3.7-flash"
-    #: Gemini writes the prose. It does not decide what is true: the rewriter
+    #: checked by `titan validate-models`, which *calls* each route rather than
+    #: looking it up -- see :meth:`ModelGateway.validate_models` for why the
+    #: cheaper catalogue check was not enough.
+    #:
+    #: **Every route below is a model that expires.** On 2026-08-26 NVIDIA
+    #: retired ``meta/llama-3.1-8b-instruct`` and
+    #: ``nvidia/llama-3.3-nemotron-super-49b-v1`` on the same day; OpenRouter
+    #: had meanwhile run ``anthropic/claude-sonnet-4`` down to zero credits and
+    #: moved ``minimax/minimax-m3:free`` behind payment, and Gemini was
+    #: answering 503. All five routes were dead at once and nothing said so for
+    #: fifteen days, because every call site degrades quietly by design. The
+    #: routes here are the ones that answered a real JSON-schema call on
+    #: 2026-09-10; treat them as perishable and let the scheduled validator be
+    #: what notices, not a person.
+    model_route_extraction: str = "nvidia:nvidia/nemotron-3-super-120b-a12b"
+    model_route_research: str = "nvidia:nvidia/nemotron-3-super-120b-a12b"
+    model_route_verification: str = "nvidia:nvidia/nemotron-3-super-120b-a12b"
+    #: The model writes the prose. It does not decide what is true: the rewriter
     #: hands it one sentence and the claim that sentence must preserve, and
     #: discards anything that comes back having lost the evidenced specific
-    #: (titan.intelligence.rewriter). Both routes above were pinned to models
-    #: that have since left their provider's catalogue -- `titan
-    #: validate-models` reported both as absent, so the message path could not
-    #: have run at all.
-    model_route_message: str = "gemini:gemini-3.7-flash"
-    model_route_premium: str = "openrouter:anthropic/claude-sonnet-4"
+    #: (titan.intelligence.rewriter).
+    #:
+    #: Deliberately on a *different provider* from the three above. The message
+    #: path is the one whose absence is invisible -- a failed rewrite still
+    #: sends, just in the deterministic words -- so it gets the route least
+    #: likely to die in the same instant as the rest, and the gateway's
+    #: cross-provider fallback then covers each direction with the other.
+    model_route_message: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    #: The expensive tier -- and, honestly, there is not one at the moment.
+    #:
+    #: This route was ``openrouter:anthropic/claude-sonnet-4`` against an
+    #: account at zero credits, so every premium call returned 402 and no
+    #: caller noticed. Nothing in the pipeline asks for PREMIUM today, but the
+    #: route still has to answer: it is what ``_is_premium_route`` compares
+    #: against, so it must stay *distinct* from the routes above or every
+    #: ordinary fallback onto them would be metered against the premium share
+    #: and eventually refused.
+    #:
+    #: On Cloudflare, which is the third provider and until now an unused one:
+    #: the account had a healthy gateway with 2,784 models reachable through it
+    #: and not one route pointed at it. That matters beyond this line -- the
+    #: gateway falls back across *providers*, so with everything on NVIDIA and
+    #: OpenRouter a bad afternoon at either took most of the estate with it.
+    #:
+    #: Chosen by measurement against a 60s cap, JSON schema included:
+    #:
+    #: =========================================  ====================
+    #: ``cloudflare:...llama-3.3-70b-fp8-fast``   1.3-2.2s, 2 of 2
+    #: ``nvidia:openai/gpt-oss-20b``              7-39s, then two
+    #:                                            consecutive timeouts
+    #: ``nvidia:...nemotron-3-ultra-550b``        503 overloaded
+    #: ``openrouter:...ultra-550b:free``          33-50s, 2 of 3
+    #: ``nvidia:deepseek-v4-pro``                 122-155s
+    #: =========================================  ====================
+    #:
+    #: A route an hourly alarm depends on has to be boring, and a 70B model
+    #: answering in two seconds is the only candidate here that is.
+    model_route_premium: str = (
+        "cloudflare:workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    )
 
     # --------------------------------------------------------------- budgets
     budget_workspace_daily_usd: float = Field(default=25.0, ge=0)
@@ -444,14 +491,16 @@ class Settings(BaseSettings):
 
     #: The route the contact lane will use.
     #:
-    #: Free tiers move. ``meta-llama/llama-3.3-70b-instruct:free`` was the
-    #: obvious default and OpenRouter now answers it with
-    #: "This model is unavailable for free"; ``google/gemma-4-31b-it:free``
-    #: answers 429 under load. ``minimax/minimax-m3:free`` was verified live on
-    #: this account on 2026-08-27 and carries a 1M context, which matters when
-    #: the input is a page of crawled text. Re-check with
-    #: ``titan validate-models`` rather than trusting this line indefinitely.
-    model_route_contact: str = "openrouter:minimax/minimax-m3:free"
+    #: Free tiers move, and this line is the proof: every model it has ever
+    #: named has since stopped being free. ``meta-llama/llama-3.3-70b-instruct:free``
+    #: began answering "This model is unavailable for free";
+    #: ``google/gemma-4-31b-it:free`` answers 429 under load; and
+    #: ``minimax/minimax-m3:free``, verified live on 2026-08-27 and left
+    #: unchecked, was answering the same "unavailable for free" 404 by
+    #: 2026-09-10. The lesson is not a better guess at a durable free model --
+    #: there is no such thing -- it is that ``titan validate-models`` has to run
+    #: on a schedule, which it now does (``housekeeping``).
+    model_route_contact: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
     #: A one-page PDF attached to every message.
     #:

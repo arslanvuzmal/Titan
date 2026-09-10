@@ -128,11 +128,11 @@ x-titan-env: &titan-env
   # Model IDs are configuration. Pinned routes that leave a provider's
   # catalogue must be changeable without a rebuild; `titan validate-models`
   # checks them against the live catalogue.
-  TITAN_MODEL_ROUTE_EXTRACTION: ${TITAN_MODEL_ROUTE_EXTRACTION:-nvidia:meta/llama-3.1-8b-instruct}
-  TITAN_MODEL_ROUTE_RESEARCH: ${TITAN_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/llama-3.3-nemotron-super-49b-v1}
-  TITAN_MODEL_ROUTE_VERIFICATION: ${TITAN_MODEL_ROUTE_VERIFICATION:-gemini:gemini-3.7-flash}
-  TITAN_MODEL_ROUTE_MESSAGE: ${TITAN_MODEL_ROUTE_MESSAGE:-gemini:gemini-3.7-flash}
-  TITAN_MODEL_ROUTE_PREMIUM: ${TITAN_MODEL_ROUTE_PREMIUM:-openrouter:anthropic/claude-sonnet-4}
+  TITAN_MODEL_ROUTE_EXTRACTION: ${TITAN_MODEL_ROUTE_EXTRACTION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  TITAN_MODEL_ROUTE_RESEARCH: ${TITAN_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  TITAN_MODEL_ROUTE_VERIFICATION: ${TITAN_MODEL_ROUTE_VERIFICATION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  TITAN_MODEL_ROUTE_MESSAGE: ${TITAN_MODEL_ROUTE_MESSAGE:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
+  TITAN_MODEL_ROUTE_PREMIUM: ${TITAN_MODEL_ROUTE_PREMIUM:-cloudflare:workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast}
   # --- message content ---
   # Real previous projects, cited in the credibility paragraph. Unset is a
   # working state: the message keeps its generic credential sentence rather
@@ -151,7 +151,7 @@ x-titan-env: &titan-env
   # the shipped default: an attachment is a new signal to receivers, so it goes
   # to a sample first and to everything only once the mailboxes are healthy.
   TITAN_ONE_PAGER_SAMPLE_PERCENT: ${TITAN_ONE_PAGER_SAMPLE_PERCENT:-0}
-  TITAN_MODEL_ROUTE_CONTACT: ${TITAN_MODEL_ROUTE_CONTACT:-openrouter:minimax/minimax-m3:free}
+  TITAN_MODEL_ROUTE_CONTACT: ${TITAN_MODEL_ROUTE_CONTACT:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
   # --- identity ---
   TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}
   TITAN_LOCAL_JWT_SECRET: ${TITAN_LOCAL_JWT_SECRET:-dev-only-not-for-production}

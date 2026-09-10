@@ -132,6 +132,24 @@ class Vitals:
     #: means nothing will leave at all.
     sending_provider_ok: bool | None = None
 
+    #: Whether the configured model routes still answer a real call.
+    #:
+    #: ``None`` means nobody asked. ``False`` means a route was called and did
+    #: not answer, and unlike every other field here that is a fault which
+    #: *hides itself*: the rewriter, the reply classifier and the contact
+    #: finder all catch their own failure and carry on with a degraded result,
+    #: by design, because a bad minute at a third party must not fail a draft.
+    #: The cost of that design is that a permanent failure looks exactly like a
+    #: bad minute. Between 26 August and 10 September every model route was
+    #: dead -- two retired on the same morning, one account at zero credits,
+    #: one free tier gone paid, one overloaded -- and the pipeline reported
+    #: itself healthy for fifteen days while every inbound reply was filed
+    #: ``UNKNOWN``. This is the field that makes that visible.
+    model_routes_ok: bool | None = None
+    #: Which routes failed and why, for the alarm to quote. Empty when nothing
+    #: was asked or everything answered.
+    model_routes_detail: str = ""
+
     now: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
     # ---------------------------------------------------------- derived
@@ -214,6 +232,34 @@ def check(vitals: Vitals) -> list[Alarm]:
                     "a lapsed trial, or a failed payment. A rotated or revoked "
                     "key looks identical from here. Check the provider's "
                     "billing page first, then the key in the environment."
+                ),
+            )
+        )
+
+    # ---- the thinking has stopped, quietly -------------------------------
+    # Second, and above every pipeline alarm below it, because this is the only
+    # fault here that does not show up in any number on the dashboard. Sends,
+    # crawls and addresses all keep moving with the model layer dead; what
+    # stops is the judgement -- replies stop being classified, contacts stop
+    # being found, and messages go out in the deterministic words. Nothing on
+    # this page falls, so nothing here would ever have said so.
+    if vitals.model_routes_ok is False:
+        alarms.append(
+            Alarm(
+                code="model_routes_dead",
+                title="No model route is answering",
+                detail=(
+                    "Drafting still works and mail still goes out -- every "
+                    "caller degrades on purpose rather than failing a draft -- "
+                    "but nothing is being judged: inbound replies are filed "
+                    "UNKNOWN, no new contacts are found, and messages send in "
+                    "the deterministic wording.\n\n"
+                    "Model routes expire without warning and several usually "
+                    "expire together: a provider retires a model, an account "
+                    "runs out of credit, a free tier goes paid. Run `titan "
+                    "validate-models` for the per-route reason, then change "
+                    "TITAN_MODEL_ROUTE_* to something that answers.\n\n"
+                    f"{vitals.model_routes_detail}".rstrip()
                 ),
             )
         )
@@ -329,6 +375,8 @@ async def read_vitals(
     daily_send_capacity: int,
     mailboxes_sending: int,
     sending_provider_ok: bool | None = None,
+    model_routes_ok: bool | None = None,
+    model_routes_detail: str = "",
     now: dt.datetime | None = None,
     history_days: int = 7,
 ) -> Vitals:
@@ -455,6 +503,8 @@ async def read_vitals(
         research_failed=research_failed,
         sends_by_day=sends_by_day,
         sending_provider_ok=sending_provider_ok,
+        model_routes_ok=model_routes_ok,
+        model_routes_detail=model_routes_detail,
         now=moment,
     )
 
@@ -491,6 +541,12 @@ def render(vitals: Vitals) -> str:
                 "     -  not checked"
                 if vitals.sending_provider_ok is None
                 else ("    ok" if vitals.sending_provider_ok else " REFUSING CREDENTIALS")
+            ),
+            "  model routes        "
+            + (
+                "     -  not checked"
+                if vitals.model_routes_ok is None
+                else ("    ok" if vitals.model_routes_ok else " NONE ANSWERING")
             ),
         ]
     )

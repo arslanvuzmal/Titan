@@ -283,3 +283,59 @@ def test_the_reading_distinguishes_unchecked_from_refusing() -> None:
     assert "not checked" in render(vitals(sending_provider_ok=None))
     assert "REFUSING" in render(vitals(sending_provider_ok=False))
     assert "ok" in render(vitals(sending_provider_ok=True))
+
+
+# ---------------------------------------------- the thinking stops in silence
+def test_dead_model_routes_raise() -> None:
+    """Planted violation: judge the model layer by the numbers on this page.
+
+    Every other alarm here reads a number that moves when something breaks.
+    This one cannot: sends, crawls and addresses all carried on unchanged for
+    fifteen days with every model route dead, because each caller catches its
+    own failure and degrades on purpose. Nothing fell, so nothing said so --
+    and meanwhile every inbound reply was filed UNKNOWN.
+    """
+    alarms = check(vitals(model_routes_ok=False))
+
+    assert alarms, "no model route answering raised nothing"
+    assert "model_routes_dead" in {a.code for a in alarms}
+
+
+def test_dead_model_routes_outrank_the_pipeline_alarms() -> None:
+    """It explains the others rather than joining them. A workspace whose
+    research is failing *and* whose models are dead should be told about the
+    models first."""
+    alarms = check(vitals(model_routes_ok=False, research_finished=100, research_failed=90))
+
+    assert alarms[0].code in {"sending_provider_rejected", "model_routes_dead"}
+    codes_seen = [a.code for a in alarms]
+    assert codes_seen.index("model_routes_dead") < codes_seen.index("research_failing")
+
+
+def test_working_model_routes_are_silent() -> None:
+    assert codes(vitals(model_routes_ok=True)) == set()
+
+
+def test_unchecked_model_routes_do_not_alarm() -> None:
+    """None is not False, here for the same reason as the sending provider: a
+    free tier answering 429 for one busy minute must not raise an alarm that
+    then gets muted before the day it matters."""
+    assert codes(vitals(model_routes_ok=None)) == set()
+
+
+def test_the_alarm_quotes_which_route_failed_and_why() -> None:
+    """An alarm saying only "models are down" leaves the operator to run the
+    diagnosis by hand. The reasons differ per route and so do the fixes."""
+    detail = "  message       openrouter:x -- HTTP 402: requires more credits"
+    alarm = next(
+        a
+        for a in check(vitals(model_routes_ok=False, model_routes_detail=detail))
+        if a.code == "model_routes_dead"
+    )
+    assert "402" in alarm.detail
+    assert "validate-models" in alarm.detail
+
+
+def test_the_reading_shows_the_model_routes() -> None:
+    assert "not checked" in render(vitals(model_routes_ok=None))
+    assert "NONE ANSWERING" in render(vitals(model_routes_ok=False))

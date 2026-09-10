@@ -310,6 +310,16 @@ class MockChatProvider:
                 "has_schema": json_schema is not None,
             }
         )
+        if model_id not in self.catalogue:
+            # A provider does not serve a model it does not have. The mock used
+            # to answer anything asked of it, which made it unable to represent
+            # the exact failure that took the model layer down for fifteen days
+            # -- NVIDIA answering HTTP 410 for a model it had retired -- and so
+            # the validator's own test could never have caught the validator
+            # being wrong about it.
+            raise ModelError(
+                f"mock: HTTP 410: model {model_id!r} is not served by this provider"
+            )
         if self.fail_times > 0:
             self.fail_times -= 1
             raise ModelError("mock: injected provider failure")

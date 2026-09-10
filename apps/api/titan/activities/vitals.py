@@ -22,12 +22,20 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
 from titan.config import get_settings
-from titan.db.models import SenderHealthSnapshot, SenderIdentity
+from titan.db.models import (
+    MessageDraft,
+    ModelRun,
+    SenderHealthSnapshot,
+    SenderIdentity,
+)
 from titan.db.session import workspace_unit_of_work
+from titan.models.gateway import ModelGateway
+from titan.models.providers import build_providers
 from titan.delivery import adaptive_limits
 from titan.delivery.sender_health import SenderHealth
 from titan.intelligence.vitals import check, read_vitals, render
@@ -67,6 +75,100 @@ async def _provider_accepts_us() -> bool | None:
         return None
     finally:
         await client.aclose()
+
+
+#: How long the model ledger may stay silent while drafts are still being
+#: written before the silence is treated as a fault rather than a quiet spell.
+#:
+#: A day rather than an hour because the ledger is a *usage* record, not a
+#: heartbeat: a workspace can legitimately go hours without a call that needs a
+#: model. Fifteen days is what it actually took to notice, so anything inside a
+#: day is an enormous improvement and a day is long enough that no ordinary
+#: lull reaches it.
+MODEL_SILENCE_WINDOW = dt.timedelta(hours=24)
+
+#: Line break for the alarm's per-route detail block.
+NEWLINE = "\n"
+
+
+async def _models_answer(
+    session: AsyncSession, *, workspace_id: uuid.UUID, now: dt.datetime
+) -> tuple[bool | None, str]:
+    """Whether the model layer is alive, and what is wrong if it is not.
+
+    Two steps, cheap one first.
+
+    The ledger is the cheap one. ``model_runs`` is written only on success, so
+    a row in it is proof a model answered. If drafts have been written in the
+    last day and not one of them produced a row, something is wrong -- and that
+    query costs nothing, cannot be rate-limited, and is exactly the signal that
+    was sitting in the database unread for fifteen days while the last
+    successful call (26 August, 08:05 UTC) sat fifty-five minutes on the near
+    side of NVIDIA's published end-of-life for two of the routes.
+
+    The live call is the confirmation. Free tiers answer 429 when busy, and an
+    alarm that fires on one rate-limited minute is an alarm that gets muted, so
+    nothing is raised on the ledger alone: the silence only decides whether it
+    is worth spending one small completion to find out.
+
+    Returns ``(None, "")`` when the question cannot be answered -- no provider
+    configured, or nothing drafted to be silent about. A check that did not run
+    is not evidence of failure.
+    """
+    settings = get_settings()
+    providers = build_providers(settings)
+    if not providers:
+        return None, ""
+
+    since = now - MODEL_SILENCE_WINDOW
+    recent_calls = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(ModelRun)
+            .where(ModelRun.workspace_id == workspace_id, ModelRun.created_at >= since)
+        )
+        or 0
+    )
+    if recent_calls:
+        return True, ""
+
+    drafts = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(MessageDraft)
+            .where(
+                MessageDraft.workspace_id == workspace_id,
+                MessageDraft.created_at >= since,
+            )
+        )
+        or 0
+    )
+    if not drafts:
+        # Nothing asked for a model, so its silence means nothing.
+        return None, ""
+
+    gateway = ModelGateway(providers, settings)
+    try:
+        report = await gateway.validate_models()
+    except Exception as exc:
+        logger.info(
+            "model route probe did not complete",
+            extra={"error_code": type(exc).__name__},
+        )
+        return None, ""
+
+    if report["ok"]:
+        # The routes answer, so the silence is something else -- rewrites
+        # switched off, or no draft that needed one. Not an alarm.
+        return True, ""
+
+    broken = [
+        f"  {e['task']:<13} {e.get('provider', '?')}:{e.get('model_id', '?')}" + NEWLINE
+        + f"      {e.get('detail') or e.get('status', 'failed')}"
+        for e in report["routes"]
+        if e.get("status") != "ok"
+    ]
+    return False, NEWLINE.join(broken)
 
 
 @activity.defn(name="check_pipeline_vitals")
@@ -123,12 +225,17 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
             if decision.effective > 0:
                 sending += 1
 
+        models_ok, models_detail = await _models_answer(
+            session, workspace_id=workspace_id, now=now
+        )
         vitals = await read_vitals(
             session,
             workspace_id=workspace_id,
             daily_send_capacity=capacity,
             mailboxes_sending=sending,
             sending_provider_ok=await _provider_accepts_us(),
+            model_routes_ok=models_ok,
+            model_routes_detail=models_detail,
             now=now,
         )
 
