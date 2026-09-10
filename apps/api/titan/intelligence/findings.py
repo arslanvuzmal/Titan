@@ -224,40 +224,98 @@ def _failed_requests(page: PageEvidence) -> DetectedFinding | None:
     )
 
 
-def _broken_cta(page: PageEvidence) -> DetectedFinding | None:
-    """A call to action whose target 404s or renders an empty page.
+def _broken_cta(pages: list[PageEvidence]) -> DetectedFinding | None:
+    """A visible call to action whose target we fetched and found broken.
 
-    Deliberately requires target_status/target_is_empty to have been *measured*.
-    If the crawler did not probe the target, no finding is produced -- an
-    unverified CTA is not a claim.
+    The most valuable finding this module can produce -- "the Book Now button
+    on your homepage leads to an error page" is a sentence a stranger acts on
+    -- and until 10 September it had **never fired once**. 217,024 calls to
+    action had been recorded across the estate and not one had a target status,
+    because the browser worker writes ``target_status: null`` as a literal and
+    nothing has ever filled it in. The rule required the field to have been
+    measured, correctly, and so it could never be satisfied.
+
+    The obvious repair -- read the status from the crawl, which visits contact
+    and booking pages anyway -- was tried on 2026-09-10 and **rejected on the
+    evidence**. Eight of the CTAs it would have condemned were fetched live:
+    four answered 200. The cause is in the crawl history:
+
+    ==========================================  ====  =========
+    ``whitesmileancoats.com/contact``           200   14:57:18
+    ``whitesmileancoats.com/contact``           404   14:57:08
+    ==========================================  ====  =========
+
+    Ten seconds apart, and that URL alternates between the two across dozens of
+    fetches over three weeks. A single recorded 404 from an incidental page
+    visit is not evidence a page is broken; it is one sample of something
+    flaky, or of a bot defence. It is nowhere near enough to tell a stranger
+    their Book Now button is dead.
+
+    So the requirement stands as it was written, and the fix belongs upstream:
+    the browser worker has to navigate to the target and record what it saw,
+    ideally more than once. Until it does, this rule produces nothing -- which
+    is the correct amount to produce from evidence this thin.
     """
-    for cta in page.ctas:
-        broken_status = cta.target_status is not None and cta.target_status >= 400
-        empty_target = cta.target_is_empty is True
-        if not (broken_status or empty_target):
+    for page in pages:
+        if (page.http_status or 200) >= 400:
+            continue  # a CTA on an error page is not the story
+        base = page.final_url or page.url
+        try:
+            here = _canonical(base)
+        except ValueError:
             continue
-        observed = (
-            f"HTTP {cta.target_status}" if broken_status else "renders an empty page"
-        )
-        return _f(
-            category=FindingCategory.CONVERSION,
-            issue_type="broken_primary_cta",
-            title=f"Call-to-action {cta.text or cta.href!r} leads nowhere",
-            severity=Severity.CRITICAL,
-            confidence=0.98,
-            verification_method=VerificationMethod.BROWSER_NAVIGATION,
-            page_url=page.final_url,
-            selector=cta.selector,
-            observed_value=observed,
-            expected_behavior="Opens a working enquiry, booking or contact flow",
-            business_impact=(
-                "Visitors who have already decided to act cannot complete the "
-                "next step, so the most valuable traffic is lost"
-            ),
-            recommended_solution="Point the button at a tested enquiry or booking flow",
-            estimated_effort=SMALL,
-            evidence=((f"{cta.selector} -> {cta.href} : {observed}", page.final_url),),
-        )
+        for cta in page.ctas:
+            if not cta.is_visible:
+                continue  # invisible to the reader is unverifiable by them
+            href = (cta.href or "").strip()
+            if not href or href.startswith("#"):
+                continue
+            if _is_placeholder(href) or _is_bare_address(href):
+                continue
+            try:
+                absolute = urljoin(base, href)
+                target = _canonical(absolute)
+            except ValueError:
+                continue
+            if target == here:
+                continue
+            # Somebody else's site is not ours to report on.
+            if target.split("/")[0] != here.split("/")[0]:
+                continue
+
+            status = cta.target_status
+            broken_status = status is not None and status in BROKEN_LINK_STATUSES
+            empty_target = cta.target_is_empty is True
+            if not (broken_status or empty_target):
+                continue
+
+            observed = f"HTTP {status}" if broken_status else "renders an empty page"
+            return _f(
+                category=FindingCategory.CONVERSION,
+                issue_type="broken_primary_cta",
+                title=f"Call-to-action {cta.text or cta.href!r} leads nowhere",
+                severity=Severity.CRITICAL,
+                confidence=0.98,
+                verification_method=VerificationMethod.BROWSER_NAVIGATION,
+                page_url=page.final_url or page.url,
+                selector=cta.selector,
+                observed_value=observed,
+                expected_behavior="Opens a working enquiry, booking or contact flow",
+                business_impact=(
+                    "Visitors who have already decided to act cannot complete "
+                    "the next step, so the most valuable traffic is lost"
+                ),
+                recommended_solution=(
+                    "Point the button at a tested enquiry or booking flow"
+                ),
+                estimated_effort=SMALL,
+                evidence=(
+                    (
+                        f"{cta.selector} -> {cta.href} : {observed}",
+                        page.final_url or page.url,
+                    ),
+                ),
+            )
     return None
 
 
@@ -317,6 +375,71 @@ def _canonical(url: str) -> str:
     return f"{host}{path}" + (f"?{split.query}" if split.query else "")
 
 
+#: Markers of a template placeholder that the site never substituted.
+#:
+#: A live page carrying ``href="[#DSR_FORM_URL#]"`` is a real defect -- the CMS
+#: shipped the token instead of the address -- but it is not the defect this
+#: detector describes, and we cannot quote it back accurately. The fragment is
+#: dropped in canonicalisation, so the address survives into the message as
+#: ``https://www.vmh.co.uk/[``, and the sentence becomes "the link
+#: https://www.vmh.co.uk/[ is broken" about something the reader cannot find on
+#: their own page. That is the same failure as naming a probed URL: a claim the
+#: recipient can check and find false.
+#:
+#: Found in the live data on 2026-09-10, on two domains, in the first six
+#: broken-link findings the corrected detector produced.
+_PLACEHOLDER_MARKERS = ("[#", "#]", "{{", "}}", "${", "<%", "%>", "%%", "[[", "]]")
+
+
+def _is_placeholder(href: str) -> bool:
+    """Whether an href is an unsubstituted template token rather than a link."""
+    return any(marker in href for marker in _PLACEHOLDER_MARKERS)
+
+
+def _is_bare_address(href: str) -> bool:
+    """An email or phone written without its scheme, which resolves as a path.
+
+    ``href="info@cristalclinic.ae"`` has no ``mailto:``, so ``urljoin`` reads it
+    as a relative path and the crawler dutifully fetches
+    ``https://crystalclinic.ae/info@cristalclinic.ae``, which 404s. Reporting
+    that as a broken link tells the practice their own email address is a dead
+    page. It is a real defect in their markup and an unrecognisable way to
+    describe it.
+    """
+    first_segment = href.split("?", 1)[0].split("#", 1)[0].split("/", 1)[0]
+    return "@" in first_segment
+
+
+def _canonical_strict(url: str) -> str:
+    """The same address, but a trailing slash is *not* the same address.
+
+    :func:`_canonical` strips it, which is right for "is this the page I am
+    standing on" and wrong for "did we fetch the thing they link to". Servers
+    genuinely disagree about the two forms, and it is not rare:
+
+    ================================================  =====
+    ``https://dermalclinic.co.uk/contact``            404
+    ``https://dermalclinic.co.uk/contact/``           200
+    ``https://skinessence.com.au/book-a-treatment``   404
+    ``https://skinessence.com.au/book-a-treatment/``  200
+    ================================================  =====
+
+    Both were checked live on 2026-09-10, after the crawler had recorded the
+    slashless form as 404 and the loose comparison had matched it to a link
+    written with the slash. The claim that would have gone out -- "the BOOK
+    ONLINE button on your site leads to an error page" -- is false, and the
+    recipient can see it is false in one click. That is the same failure as
+    naming a probed URL, reached through the normalisation instead of through
+    the crawl.
+
+    Scheme and ``www`` are still folded: both were tested against these same
+    hosts and neither changes the status.
+    """
+    split = urlsplit(url)
+    host = split.netloc.lower().removeprefix("www.")
+    return f"{host}{split.path}" + (f"?{split.query}" if split.query else "")
+
+
 def _linked_urls(pages: list[PageEvidence]) -> set[str]:
     """Every internal address a *working* page links to, excluding self-links.
 
@@ -335,6 +458,11 @@ def _linked_urls(pages: list[PageEvidence]) -> set[str]:
     address -- so a probed URL that does not exist would mark *itself* as
     linked. Measured: this alone made 17,441 of 30,440 crawled 404s look
     genuine, including all six of the paths the crawler had guessed.
+
+    **An unsubstituted template token is not an address.** ``[#DSR_FORM_URL#]``
+    appears on every page of a site whose CMS failed to fill it in; it 404s
+    honestly, and quoting it back is impossible because canonicalisation drops
+    the fragment and leaves ``.../[``. See :data:`_PLACEHOLDER_MARKERS`.
     """
     linked: set[str] = set()
     for page in pages:
@@ -351,15 +479,35 @@ def _linked_urls(pages: list[PageEvidence]) -> set[str]:
             href = (link.href or "").strip()
             if not href or href.startswith("#"):
                 continue
+            if _is_placeholder(href) or _is_bare_address(href):
+                # Real markup, real 404, and still not a claim we can make:
+                # see _PLACEHOLDER_MARKERS and _is_bare_address.
+                continue
             try:
-                target = _canonical(urljoin(base, href))
+                absolute = urljoin(base, href)
+                target = _canonical(absolute)
             except ValueError:
                 # A malformed href is not evidence of anything. Skipped rather
                 # than raised: one unparseable link must not lose the page.
                 continue
             if target == here:
                 continue
-            linked.add(target)
+            # Same host as the page carrying the link, checked here rather than
+            # trusted from the worker's ``is_external`` flag.
+            #
+            # That flag missed ``accounts.shopify.com/login/external/...``,
+            # which is Shopify's login page and answers 404 to anyone not
+            # mid-flow. Reported as an internal link it becomes "a link on your
+            # site is broken" about somebody else's infrastructure. The crawler
+            # also drifts across domains legitimately -- a .co.uk redirecting
+            # to its .com, an IDN to its punycode -- so the test is against the
+            # page the link was written on, not against the seed.
+            if target.split("/")[0] != here.split("/")[0]:
+                continue
+            # Recorded in the exact form it was written. Whether this address
+            # is the page we are standing on is a loose question; whether we
+            # fetched it is not -- see _canonical_strict.
+            linked.add(_canonical_strict(absolute))
     return linked
 
 
@@ -387,15 +535,34 @@ def _broken_internal_links(pages: list[PageEvidence]) -> DetectedFinding | None:
     carry a link to the address before we will say the link is broken.
     """
     linked = _linked_urls(pages)
+
+    # An address we also saw working is not an address we may call broken.
+    #
+    # ``whitesmileancoats.com/contact`` answered 404 at 14:57:08 and 200 at
+    # 14:57:18 on the same day, and alternated between the two across dozens of
+    # fetches over three weeks. Sites do this: rate limiting, a bot defence, a
+    # flaky origin. One recorded 404 is one sample, and where the crawl holds a
+    # success for the same address the honest reading is that the page is
+    # there.
+    seen_working = {
+        _canonical_strict(u)
+        for p in pages
+        if p.http_status is not None and p.http_status < 400
+        for u in (p.url, p.final_url)
+        if u
+    }
+
     broken = [
         (p.url, p.http_status)
         for p in pages
         if p.http_status is not None
         and p.http_status in BROKEN_LINK_STATUSES
         and (
-            _canonical(p.url) in linked
-            or (p.final_url and _canonical(p.final_url) in linked)
+            _canonical_strict(p.url) in linked
+            or (p.final_url and _canonical_strict(p.final_url) in linked)
         )
+        and _canonical_strict(p.url) not in seen_working
+        and not (p.final_url and _canonical_strict(p.final_url) in seen_working)
     ]
     if not broken:
         return None
@@ -635,7 +802,6 @@ PAGE_RULES = (
     _images_missing_alt,
     _console_errors,
     _failed_requests,
-    _broken_cta,
     _high_friction_form,
     _missing_security_headers,
     _accessibility_violations,
@@ -679,10 +845,13 @@ def detect_findings(result: CrawlResult) -> list[DetectedFinding]:
             if found is not None:
                 findings.setdefault(found.fingerprint, found)
 
-    # Broken-link detection needs the error pages, so it runs over everything.
-    broken = _broken_internal_links(result.pages)
-    if broken is not None:
-        findings.setdefault(broken.fingerprint, broken)
+    # Both of these need the error pages to be visible, so they run over
+    # everything rather than over ok_pages: the defect they describe is a
+    # working page pointing at a broken one.
+    for whole_site_rule in (_broken_internal_links, _broken_cta):
+        found = whole_site_rule(result.pages)
+        if found is not None:
+            findings.setdefault(found.fingerprint, found)
 
     return sorted(
         findings.values(),

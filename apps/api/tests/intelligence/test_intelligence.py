@@ -183,6 +183,131 @@ def test_broken_cta_requires_a_measured_target() -> None:
     assert "404" in (cta_finding.observed_value or "")
 
 
+def test_a_cta_target_is_not_inferred_from_an_incidental_page_fetch() -> None:
+    """Planted violation: read the CTA's target status out of the crawl.
+
+    Tempting, and wrong. The crawler visits contact and booking pages anyway,
+    so one CTA in five has a status sitting in the same crawl -- and when eight
+    of the CTAs that would have condemned were fetched live on 2026-09-10, four
+    answered 200.
+
+    The crawl history says why. ``whitesmileancoats.com/contact`` answered 404
+    at 14:57:08 and 200 at 14:57:18, and alternates across dozens of fetches.
+    One incidental 404 is one sample of something flaky, which is not grounds
+    for telling a stranger their Book Now button is dead. The fix belongs in
+    the browser worker, which has to navigate to the target and record what it
+    saw.
+    """
+    home = page(
+        ctas=[
+            CtaObservation(
+                selector="a.book", text="Book now", href="/book", target_status=None
+            )
+        ]
+    )
+    fetched_404 = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+    )
+
+    assert "broken_primary_cta" not in issue_types(
+        detect_findings(crawl(home, fetched_404))
+    )
+
+
+def test_a_link_we_also_saw_working_is_not_called_broken() -> None:
+    """Planted violation: report a 404 while a 200 for the same address sits in
+    the same crawl. This is the whitesmileancoats case, ten seconds apart."""
+    home = page(nav_links=[LinkObservation(text="Contact", href="/contact")])
+    flaky_404 = page(
+        url="https://bellrose-dental.test/contact",
+        final_url="https://bellrose-dental.test/contact",
+        http_status=404,
+    )
+    same_url_200 = page(
+        url="https://bellrose-dental.test/contact",
+        final_url="https://bellrose-dental.test/contact",
+        http_status=200,
+    )
+
+    assert "broken_internal_link" not in issue_types(
+        detect_findings(crawl(home, flaky_404, same_url_200))
+    )
+
+
+def test_a_cta_whose_target_we_fetched_and_found_working_is_not_reported() -> None:
+    """The other half. Resolving from the crawl must not turn every CTA into a
+    finding -- it has to read the status it found."""
+    home = page(
+        ctas=[
+            CtaObservation(selector="a.book", text="Book now", href="/book")
+        ]
+    )
+    fetched = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=200,
+    )
+
+    assert "broken_primary_cta" not in issue_types(detect_findings(crawl(home, fetched)))
+
+
+def test_a_cta_target_nobody_fetched_is_still_not_a_claim() -> None:
+    """The original principle, and it survives the change. Unverified is not a
+    claim: if this crawl never asked for the address, we do not know it is
+    broken and we do not say so."""
+    home = page(
+        ctas=[
+            CtaObservation(selector="a.book", text="Book now", href="/never-fetched")
+        ]
+    )
+
+    assert "broken_primary_cta" not in issue_types(detect_findings(crawl(home)))
+
+
+def test_a_cta_pointing_at_another_site_is_not_ours_to_report() -> None:
+    """A booking widget on a third-party domain is somebody else's outage, and
+    naming it as the prospect's defect is the same error as naming a probed
+    URL."""
+    home = page(
+        ctas=[
+            CtaObservation(
+                selector="a.book",
+                text="Book now",
+                href="https://booking-provider.test/slot",
+            )
+        ]
+    )
+    theirs = page(
+        url="https://booking-provider.test/slot",
+        final_url="https://booking-provider.test/slot",
+        http_status=404,
+    )
+
+    assert "broken_primary_cta" not in issue_types(detect_findings(crawl(home, theirs)))
+
+
+def test_a_cta_on_an_error_page_is_not_the_story() -> None:
+    """Soft 404s render the whole template, calls to action included. Reporting
+    those would be the site's error page arguing with itself -- the same trap
+    that made 17,441 crawled 404s look genuine."""
+    soft_404 = page(
+        url="https://bellrose-dental.test/gone",
+        final_url="https://bellrose-dental.test/gone",
+        http_status=404,
+        ctas=[CtaObservation(selector="a.book", text="Book now", href="/book")],
+    )
+    fetched = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+    )
+
+    found = issue_types(detect_findings(crawl(soft_404, fetched)))
+    assert "broken_primary_cta" not in found
+
+
 def test_empty_cta_target_detected_even_with_200_status() -> None:
     """The failure a status check alone misses."""
     probed = page(
@@ -259,11 +384,16 @@ def test_a_404_nobody_links_to_is_not_a_broken_link() -> None:
 
 def test_a_relative_link_still_counts_as_a_link() -> None:
     """Hrefs are written relative far more often than not, and a rule that only
-    matched absolute ones would silently report nothing at all."""
+    matched absolute ones would silently report nothing at all.
+
+    The crawled form matches the resolved href exactly, slash included. That is
+    not incidental to the test -- see
+    :func:`test_a_slashless_404_does_not_condemn_the_link_written_with_a_slash`.
+    """
     ok = page(nav_links=[LinkObservation(text="Book", href="book/")])
     broken = page(
-        url="https://bellrose-dental.test/book",
-        final_url="https://bellrose-dental.test/book",
+        url="https://bellrose-dental.test/book/",
+        final_url="https://bellrose-dental.test/book/",
         http_status=404,
     )
 
@@ -274,7 +404,11 @@ def test_the_link_and_the_crawl_may_disagree_about_scheme_and_www() -> None:
     """A link written http:// to a page crawled at https://www. is the same
     address to everyone except a string comparison -- and getting this wrong
     fails closed, reporting nothing, which is the failure that hides."""
-    ok = page(nav_links=[LinkObservation(text="Fees", href="http://bellrose-dental.test/fees")])
+    ok = page(
+        nav_links=[
+            LinkObservation(text="Fees", href="http://bellrose-dental.test/fees/")
+        ]
+    )
     broken = page(
         url="https://www.bellrose-dental.test/fees/",
         final_url="https://www.bellrose-dental.test/fees/",
@@ -312,6 +446,169 @@ def test_a_soft_404_does_not_vouch_for_itself() -> None:
     assert "broken_internal_link" not in issue_types(
         detect_findings(crawl(home, soft_404))
     )
+
+
+def test_an_unsubstituted_template_token_is_not_a_broken_link() -> None:
+    """Planted violation: treat any href that 404s as a link worth reporting.
+
+    Found in the live data on 2026-09-10. Two sites shipped
+    ``href="[#DSR_FORM_URL#]"`` on every page -- the CMS never filled the token
+    in. It is a genuine defect and it genuinely 404s, but canonicalisation
+    drops the fragment, so the address reaching the message is
+    ``https://www.vmh.co.uk/[`` and the sentence becomes "the link
+    https://www.vmh.co.uk/[ is broken". That is the same error as naming a
+    probed URL, arrived at from the opposite direction: a claim the recipient
+    can check and find false.
+    """
+    ok = page(
+        nav_links=[LinkObservation(text="Data request", href="/[#DSR_FORM_URL#]")]
+    )
+    broken = page(
+        url="https://bellrose-dental.test/[#DSR_FORM_URL#]",
+        final_url="https://bellrose-dental.test/[#DSR_FORM_URL#]",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(ok, broken)))
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "/{{page.slug}}",
+        "/${basePath}/book",
+        "/<%= url %>",
+        "/%%CONTACT_URL%%",
+        "/[[booking]]",
+    ],
+)
+def test_every_template_syntax_is_refused(href: str) -> None:
+    """One CMS per syntax, and each one ships the token unfilled sooner or
+    later. Named individually because a regex over "looks odd" would start
+    dropping real links with brackets in a query string."""
+    ok = page(nav_links=[LinkObservation(text="Book", href=href)])
+    broken = page(
+        url=f"https://bellrose-dental.test{href}",
+        final_url=f"https://bellrose-dental.test{href}",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(ok, broken)))
+
+
+def test_a_real_link_with_a_query_string_still_counts() -> None:
+    """The guard above must not be a licence to drop awkward-looking URLs. A
+    query string is not a template token, and ``?page_id=431`` is exactly the
+    shape live evidence carries."""
+    ok = page(nav_links=[LinkObservation(text="Fees", href="/fees?page_id=431")])
+    broken = page(
+        url="https://bellrose-dental.test/fees?page_id=431",
+        final_url="https://bellrose-dental.test/fees?page_id=431",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" in issue_types(detect_findings(crawl(ok, broken)))
+
+
+def test_a_slashless_404_does_not_condemn_the_link_written_with_a_slash() -> None:
+    """Planted violation: fold the trailing slash when attributing a status.
+
+    Checked live on 2026-09-10, after the crawler had recorded the slashless
+    form as 404:
+
+        https://dermalclinic.co.uk/contact    404
+        https://dermalclinic.co.uk/contact/   200
+
+    Same host, same path, different answer -- and ``www`` makes no difference
+    to either, so the slash is the whole of it. Folding it let a link written
+    ``/contact/`` be condemned by a fetch of ``/contact``, which is a claim the
+    recipient disproves in one click.
+    """
+    home = page(nav_links=[LinkObservation(text="Contact", href="/contact/")])
+    slashless = page(
+        url="https://bellrose-dental.test/contact",
+        final_url="https://bellrose-dental.test/contact",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(
+        detect_findings(crawl(home, slashless))
+    )
+
+
+def test_the_exact_linked_form_returning_404_is_still_reported() -> None:
+    """The rule tightens attribution, it does not switch the detector off. When
+    the address we fetched is the address they wrote, the claim stands."""
+    home = page(nav_links=[LinkObservation(text="Contact", href="/contact/")])
+    fetched = page(
+        url="https://bellrose-dental.test/contact/",
+        final_url="https://bellrose-dental.test/contact/",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" in issue_types(detect_findings(crawl(home, fetched)))
+
+
+def test_a_cta_is_judged_on_the_form_it_points_at() -> None:
+    """The same hazard on the more expensive claim. ``skinessence.com.au``
+    answers 404 for ``/book-a-treatment`` and 200 for ``/book-a-treatment/``,
+    and the button is written with the slash."""
+    home = page(
+        ctas=[CtaObservation(selector="a.book", text="BOOK ONLINE", href="/book/")]
+    )
+    slashless = page(
+        url="https://bellrose-dental.test/book",
+        final_url="https://bellrose-dental.test/book",
+        http_status=404,
+    )
+
+    assert "broken_primary_cta" not in issue_types(
+        detect_findings(crawl(home, slashless))
+    )
+
+
+def test_a_link_to_another_host_is_not_an_internal_link() -> None:
+    """Planted violation: trust the worker's is_external flag alone.
+
+    It missed ``accounts.shopify.com/login/external/apple/login?rid=...``,
+    which answers 404 to anyone not mid-login. Reported as an internal link it
+    becomes "a link on your site is broken" about Shopify's infrastructure --
+    somebody else's page, and not broken in any sense the shop owner can act
+    on.
+    """
+    home = page(
+        nav_links=[
+            LinkObservation(
+                text="Sign in",
+                href="https://accounts.shopify.test/login/external/apple",
+                is_external=False,  # the flag the worker got wrong
+            )
+        ]
+    )
+    theirs = page(
+        url="https://accounts.shopify.test/login/external/apple",
+        final_url="https://accounts.shopify.test/login/external/apple",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(home, theirs)))
+
+
+def test_an_email_written_without_mailto_is_not_a_broken_page() -> None:
+    """``href="info@cristalclinic.ae"`` has no scheme, so it resolves as a
+    relative path and the crawler fetches ``/info@cristalclinic.ae``, which
+    404s. Their markup is genuinely wrong; "your email address is a dead page"
+    is not a recognisable way to say so."""
+    home = page(
+        nav_links=[LinkObservation(text="Email us", href="info@bellrose-dental.test")]
+    )
+    fetched = page(
+        url="https://bellrose-dental.test/info@bellrose-dental.test",
+        final_url="https://bellrose-dental.test/info@bellrose-dental.test",
+        http_status=404,
+    )
+
+    assert "broken_internal_link" not in issue_types(detect_findings(crawl(home, fetched)))
 
 
 def test_an_external_link_is_not_ours_to_report() -> None:
