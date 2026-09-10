@@ -268,3 +268,78 @@ describe('accessibility and timing collection', { concurrency: 1 }, () => {
     assert.equal(perf!.best_practices_score, null);
   });
 });
+
+// ==========================================================================
+// Call-to-action targets
+//
+// The worker declared `target_status` from the first release and wrote null
+// into it every time, so the CRITICAL rule that reads it -- "your Book Now
+// button leads nowhere" -- had never fired once across 217,024 recorded calls
+// to action. These prove the measurement is real, and that it is careful.
+// ==========================================================================
+describe('call-to-action targets', () => {
+  test('an empty target is measured, not assumed', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+    const result = await runCrawl(request(`${BASE}/lawfirm/`));
+
+    const ctas = result.pages.flatMap((p) => p.ctas);
+    const consultation = ctas.find((c) => (c.href ?? '').includes('/lawfirm/blank'));
+    assert.ok(consultation, 'the consultation CTA was not collected at all');
+    assert.equal(consultation.target_status, 200, 'the blank page answers 200');
+    assert.equal(
+      consultation.target_is_empty,
+      true,
+      'a 200 with nothing rendered is the failure a status check alone misses',
+    );
+  });
+
+  test('a target that flaps is believed on its better answer', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+    await fetch(`${BASE}/flaky/reset`);
+
+    const result = await runCrawl(request(`${BASE}/flaky/`, { max_depth: 0 }));
+    const cta = result.pages.flatMap((p) => p.ctas).find((c) => (c.href ?? '').includes('wobbly'));
+    assert.ok(cta, 'the booking CTA was not collected');
+    // The fixture answers 404 once and 200 thereafter, the way
+    // whitesmileancoats.com/contact did ten seconds apart. One sample would
+    // record the 404 and a stranger would be told their booking page is dead.
+    assert.equal(cta.target_status, 200, 'the second look must overrule the first');
+  });
+
+  test('a target on another site is never probed', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+    const result = await runCrawl(request(`${BASE}/hostile/`));
+    for (const cta of result.pages.flatMap((p) => p.ctas)) {
+      if (!cta.href) continue;
+      const sameSite = cta.href.startsWith(BASE);
+      if (!sameSite) {
+        assert.equal(
+          cta.target_status,
+          null,
+          `probed ${cta.href}, which is somebody else's server`,
+        );
+      }
+    }
+  });
+});
+
+// ==========================================================================
+// The address we fetch is the address they wrote
+// ==========================================================================
+describe('trailing slash', () => {
+  test('a link written with a slash is fetched with the slash', async (t) => {
+    if (!fixturesUp) return t.skip('fixture server not running');
+    const result = await runCrawl(request(`${BASE}/slashy/`, { max_depth: 1 }));
+
+    const contact = result.pages.find((p) => p.url.includes('/slashy/contact'));
+    assert.ok(contact, '/slashy/contact/ was never crawled');
+    // The fixture answers 404 without the slash and 200 with it, as
+    // dermalclinic.co.uk and skinessence.com.au both do. The crawler used to
+    // strip it before asking, then record the answer against the link.
+    assert.ok(
+      contact.url.endsWith('/contact/'),
+      `fetched ${contact.url}, which is not the address the site links to`,
+    );
+    assert.equal(contact.http_status, 200, 'the address they link to is not broken');
+  });
+});

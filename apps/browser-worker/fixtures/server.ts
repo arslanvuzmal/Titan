@@ -202,8 +202,72 @@ ${Array.from({ length: 400 }, (_, i) => `<a href="/hostile/link${i}">Link ${i}</
   },
 };
 
+/**
+ * How many times `/flaky/wobbly` has been asked for.
+ *
+ * It answers 404 first and 200 afterwards, reproducing a real observation:
+ * `whitesmileancoats.com/contact` returned 404 at 14:57:08 and 200 at
+ * 14:57:18, and alternated across dozens of fetches. A crawler that believes
+ * one sample calls a working page dead.
+ */
+let wobblyHits = 0;
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
+
+  // --- served before normalisation, because the raw path is the point ------
+  //
+  // Real servers disagree about the trailing slash. `dermalclinic.co.uk`
+  // answers 404 for `/contact` and 200 for `/contact/`, which is exactly what
+  // the crawler used to strip off before asking.
+  if (url.pathname === '/slashy/contact/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(html('Contact — Slashy', '<h1>Contact</h1><p>We are here to help you today.</p>'));
+    return;
+  }
+  if (url.pathname === '/slashy/contact') {
+    res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(html('Not found', '<h1>404</h1>'));
+    return;
+  }
+  if (url.pathname === '/slashy' || url.pathname === '/slashy/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(
+      html(
+        'Slashy — Fictional Clinic',
+        '<h1>Slashy</h1><nav><a href="/slashy/contact/">Contact</a></nav>',
+      ),
+    );
+    return;
+  }
+  if (url.pathname === '/flaky/wobbly') {
+    wobblyHits += 1;
+    if (wobblyHits === 1) {
+      res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(html('Not found', '<h1>404</h1>'));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(html('Booking — Flaky', '<h1>Book</h1><p>Choose an appointment time below.</p>'));
+    return;
+  }
+  if (url.pathname === '/flaky/reset') {
+    wobblyHits = 0;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"reset":true}');
+    return;
+  }
+  if (url.pathname === '/flaky' || url.pathname === '/flaky/') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(
+      html(
+        'Flaky — Fictional Clinic',
+        '<h1>Flaky</h1><a data-testid="book" href="/flaky/wobbly">Book an appointment</a>',
+      ),
+    );
+    return;
+  }
+
   const segments = url.pathname.split('/').filter(Boolean);
   const site = segments.length ? `/${segments[0]}` : '';
   const rest = `/${segments.slice(1).join('/')}`;

@@ -54,10 +54,195 @@ function normalizeUrl(raw: string): string {
     for (const p of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid']) {
       u.searchParams.delete(p);
     }
-    if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
     return u.toString();
   } catch {
     return raw;
+  }
+}
+
+/**
+ * The key that decides whether we have already been somewhere.
+ *
+ * This is where the trailing slash belongs, and for two years it was in
+ * `normalizeUrl` instead -- so the crawler *fetched* `/contact` when the site
+ * linked `/contact/`, and recorded the answer against the link. Servers do not
+ * agree that those are the same address:
+ *
+ *     https://dermalclinic.co.uk/contact     404
+ *     https://dermalclinic.co.uk/contact/    200
+ *     https://skinessence.com.au/book-a-treatment    404
+ *     https://skinessence.com.au/book-a-treatment/   200
+ *
+ * Both checked live on 2026-09-10, against crawl rows saying 404. The evidence
+ * was a fact about a URL we invented by editing theirs, and it reached a
+ * finding that told the business a working page was broken.
+ *
+ * Folding the two forms is still right for "have I crawled this already" --
+ * that is a question about our budget, not about their server -- so the two
+ * jobs are now separate functions.
+ */
+function dedupeKey(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/') && u.pathname !== '/') u.pathname = u.pathname.slice(0, -1);
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * How many distinct call-to-action targets one crawl will navigate to.
+ *
+ * Small on purpose. These are extra requests to somebody else's server on top
+ * of an 18-page crawl, and the finding they support is site-wide -- one dead
+ * booking button is the story whether it is dead on one page or on twelve. A
+ * page may carry 30 calls to action and most sites repeat the same handful
+ * across every template, so deduplication does most of the work and this is
+ * the ceiling for the rest.
+ */
+const MAX_CTA_PROBES = 10;
+
+/** A rendered page shorter than this is treated as having nothing on it. */
+const EMPTY_TEXT_CHARS = 40;
+
+/** Pause before the second look, so a rate limiter has a moment to forget us. */
+const RECHECK_DELAY_MS = 1_500;
+
+interface ProbeOutcome {
+  status: number | null;
+  isEmpty: boolean | null;
+}
+
+/**
+ * Navigate to one call-to-action target and say what is there.
+ *
+ * **An error is checked twice.** Statuses flap, and not rarely:
+ *
+ *     whitesmileancoats.com/contact   404   14:57:08
+ *     whitesmileancoats.com/contact   200   14:57:18
+ *
+ * Ten seconds apart, alternating across dozens of fetches over three weeks --
+ * rate limiting, a bot defence, or a flaky origin, and indistinguishable from
+ * a genuinely missing page on one sample. The finding this feeds is CRITICAL
+ * and says "the button on your website leads nowhere", so one sample is not
+ * enough to earn it. A success on either look wins: we are trying to prove the
+ * page is gone, and having loaded it once disproves that.
+ */
+async function probeTarget(
+  context: BrowserContext,
+  url: string,
+  deadline: number,
+): Promise<ProbeOutcome | null> {
+  const verdict = await validateUrl(url);
+  if (!verdict.allowed) return null;
+
+  let last: ProbeOutcome | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (Date.now() > deadline) break;
+    const page = await context.newPage();
+    try {
+      const response = await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: Math.min(15_000, Math.max(4_000, deadline - Date.now())),
+      });
+      const status = response?.status() ?? null;
+      let isEmpty: boolean | null = null;
+      try {
+        const text = (await page.evaluate(
+          'document.body ? document.body.innerText.trim().length : 0',
+        )) as number;
+        isEmpty = text < EMPTY_TEXT_CHARS;
+      } catch {
+        /* a page that will not answer about itself is not evidence of empty */
+      }
+      last = { status, isEmpty };
+      // Good news is believed immediately; bad news gets a second look.
+      if (status !== null && status < 400) return last;
+    } catch {
+      last = last ?? { status: null, isEmpty: null };
+    } finally {
+      if (!page.isClosed()) await page.close().catch(() => undefined);
+    }
+    if (attempt === 0 && Date.now() + RECHECK_DELAY_MS < deadline) {
+      await new Promise((r) => setTimeout(r, RECHECK_DELAY_MS));
+    }
+  }
+  return last;
+}
+
+/**
+ * Fill in `target_status` for the calls to action this crawl collected.
+ *
+ * Until now the worker wrote `target_status: null` as a literal, so across
+ * 217,024 recorded calls to action not one was ever measured -- and the rule
+ * that reads it, a CRITICAL "your Book Now button leads nowhere", could never
+ * fire. The rule was right to insist on a measurement rather than infer one:
+ * resolving it from pages the crawl happened to visit was tried on the live
+ * data and produced a false claim half the time.
+ *
+ * Runs after the crawl so it spends only what is left of the budget, and only
+ * on targets nothing else has already answered for.
+ */
+async function probeCtaTargets(
+  context: BrowserContext,
+  result: CrawlResult,
+  deadline: number,
+): Promise<void> {
+  const wanted = new Map<string, string>();
+  for (const page of result.pages) {
+    if (page.http_status !== null && page.http_status >= 400) continue;
+    const base = page.final_url || page.url;
+    let origin: string;
+    try {
+      origin = new URL(base).origin;
+    } catch {
+      continue;
+    }
+    for (const cta of page.ctas) {
+      if (!cta.is_visible || !cta.href) continue;
+      let absolute: URL;
+      try {
+        absolute = new URL(cta.href, base);
+      } catch {
+        continue;
+      }
+      // Same site only: a booking widget on a third-party domain is somebody
+      // else's outage, and naming it as this business's defect is the error
+      // this whole module exists to avoid.
+      if (absolute.origin !== origin) continue;
+      if (absolute.toString() === base) continue;
+      absolute.hash = '';
+      const key = absolute.toString();
+      if (!wanted.has(key) && wanted.size < MAX_CTA_PROBES) wanted.set(key, key);
+    }
+  }
+
+  const measured = new Map<string, ProbeOutcome>();
+  for (const url of wanted.keys()) {
+    if (Date.now() > deadline) break;
+    const outcome = await probeTarget(context, url, deadline);
+    if (outcome) measured.set(url, outcome);
+  }
+  if (measured.size === 0) return;
+
+  for (const page of result.pages) {
+    const base = page.final_url || page.url;
+    for (const cta of page.ctas) {
+      if (!cta.href) continue;
+      let key: string;
+      try {
+        const u = new URL(cta.href, base);
+        u.hash = '';
+        key = u.toString();
+      } catch {
+        continue;
+      }
+      const outcome = measured.get(key);
+      if (!outcome) continue;
+      cta.target_status = outcome.status;
+      cta.target_is_empty = outcome.isEmpty;
+    }
   }
 }
 
@@ -191,8 +376,9 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
         break;
       }
       const item = queue.shift()!;
-      if (seen.has(item.url) || item.depth > req.max_depth) continue;
-      seen.add(item.url);
+      const key = dedupeKey(item.url);
+      if (seen.has(key) || item.depth > req.max_depth) continue;
+      seen.add(key);
 
       // Re-validate: this URL came off a page, not from the control plane.
       const verdict = await validateUrl(item.url);
@@ -303,7 +489,7 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
           for (const link of evidence.nav_links) {
             if (link.is_external) continue;
             const next = normalizeUrl(link.href);
-            if (!seen.has(next) && queue.length < req.max_pages * 3) {
+            if (!seen.has(dedupeKey(next)) && queue.length < req.max_pages * 3) {
               queue.push({ url: next, depth: item.depth + 1 });
             }
           }
@@ -315,6 +501,17 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
       } finally {
         if (!page.isClosed()) await page.close();
       }
+    }
+
+    // After the crawl, with whatever budget is left: the one measurement the
+    // worker has always declared and never taken. Failure here is swallowed --
+    // an unmeasured call to action simply stays unmeasured, which is the state
+    // every crawl before this one shipped in, and it must not cost us a crawl
+    // that otherwise succeeded.
+    try {
+      await probeCtaTargets(context, result, deadline);
+    } catch (err) {
+      result.failure_reason ??= `cta_probe_failed: ${(err as Error).message.slice(0, 200)}`;
     }
 
     if (result.status !== 'partial') {
