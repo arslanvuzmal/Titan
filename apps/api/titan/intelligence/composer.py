@@ -454,11 +454,14 @@ _UPSIDE_DETAIL: dict[str, str] = {
         "way."
     ),
     "high_friction_contact_form": (
-        "Cutting the form back to what you genuinely need before a "
-        "conversation means the people who start filling it in are far more "
-        "likely to finish. The rest of the detail still reaches you -- it "
-        "just arrives in the first reply, once they are already talking to "
-        "you rather than deciding whether to."
+        # The outcome only. This used to reopen with "Cutting the form back
+        # to what you genuinely need", which is the solution paragraph's own
+        # first clause, and then repeat its second -- so the most-sent claim in
+        # the estate (648 of 1,766) made its recommendation twice in a row and
+        # read as padding.
+        "The change shows up as a higher share of the people who start the "
+        "form finishing it: the same traffic, fewer of them lost between the "
+        "first field and the last."
     ),
     "no_visible_phone_number": (
         "A number in the header, tappable on a phone, gives the callers "
@@ -491,10 +494,12 @@ _UPSIDE_DETAIL: dict[str, str] = {
         "repair reduces risk at the same time as it widens the audience."
     ),
     "javascript_console_errors": (
-        "With the failing scripts fixed, whatever they drive -- the form, "
-        "the menu, the booking widget -- starts responding again. The "
+        # "the form, the menu, the booking widget" is already listed in the
+        # problem paragraph above; naming it again is the same redundancy as
+        # the contact-form upside, milder.
+        "The features those scripts drive start responding again, and the "
         "visitors who currently click and get nothing stop being lost "
-        "silently, which is the part nobody is currently able to see."
+        "silently -- which is the part nobody can currently see."
     ),
     "failed_network_requests": (
         "When the files come back, the pieces that depend on them render "

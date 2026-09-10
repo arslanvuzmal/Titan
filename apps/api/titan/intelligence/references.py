@@ -132,10 +132,17 @@ REFERENCES: dict[str, tuple[Reference, ...]] = {
         ),
     ),
     "javascript_console_errors": (
+        # The label used to read "How one failing script halts everything after
+        # it" over a link to MDN's `console` object -- an API reference whose
+        # own summary is "provides access to the debugging console". It said
+        # nothing about scripts halting. In a message whose entire premise is
+        # that every claim is checkable, a citation that does not support its
+        # own label is worse than no citation: the one reader who follows it is
+        # the one who was taking us seriously.
         Reference(
             "MDN Web Docs",
-            "How one failing script halts everything after it",
-            "https://developer.mozilla.org/en-US/docs/Web/API/console",
+            "JavaScript errors, and what each one means",
+            "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors",
         ),
     ),
     "failed_network_requests": (
@@ -175,7 +182,9 @@ REFERENCES: dict[str, tuple[Reference, ...]] = {
         Reference(
             "OWASP",
             "The response headers a browser expects",
-            "https://owasp.org/www-project-secure-headers/",
+            # The OWASP project page this used to point at now answers 404.
+            # Checked 2026-09-10, along with every other reference here.
+            "https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html",
         ),
     ),
 }
