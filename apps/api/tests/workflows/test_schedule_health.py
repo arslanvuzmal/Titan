@@ -79,9 +79,7 @@ def test_a_schedule_running_a_few_minutes_late_is_not_wedged() -> None:
     ever, and the reinstall is not free: it rewrites the spec of a schedule
     that is working.
     """
-    late = observation(
-        next_action_times=(NOW - dt.timedelta(minutes=3),)
-    )
+    late = observation(next_action_times=(NOW - dt.timedelta(minutes=3),))
 
     assert assess(late, now=NOW).verdict is Verdict.HEALTHY
 
@@ -205,6 +203,10 @@ class FakeHandle:
             raise KeyError(self._id)
         return self._client.existing[self._id]
 
+    async def delete(self) -> None:
+        self._client.deleted.append(self._id)
+        self._client.existing.pop(self._id, None)
+
     async def update(self, mutate) -> None:
         current = self._client.existing[self._id]
         mutate(FakeUpdateInput(current))
@@ -247,10 +249,6 @@ class FakeClient:
     def get_schedule_handle(self, schedule_id: str) -> FakeHandle:
         return FakeHandle(self, schedule_id)
 
-    async def delete_schedule(self, schedule_id: str) -> None:
-        self.deleted.append(schedule_id)
-        self.existing.pop(schedule_id, None)
-
 
 def described(cron_times, *, paused: bool = False) -> FakeDescription:
     return FakeDescription(FakeSchedule(paused=paused), FakeInfo(cron_times))
@@ -283,7 +281,9 @@ async def test_only_the_wedged_schedule_is_reinstalled() -> None:
     live = estate(**{housekeeping: described((NOW - dt.timedelta(days=7),))})
     client = FakeClient(live)
 
-    result = await heal_wedged_schedules(client, workspace_id=WS, task_queue=QUEUE, now=NOW)
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
 
     assert client.updated == [housekeeping]
     assert [h.schedule_id for h in result.healed] == [housekeeping]
@@ -294,7 +294,9 @@ async def test_an_estate_that_is_advancing_is_left_entirely_alone() -> None:
     """The normal case, and the one that runs every fifteen minutes for ever."""
     client = FakeClient(estate())
 
-    result = await heal_wedged_schedules(client, workspace_id=WS, task_queue=QUEUE, now=NOW)
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
 
     assert client.updated == []
     assert result.healed == ()
@@ -314,7 +316,9 @@ async def test_a_paused_schedule_is_not_reinstalled_however_far_behind() -> None
     live = estate(**{ramp: described((NOW - dt.timedelta(days=30),), paused=True)})
     client = FakeClient(live)
 
-    result = await heal_wedged_schedules(client, workspace_id=WS, task_queue=QUEUE, now=NOW)
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
 
     assert client.updated == []
     assert result.healed == ()
@@ -333,7 +337,9 @@ async def test_one_unreadable_schedule_does_not_abandon_the_rest() -> None:
     del live[f"titan-opt-outs::{WS}"]
     client = FakeClient(live)
 
-    result = await heal_wedged_schedules(client, workspace_id=WS, task_queue=QUEUE, now=NOW)
+    result = await heal_wedged_schedules(
+        client, workspace_id=WS, task_queue=QUEUE, now=NOW
+    )
 
     assert client.updated == [housekeeping]
     assert result.unreadable == 1
@@ -576,3 +582,64 @@ async def test_a_recreate_that_fails_leaves_a_loud_trail() -> None:
 
     assert result.healed == ()
     assert [a.schedule_id for a in result.attempted] == [housekeeping]
+
+
+class TestTheFakeMatchesTheRealSdk:
+    """The fake said yes to a method the SDK does not have.
+
+    ``_recreate`` called ``client.delete_schedule(id)``. ``temporalio.client.Client``
+    has no such attribute and never has -- delete lives on the handle, exactly
+    like ``describe``, which the same file two functions below was already
+    using correctly. Every test here passed, because ``FakeClient`` had been
+    written to match the code rather than the library.
+
+    Live consequence, 10-12 September: the daily-report schedule wedged, the
+    watchdog detected it correctly, tried the in-place update, read back that
+    it had not worked, reached the repair of last resort and raised
+    AttributeError. It then filed a task telling a human to "delete the
+    schedule and run titan schedules" -- an instruction it could have carried
+    out itself -- into a CRM the operator reads through the daily report that
+    was broken. Two days of silence.
+
+    A fake is a claim about somebody else's API. These tests check the claim.
+    """
+
+    def test_the_client_methods_the_code_calls_exist_on_the_real_client(self) -> None:
+        """Planted violation: give the fake a method the SDK lacks."""
+        from temporalio.client import Client
+
+        for name in ("create_schedule", "get_schedule_handle"):
+            assert hasattr(FakeClient, name), f"the fake is missing {name}"
+            assert hasattr(Client, name), (
+                f"FakeClient.{name} does not exist on temporalio Client; "
+                "the fake is modelling an API the server does not have"
+            )
+
+    def test_the_fake_client_invents_nothing(self) -> None:
+        """Anything public on the fake must be answerable by the real client.
+
+        Bookkeeping attributes are exempt -- they are the fake's own way of
+        recording what happened, not claims about Temporal.
+        """
+        from temporalio.client import Client
+
+        bookkeeping = {"existing", "updated", "created", "deleted", "repair_works"}
+        invented = [
+            name
+            for name in dir(FakeClient)
+            if not name.startswith("_")
+            and name not in bookkeeping
+            and not hasattr(Client, name)
+        ]
+
+        assert not invented, f"FakeClient invents {invented}, which Temporal has not"
+
+    def test_the_handle_methods_the_code_calls_exist_on_the_real_handle(self) -> None:
+        """``delete`` is the one that was missing, and the reason this exists."""
+        from temporalio.client import ScheduleHandle
+
+        for name in ("describe", "update", "delete"):
+            assert hasattr(FakeHandle, name), f"the fake handle is missing {name}"
+            assert hasattr(ScheduleHandle, name), (
+                f"FakeHandle.{name} does not exist on temporalio ScheduleHandle"
+            )

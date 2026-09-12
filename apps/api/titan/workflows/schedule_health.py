@@ -248,7 +248,19 @@ async def _recreate(client: Any, job: Any, *, now: dt.datetime) -> bool:
     it.
     """
     try:
-        await client.delete_schedule(job.schedule_id)
+        # Through the handle, not the client. ``Client`` has no
+        # ``delete_schedule`` and never has -- the call below raised
+        # AttributeError on every attempt, so the repair of last resort had
+        # never once run. The watchdog detected the stuck daily report
+        # correctly, tried the in-place update, read back that it had not
+        # worked, reached this line, crashed, and escalated to a human with
+        # instructions to "delete the schedule and run titan schedules" -- an
+        # instruction it could have carried out itself, filed as a task in a
+        # CRM the operator reads via the daily report that was broken.
+        #
+        # Two days of missed reports, and the code two functions below was
+        # already using the correct form: ``get_schedule_handle(id).describe()``.
+        await client.get_schedule_handle(job.schedule_id).delete()
     except Exception:
         logger.warning(
             "could not delete the wedged schedule; leaving it alone",
