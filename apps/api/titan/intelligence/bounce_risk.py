@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from titan.db.enums import ContactSource, VerificationStatus, verification_permits_sending
+from titan.intelligence.address_history import AddressHistory
 from titan.intelligence.contacts import (
     DIGIT_RUN_PREFIX,
     email_domain,
@@ -139,6 +140,7 @@ def assess(
     verification: VerificationResult | None = None,
     history: DomainWindow | None = None,
     source_url: str | None = None,
+    prior: AddressHistory | None = None,
 ) -> BounceRisk:
     """Classify a recipient as deliverable, catch-all, risky, unknown or invalid.
 
@@ -170,6 +172,56 @@ def assess(
         )
 
     domain = email_domain(normalized)
+
+    # ---- layer 1a: what happened last time we wrote to it ----------------
+    # Asked before every inference below, because it is not one. Everything
+    # else in this function reasons about an address; this reports what a mail
+    # server did when Titan actually sent to it.
+    #
+    # The gap this closes: ten addresses on the live estate had hard-bounced
+    # and not one was marked invalid. Six still carried published_first_party,
+    # the strongest status available, after proving themselves dead -- so an
+    # address that bounced in August and was rediscovered by a second crawl in
+    # September came back with a clean record and was eligible to be written to
+    # again. Suppression stopped the send; nothing stopped the lead being
+    # re-researched, re-scored and re-drafted first.
+    #
+    # This is also the layer a paid verification service is really selling.
+    # MillionVerifier does not deduce that a mailbox is dead, it remembers.
+    # Titan generates the same evidence on every send; it was discarding it.
+    if prior is not None:
+        if prior.is_proven_dead:
+            signals.append(
+                RiskSignal(
+                    "mailbox_previously_bounced",
+                    Verdict.REFUSE,
+                    prior.describe(),
+                )
+            )
+        elif prior.has_complained:
+            # Separate from the bounce case and equally conclusive. A person
+            # marked us as spam; no sample size makes that ambiguous, and the
+            # domain-health layer says the same about its own complaints.
+            signals.append(
+                RiskSignal(
+                    "recipient_complained_before",
+                    Verdict.REFUSE,
+                    "this address has reported Titan as spam; it must not be "
+                    "written to again",
+                )
+            )
+        elif prior.is_doubtful:
+            # DOWNGRADE, not REFUSE. A soft bounce is a full mailbox, a
+            # greylist, a server having a bad week -- individually meaningless,
+            # and a pattern only in aggregate. Holding it back leaves it for a
+            # verification service or a person to release.
+            signals.append(
+                RiskSignal(
+                    "mailbox_soft_bounces_repeatedly",
+                    Verdict.DOWNGRADE,
+                    prior.describe(),
+                )
+            )
 
     # ---- layer 1b: two things stuck together ----------------------------
     # A local part that is a run of three or more digits immediately followed by

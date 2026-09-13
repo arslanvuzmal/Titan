@@ -66,6 +66,7 @@ from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence import case_studies
 from titan.intelligence.absence import findings_from_gap
+from titan.intelligence.address_history import AddressHistory, read_many
 from titan.intelligence.bounce_risk import BounceRisk, assess
 from titan.intelligence.composer import ComposerContext, compose, family_for
 from titan.intelligence.contacts import (
@@ -854,6 +855,28 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
     # one per address, and outside the write loop for the same reason.
     history = await _domain_history(workspace_id, candidate_domains)
 
+    # What each of these addresses did the last time Titan wrote to it. Read in
+    # bulk here for the same reason the MX checks and the domain history are:
+    # discovery assesses every address on a site in one pass, and this must not
+    # become two queries per candidate.
+    #
+    # Failure is swallowed to nothing rather than raised. Like domain history
+    # this layer is purely additive -- without it the engine has one fewer
+    # signal -- and a slow database must not abandon contact discovery.
+    try:
+        async with workspace_session(workspace_id) as session:
+            prior_history = await read_many(
+                session,
+                workspace_id=workspace_id,
+                emails=[c.normalized for c in discovered if c.normalized],
+            )
+    except Exception as exc:
+        logger.warning(
+            "address history unavailable; assessing without it",
+            extra={"error_code": type(exc).__name__},
+        )
+        prior_history = {}
+
     for candidate in discovered:
         if not candidate.is_usable:
             rejected.append(f"{candidate.normalized}: {candidate.rejection_reason}")
@@ -867,7 +890,12 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
         # disposable domain, a misspelling of a webmail provider or a
         # verification service can now say otherwise before the address is ever
         # stored as sendable.
-        risk = await _assess_bounce_risk(candidate, mx, history.get(candidate.domain))
+        risk = await _assess_bounce_risk(
+            candidate,
+            mx,
+            history.get(candidate.domain),
+            prior_history.get(candidate.normalized),
+        )
 
         verdict = check_contact_eligibility(
             source=candidate.source,
@@ -1076,6 +1104,7 @@ async def _assess_bounce_risk(
     candidate: DiscoveredContact,
     mx: MxCheck | None,
     history: DomainWindow | None,
+    prior: AddressHistory | None = None,
 ) -> BounceRisk:
     """Run the bounce reduction engine over one discovered address.
 
@@ -1096,6 +1125,7 @@ async def _assess_bounce_risk(
         mx=mx,
         history=history,
         source_url=candidate.source_url,
+        prior=prior,
     )
     if risk.refusals:
         return risk
@@ -1121,6 +1151,7 @@ async def _assess_bounce_risk(
         history=history,
         verification=result,
         source_url=candidate.source_url,
+        prior=prior,
     )
 
 

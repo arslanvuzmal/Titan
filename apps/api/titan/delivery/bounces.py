@@ -34,8 +34,8 @@ from enum import StrEnum
 from sqlalchemy import func, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from titan.db.enums import LeadStatus, SuppressionReason
-from titan.db.models import Lead, Message
+from titan.db.enums import LeadStatus, SuppressionReason, VerificationStatus
+from titan.db.models import ContactChannel, Lead, Message
 from titan.delivery.suppression import suppress
 
 logger = logging.getLogger(__name__)
@@ -350,6 +350,34 @@ async def _suppress_and_stop(
         detail=detail or {},
         now=now,
     )
+    if reason is SuppressionReason.HARD_BOUNCE:
+        # The address itself is now known bad, not merely blocked.
+        #
+        # Suppression stops the next send and nothing else. The channel kept
+        # whatever status discovery gave it, which for six of the ten addresses
+        # that had hard-bounced on the live estate was `published_first_party`
+        # -- the strongest status the system assigns -- held by a mailbox a
+        # mail server had already said does not exist.
+        #
+        # That mattered beyond tidiness. Scoring reads verification_status, so
+        # a dead address kept scoring as a live one; and a lead rediscovered by
+        # a later crawl came back through research, scoring and drafting on a
+        # clean record, spending a crawl and a model call before suppression
+        # stopped it at the gate. Writing the truth here stops it at the top.
+        #
+        # Every matching channel in the workspace, not just this lead's: the
+        # same address is often published by one business on several pages and
+        # stored more than once.
+        await session.execute(
+            update(ContactChannel)
+            .where(
+                ContactChannel.workspace_id == workspace_id,
+                ContactChannel.normalized_value == target,
+                ContactChannel.verification_status != VerificationStatus.INVALID,
+            )
+            .values(verification_status=VerificationStatus.INVALID)
+        )
+
     if lead_id is not None:
         await session.execute(
             update(Lead)

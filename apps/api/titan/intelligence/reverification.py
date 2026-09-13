@@ -47,6 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.db.enums import VerificationStatus, verification_permits_sending
 from titan.db.models import ContactChannel, ContactVerification
+from titan.intelligence.address_history import read_history
 from titan.intelligence.bounce_risk import assess
 from titan.intelligence.mx import (
     MxCheck,
@@ -283,12 +284,25 @@ async def reverify(
             mx = None
 
         report.checked += 1
+        # What this address did the last time Titan wrote to it. Read per
+        # candidate rather than in bulk because this pass is already one
+        # network round trip per address and is bounded to a small batch --
+        # two more cheap queries against an index are not the cost here.
+        #
+        # It matters most in exactly this pass. The addresses re-checked here
+        # are the oldest in the estate, which means they are the ones most
+        # likely to have been written to already, and a previous hard bounce is
+        # stronger evidence than anything the probe is about to collect.
+        prior = await read_history(
+            session, workspace_id=workspace_id, email=candidate.email
+        )
         risk = assess(
             email=candidate.email,
             source=candidate.source,  # type: ignore[arg-type]
             mx=mx,
             verification=verification if verification.is_conclusive else None,
             source_url=candidate.source_url,
+            prior=prior,
         )
         report.record(risk.status)
 
