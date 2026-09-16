@@ -223,6 +223,20 @@ class ExpireAlarmsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExpandMarketsInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ExpandMarketsResult:
+    #: Combinations that have stopped producing new businesses.
+    exhausted: int = 0
+    #: Markets opened this pass, as "business type / city".
+    opened: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
 class PingWatchdogInput:
     """Nothing. The watchdog is per-installation, not per-workspace.
 

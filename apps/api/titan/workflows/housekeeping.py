@@ -33,6 +33,8 @@ with workflow.unsafe.imports_passed_through():
         CheckVitalsResult,
         EraseExpiredDataInput,
         EraseExpiredDataResult,
+        ExpandMarketsInput,
+        ExpandMarketsResult,
         ExpireAlarmsInput,
         ExpireAlarmsResult,
         PingWatchdogInput,
@@ -238,6 +240,37 @@ class HousekeepingWorkflow:
             )
         except Exception as exc:
             workflow.logger.warning("vitals check failed: %s", str(exc)[:300])
+
+        # Lead supply, before the alarms are swept so that a campaign which
+        # has just been given somewhere new to look is not also reported as
+        # stalled in the same pass.
+        #
+        # Swallowed like the rest. A pass that repaired stranded drafts
+        # must not be recorded as failed because the territory catalogue
+        # could not be read.
+        try:
+            grew: ExpandMarketsResult = await workflow.execute_activity(
+                "expand_markets",
+                ExpandMarketsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
+                retry_policy=RETRY,
+                result_type=ExpandMarketsResult,
+            )
+            if grew.opened:
+                workflow.logger.info(
+                    "opened %s new market(s): %s",
+                    len(grew.opened),
+                    ", ".join(grew.opened),
+                )
+            elif grew.exhausted:
+                workflow.logger.info(
+                    "%s combination(s) worked out but none opened: %s",
+                    grew.exhausted,
+                    grew.reason,
+                )
+        except Exception as error:
+            workflow.logger.warning("market expansion skipped: %s", error)
 
         # The queue the alarms land in, swept after they are raised.
         #

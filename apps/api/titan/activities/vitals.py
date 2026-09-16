@@ -45,6 +45,8 @@ from titan.providers import smartlead
 from titan.workflows.types import (
     CheckVitalsInput,
     CheckVitalsResult,
+    ExpandMarketsInput,
+    ExpandMarketsResult,
     ExpireAlarmsInput,
     ExpireAlarmsResult,
     PingWatchdogInput,
@@ -327,6 +329,39 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
     )
 
 
+@activity.defn(name="expand_markets")
+async def expand_markets(request: ExpandMarketsInput) -> ExpandMarketsResult:
+    """Open the next market when the current one is worked out.
+
+    The last decision in lead supply that a person still had to make. Discovery
+    runs on a schedule, research runs on a schedule, sending runs on a
+    schedule -- and *where to look next* was somebody editing
+    ``provision_markets.py``. So when the 29 configured combinations were
+    worked out, discovery stopped for eight days and the only complaint was a
+    campaign filing "budget but no eligible leads" into a CRM read through a
+    daily report that was itself broken.
+
+    Discovery was never exhausted; the query list was. The catalogue holds 107
+    territories against 13 business types in use, and 29 of those 1,391
+    combinations had been tried.
+
+    Safe to run unattended because of what it creates: a RESEARCH_ONLY campaign
+    that is not authorised to send. The worst case of a bug here is crawling a
+    city nobody asked for.
+    """
+    from titan.intelligence.expansion import expand
+
+    workspace_id = uuid.UUID(request.workspace_id)
+    async with workspace_unit_of_work(workspace_id) as session:
+        report = await expand(session, workspace_id=workspace_id, apply=True)
+
+    return ExpandMarketsResult(
+        exhausted=len(report.exhausted),
+        opened=tuple(report.opened),
+        reason=report.reason,
+    )
+
+
 @activity.defn(name="expire_stale_alarms")
 async def expire_stale_alarms_activity(
     request: ExpireAlarmsInput,
@@ -395,6 +430,7 @@ async def ping_watchdog(_: PingWatchdogInput) -> PingWatchdogResult:
 
 ALL_VITALS_ACTIVITIES = [
     check_pipeline_vitals,
+    expand_markets,
     expire_stale_alarms_activity,
     ping_watchdog,
 ]
