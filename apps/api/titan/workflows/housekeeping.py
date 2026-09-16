@@ -41,6 +41,8 @@ with workflow.unsafe.imports_passed_through():
         PingWatchdogResult,
         ReadmitLeadsInput,
         ReadmitLeadsResult,
+        RecheckClaimsInput,
+        RecheckClaimsResult,
         ReleaseHeldInput,
         ReleaseHeldResult,
         ReopenStaleRunsInput,
@@ -242,6 +244,39 @@ class HousekeepingWorkflow:
             )
         except Exception as exc:
             workflow.logger.warning("vitals check failed: %s", str(exc)[:300])
+
+        # Claims about to be asserted, tested against the live site.
+        #
+        # Before the staleness sweep: a claim that is *false* should be
+        # withdrawn now, not re-measured in nine days' time. Both end with the
+        # lead back in research; this one also records why.
+        #
+        # Swallowed like the rest. A recipient's web server being down must not
+        # fail the pass that repairs the pipeline.
+        try:
+            rechecked: RecheckClaimsResult = await workflow.execute_activity(
+                "recheck_pending_claims",
+                RecheckClaimsInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
+                retry_policy=RETRY,
+                result_type=RecheckClaimsResult,
+            )
+            if rechecked.contradicted:
+                workflow.logger.info(
+                    "withdrew %s message(s) whose claim is no longer true: %s",
+                    rechecked.contradicted,
+                    ", ".join(rechecked.withdrawn),
+                )
+            elif rechecked.checked:
+                workflow.logger.info(
+                    "re-checked %s claim(s): %s still true, %s inconclusive",
+                    rechecked.checked,
+                    rechecked.confirmed,
+                    rechecked.inconclusive,
+                )
+        except Exception as error:
+            workflow.logger.warning("claim re-check skipped: %s", error)
 
         # Claims that are ageing out, before lead supply -- a lead returned
         # here becomes researchable, and running supply first would plan

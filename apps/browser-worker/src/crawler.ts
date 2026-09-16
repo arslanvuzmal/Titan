@@ -281,6 +281,104 @@ async function robotsAllows(origin: string, userAgent: string, path: string): Pr
   }
 }
 
+/**
+ * Re-measure one URL, cheaply, so a claim can be checked before it is sent.
+ *
+ * Every message Titan sends asserts something about a page: "the link in your
+ * navigation returns 404", "your Book Now button leads nowhere". That
+ * assertion was measured when the site was crawled, and the send gate only
+ * asks how *old* the measurement is -- never whether it is still true. A
+ * business that fixed its booking page a fortnight ago still gets told it is
+ * broken, and `audit_findings.contradicted` exists for exactly this and has
+ * never been written by anything.
+ *
+ * This is the cheap half of the answer: one URL, one browser context, the same
+ * double-sampling `probeTarget` already uses, and no crawl. It lives here
+ * rather than in the API because the browser worker is deliberately the only
+ * component that fetches attacker-controlled URLs and deliberately the only one
+ * with no database, mail or model credentials. Moving this fetch into the API
+ * container would hand a hostile page a process that holds all three.
+ *
+ * Returns what was seen, never a verdict. Deciding whether a status contradicts
+ * a claim belongs with the claim, which is in Python.
+ */
+export async function recheckUrl(
+  url: string,
+  opts: { userAgent: string; timeoutSeconds: number },
+): Promise<{
+  url: string;
+  allowed: boolean;
+  blocked_reason: string | null;
+  status: number | null;
+  is_empty: boolean | null;
+  duration_ms: number;
+  worker_version: string;
+}> {
+  const started = Date.now();
+  const out = {
+    url,
+    allowed: true,
+    blocked_reason: null as string | null,
+    status: null as number | null,
+    is_empty: null as boolean | null,
+    duration_ms: 0,
+    worker_version: WORKER_VERSION,
+  };
+
+  const verdict = await validateUrl(url);
+  if (!verdict.allowed) {
+    out.allowed = false;
+    out.blocked_reason = verdict.reason ?? 'url_guard_refused';
+    out.duration_ms = Date.now() - started;
+    return out;
+  }
+
+  const deadline = started + Math.max(5, opts.timeoutSeconds) * 1000;
+  let browser: Browser | null = null;
+  let context: BrowserContext | null = null;
+  try {
+    const launchOptions: any = {
+      args: [
+        '--disable-dev-shm-usage',
+        '--no-zygote',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-extensions',
+      ],
+    };
+    if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+      launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+    }
+    browser = await chromium.launch(launchOptions);
+    context = await browser.newContext({
+      userAgent: opts.userAgent,
+      viewport: DESKTOP,
+      ignoreHTTPSErrors: false,
+      javaScriptEnabled: true,
+      serviceWorkers: 'block',
+      bypassCSP: false,
+    });
+    await context.clearCookies();
+
+    const outcome = await probeTarget(context, url, deadline);
+    if (outcome) {
+      out.status = outcome.status;
+      out.is_empty = outcome.isEmpty;
+    }
+  } catch {
+    // A probe that could not run is not evidence that anything changed. The
+    // caller treats a null status as inconclusive and sends anyway, which is
+    // the right asymmetry: a wrong "still broken" costs a false claim, and a
+    // wrong "now fixed" costs a lead nobody was going to write to twice.
+  } finally {
+    if (context) await context.close().catch(() => undefined);
+    if (browser) await browser.close().catch(() => undefined);
+  }
+
+  out.duration_ms = Date.now() - started;
+  return out;
+}
+
 export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
   const started = Date.now();
   const deadline = started + req.timeout_seconds * 1000;

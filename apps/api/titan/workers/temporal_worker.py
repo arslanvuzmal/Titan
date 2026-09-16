@@ -21,6 +21,7 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from titan.activities import claim_verification
 from titan.activities import daily_report as daily_report_activities
 from titan.activities import delivery_events as delivery_event_activities
 from titan.activities import discovery as discovery_activities
@@ -161,6 +162,11 @@ async def main() -> None:
             *retention_activities.ALL_RETENTION_ACTIVITIES,
             *readmission_activities.ALL_READMISSION_ACTIVITIES,
             *vitals_activities.ALL_VITALS_ACTIVITIES,
+            # Re-checks a claim against the live site before it is asserted.
+            # On the maintenance queue, not research: it is a guard on the
+            # pipeline rather than part of it, and it must keep running while
+            # a crawl backlog saturates the research lane.
+            *claim_verification.ALL_CLAIM_VERIFICATION_ACTIVITIES,
         ],
         max_concurrent_activities=2,
         graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),

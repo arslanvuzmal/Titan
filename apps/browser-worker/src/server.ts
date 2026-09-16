@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { runCrawl } from './crawler.js';
+import { recheckUrl, runCrawl } from './crawler.js';
 import type { ResearchRequest } from './contract.js';
 import { WORKER_VERSION } from './contract.js';
 
@@ -89,7 +89,13 @@ const server = http.createServer(async (req, res) => {
       : send(res, 503, { status: 'saturated', in_flight: inFlight });
   }
 
-  if (req.method !== 'POST' || url.pathname !== '/research') {
+  const isResearch = req.method === 'POST' && url.pathname === '/research';
+  // One URL, no crawl. Used to ask whether a claim Titan is about to send is
+  // still true -- see recheckUrl in crawler.ts for why it lives on this side
+  // of the credential boundary.
+  const isRecheck = req.method === 'POST' && url.pathname === '/recheck';
+
+  if (!isResearch && !isRecheck) {
     return send(res, 404, { error: 'not_found' });
   }
 
@@ -107,7 +113,22 @@ const server = http.createServer(async (req, res) => {
 
   inFlight += 1;
   try {
-    const parsed = validateRequest(JSON.parse(await readBody(req)));
+    const body = JSON.parse(await readBody(req));
+    if (isRecheck) {
+      const target = typeof body?.url === 'string' ? body.url : '';
+      if (!target) throw new Error('url is required');
+      const result = await recheckUrl(target, {
+        userAgent:
+          typeof body?.user_agent === 'string' && body.user_agent
+            ? body.user_agent
+            : 'TitanBot/1.0 (+https://arslanvuzmallone.com/titan)',
+        timeoutSeconds:
+          typeof body?.timeout_seconds === 'number' ? body.timeout_seconds : 25,
+      });
+      send(res, 200, result);
+      return;
+    }
+    const parsed = validateRequest(body);
     const result = await runCrawl(parsed);
     send(res, 200, result);
   } catch (err) {

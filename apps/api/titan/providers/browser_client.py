@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -81,6 +82,30 @@ class UrlBlockedError(RuntimeError):
     Named in the workflow's ``non_retryable_error_types``: a refused URL is
     refused identically on every retry, so retrying only wastes time.
     """
+
+
+@dataclass(frozen=True, slots=True)
+class RecheckResult:
+    """What one URL did when asked again.
+
+    Deliberately not a verdict. ``status is None`` means the probe could not
+    reach a conclusion -- blocked by the URL guard, the worker unreachable, the
+    page refusing to answer -- and a caller must treat that as "unchanged",
+    never as "fixed". The asymmetry matters: reading an inconclusive probe as
+    "the defect is gone" would silently discard real leads, and nothing
+    downstream would ever show it happened.
+    """
+
+    url: str
+    allowed: bool = True
+    blocked_reason: str | None = None
+    status: int | None = None
+    is_empty: bool | None = None
+    error: str | None = None
+
+    @property
+    def is_conclusive(self) -> bool:
+        return self.status is not None
 
 
 class BrowserWorkerClient:
@@ -204,6 +229,71 @@ class BrowserWorkerClient:
 
         self._reverify(result)
         return result
+
+    async def recheck(self, url: str, *, timeout_seconds: int = 25) -> RecheckResult:
+        """Ask what one URL does *now*. One request, no crawl.
+
+        Used to test a claim Titan is about to make before it makes it. The
+        send gate only asks how old a measurement is, never whether it is still
+        true, so a business that fixed its booking page a fortnight ago was
+        still being told it was broken.
+
+        Goes through the browser worker rather than fetching here, and that is
+        a security boundary rather than a convenience: the worker is
+        deliberately the only component that opens attacker-controlled URLs and
+        deliberately the only one holding no database, mail or model
+        credentials. Fetching a lead's site from this process would hand a
+        hostile page all three.
+
+        Returns what was seen. It never decides whether the observation
+        contradicts a claim -- that belongs with the claim.
+        """
+        verdict = validate_url(url)
+        if not verdict.allowed:
+            return RecheckResult(
+                url=url,
+                allowed=False,
+                blocked_reason=(
+                    verdict.reason.value if verdict.reason else "url_guard_refused"
+                ),
+            )
+
+        async with _lanes(self._settings):
+            try:
+                http = await self._http()
+                response = await http.post(
+                    "/recheck",
+                    json={
+                        "url": url,
+                        "user_agent": self._settings.crawl_user_agent,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                # Inconclusive, not failed. A probe that could not run is not
+                # evidence that anything changed, and the caller must not read
+                # it as one.
+                return RecheckResult(
+                    url=url, error=f"{type(exc).__name__}: {str(exc)[:160]}"
+                )
+
+        if response.status_code != 200:
+            return RecheckResult(
+                url=url, error=f"HTTP {response.status_code}: {response.text[:160]}"
+            )
+
+        try:
+            body = response.json()
+        except Exception as exc:
+            return RecheckResult(url=url, error=f"unparseable response: {exc}")
+
+        return RecheckResult(
+            url=url,
+            allowed=bool(body.get("allowed", True)),
+            blocked_reason=body.get("blocked_reason"),
+            status=body.get("status"),
+            is_empty=body.get("is_empty"),
+        )
 
     def _reverify(self, result: CrawlResult) -> None:
         """Re-check what the worker claims it visited.

@@ -223,6 +223,24 @@ class ExpireAlarmsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RecheckClaimsInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RecheckClaimsResult:
+    checked: int = 0
+    #: The defect is still there; the message stands.
+    confirmed: int = 0
+    #: The business fixed it. The message was withdrawn rather than sent.
+    contradicted: int = 0
+    #: Nothing was learned, so nothing changed -- see claim_recheck on why an
+    #: inconclusive probe must never be read as "fixed".
+    inconclusive: int = 0
+    withdrawn: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
 class SweepStaleEvidenceInput:
     workspace_id: str
 
