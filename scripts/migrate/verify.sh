@@ -11,7 +11,10 @@ set -uo pipefail
 
 INSTALL_DIR="${TITAN_INSTALL_DIR:-/opt/titan}"
 cd "${INSTALL_DIR}" 2>/dev/null || { echo "no ${INSTALL_DIR}"; exit 1; }
-COMPOSE="docker compose -f deploy/docker-compose.prod.yml"
+# --env-file for the same reason bootstrap-vps.sh gives: compose
+# interpolation does not read `env_file:`, only the shell or a .env beside
+# the compose file.
+COMPOSE="docker compose --env-file .env -f deploy/docker-compose.prod.yml"
 
 PASS=0
 FAIL=0
@@ -93,6 +96,33 @@ else
   # so this reports rather than failing the run.
   note "preflight exited non-zero (expected while paused):"
   tail -6 /tmp/titan-preflight.txt | sed 's/^/        /'
+fi
+
+# ---- outbound SMTP, which the provider may simply block --------------------
+# Hetzner blocks outbound 25 and 465 on new accounts to keep spammers off their
+# ranges. The mailboxes shipped configured for 465/ssl, so the first send from
+# the new host timed out -- and `operator_mail` raised AttributeError instead of
+# the reason, because it read a field SendResult does not have. Both are fixed;
+# this check means the next person sees the block in ten seconds rather than
+# after an hour of guessing.
+echo
+echo "outbound SMTP"
+SMTP_HOST="$(${COMPOSE} exec -T api python -c "
+import json, os
+p = os.environ.get('TITAN_MAILBOX_FILE')
+d = json.load(open(p)) if p else {}
+mbs = d['mailboxes'] if isinstance(d, dict) and 'mailboxes' in d else (d if isinstance(d, list) else [])
+print(mbs[0]['smtp']['host'], mbs[0]['smtp']['port']) if mbs else print('')
+" 2>/dev/null | tr -d '')"
+if [ -z "${SMTP_HOST}" ]; then
+  note "no mailbox file to read an SMTP host from"
+else
+  set -- ${SMTP_HOST}
+  if timeout 10 bash -c "echo > /dev/tcp/$1/$2" 2>/dev/null; then
+    ok "outbound SMTP to $1:$2 is open"
+  else
+    bad "outbound SMTP to $1:$2 is BLOCKED -- try port 587 with security 'starttls', or ask the provider to unblock"
+  fi
 fi
 
 # ---- the thing the VPS was bought for --------------------------------------

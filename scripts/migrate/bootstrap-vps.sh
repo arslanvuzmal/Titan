@@ -75,10 +75,71 @@ echo "secrets/ and .env in place, mode 600"
 
 cat "${SRC}/MANIFEST.txt" 2>/dev/null | head -20
 
+# ---- 5b. make a Windows .env usable on Linux -------------------------------
+step "normalising .env"
+# Two things bite here, both found the hard way on 16 September.
+#
+# CRLF: the file comes off a Windows laptop, so every value ends in a carriage
+# return. `set -a; . ./.env` then exports TITAN_DATABASE_URL with a trailing \r
+# and every connection string is subtly wrong.
+if [ -f "${INSTALL_DIR}/.env" ]; then
+  sed -i 's/\r$//' "${INSTALL_DIR}/.env"
+  for f in "${INSTALL_DIR}"/secrets/*.json; do
+    [ -f "$f" ] && sed -i 's/\r$//' "$f"
+  done
+  echo "line endings normalised"
+fi
+
+# Host-mapped ports: the laptop reaches Postgres on localhost:5442 because
+# compose publishes it there. Inside the compose network the service is
+# `postgres:5432`, and a copied .env points the whole stack at a port nothing
+# is listening on. migrate fails with "connection refused" and takes every
+# dependent service with it.
+if grep -qE '^TITAN_DATABASE_URL=.*(localhost|127\.0\.0\.1)' "${INSTALL_DIR}/.env" 2>/dev/null; then
+  sed -i 's|^TITAN_DATABASE_URL=.*|TITAN_DATABASE_URL=postgresql+psycopg://titan:titan_dev_password@postgres:5432/titan|' "${INSTALL_DIR}/.env"
+  echo "TITAN_DATABASE_URL pointed at the compose service"
+fi
+
+# Variables compose interpolates into the file itself, as opposed to the ones
+# it passes into containers. These are `${VAR:?}` in the compose file, and an
+# assignment that exists but is *empty* counts as missing -- which is exactly
+# what TITAN_BROWSER_WORKER_TOKEN= was, so a `grep -q ^VAR=` guard matched it
+# and never filled it in.
+ensure_var() {
+  local name="$1" value="$2"
+  local current
+  current="$(grep -E "^${name}=" "${INSTALL_DIR}/.env" | tail -1 | cut -d= -f2-)"
+  if [ -z "${current}" ]; then
+    sed -i "/^${name}=/d" "${INSTALL_DIR}/.env"
+    echo "${name}=${value}" >> "${INSTALL_DIR}/.env"
+    echo "  set ${name}"
+  fi
+}
+ensure_var TITAN_API_IMAGE "titan-api:local"
+ensure_var TITAN_BROWSER_WORKER_IMAGE "titan-browser-worker:local"
+ensure_var TITAN_BROWSER_WORKER_TOKEN "$(openssl rand -hex 24)"
+ensure_var POSTGRES_USER "titan"
+ensure_var POSTGRES_PASSWORD "titan_dev_password"
+ensure_var TEMPORAL_POSTGRES_PASSWORD "titan_dev_password"
+
+# ---- 5c. images ------------------------------------------------------------
+# Built here rather than pulled: there is no registry, and building on the
+# target is one fewer moving part than pushing to one.
+step "images"
+cd "${INSTALL_DIR}"
+docker build -q -f apps/api/Dockerfile -t titan-api:local . >/dev/null
+docker build -q -f apps/browser-worker/Dockerfile -t titan-browser-worker:local apps/browser-worker >/dev/null
+echo "titan-api:local and titan-browser-worker:local built"
+
 # ---- 6. database, then the stack, paused -----------------------------------
 step "database"
 cd "${INSTALL_DIR}"
-COMPOSE="docker compose -f deploy/docker-compose.prod.yml"
+# --env-file is not optional. `env_file:` inside the compose file supplies
+# variables to *containers*; ${VAR} interpolation in the compose file itself is
+# resolved from the shell or from a .env sitting next to the compose file. Ours
+# is at the repo root, so it has to be named explicitly or every image and
+# password interpolates to nothing.
+COMPOSE="docker compose --env-file .env -f deploy/docker-compose.prod.yml"
 
 ${COMPOSE} up -d postgres
 echo "waiting for postgres"

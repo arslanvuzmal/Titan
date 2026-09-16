@@ -84,7 +84,16 @@ async def mail_the_operator(*, subject: str, body: str) -> str:
         )
     )
     if not result.accepted:
-        raise RuntimeError(result.error or "the provider refused the operator mail")
+        # `error_kind` and `error_detail`, never `error`. SendResult has never
+        # had that attribute, so this line raised AttributeError instead of the
+        # reason -- which is how a Hetzner block on port 465 surfaced during the
+        # 16 September migration as "'SendResult' object has no attribute
+        # 'error'" rather than "TimeoutError: timed out". The failure path is
+        # the one place a wrong attribute name costs most: it only runs when
+        # something is already wrong, so it is never exercised until it matters.
+        kind = result.error_kind.value if result.error_kind else "refused"
+        detail = result.error_detail or "no detail from the provider"
+        raise RuntimeError(f"operator mail {kind}: {detail}")
     return to
 
 
