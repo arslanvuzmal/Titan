@@ -142,7 +142,15 @@ async def recheck_pending_claims(request: RecheckClaimsInput) -> RecheckClaimsRe
     client = BrowserWorkerClient()
     try:
         for row in rows:
-            activity.heartbeat(f"re-checking {row.page_url}")
+            # Outside a Temporal activity -- a CLI run, a test -- there is no
+            # context to heartbeat into, and `activity.heartbeat` raises rather
+            # than no-ops. The heartbeat exists so a slow batch is not killed
+            # as stuck; it is not worth making the function impossible to call
+            # by hand.
+            try:
+                activity.heartbeat(f"re-checking {row.page_url}")
+            except RuntimeError:
+                pass
             observed = await client.recheck(row.page_url)
             check = judge(issue_type=row.issue_type, observed=observed)
             report.checked += 1
