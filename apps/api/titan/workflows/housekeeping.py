@@ -47,6 +47,8 @@ with workflow.unsafe.imports_passed_through():
         ReopenStaleRunsResult,
         ReverifyContactsInput,
         ReverifyContactsResult,
+        SweepStaleEvidenceInput,
+        SweepStaleEvidenceResult,
         SweepStrandedInput,
         SweepStrandedResult,
     )
@@ -240,6 +242,32 @@ class HousekeepingWorkflow:
             )
         except Exception as exc:
             workflow.logger.warning("vitals check failed: %s", str(exc)[:300])
+
+        # Claims that are ageing out, before lead supply -- a lead returned
+        # here becomes researchable, and running supply first would plan
+        # this cycle without it.
+        #
+        # Swallowed like the rest. A pass that repaired stranded drafts
+        # must not be recorded as failed because a re-measure could not run.
+        try:
+            stale: SweepStaleEvidenceResult = await workflow.execute_activity(
+                "sweep_stale_evidence",
+                SweepStaleEvidenceInput(workspace_id=request.workspace_id),
+                start_to_close_timeout=TIMEOUT,
+                task_queue=MAINTENANCE_QUEUE,
+                retry_policy=RETRY,
+                result_type=SweepStaleEvidenceResult,
+            )
+            if stale.reopened:
+                workflow.logger.info(
+                    "re-measuring %s lead(s) whose claims were ageing "
+                    "(%s already past the send gate, oldest %sd)",
+                    stale.reopened,
+                    stale.already_unsendable,
+                    stale.oldest_days,
+                )
+        except Exception as error:
+            workflow.logger.warning("stale-evidence sweep skipped: %s", error)
 
         # Lead supply, before the alarms are swept so that a campaign which
         # has just been given somewhere new to look is not also reported as

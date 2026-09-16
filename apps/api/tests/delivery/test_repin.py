@@ -29,7 +29,6 @@ from titan.db.models import (
     CampaignSender,
     Message,
     OrganizationLocation,
-    OutboxMessage,
     SenderIdentity,
 )
 from titan.db.session import get_sessionmaker

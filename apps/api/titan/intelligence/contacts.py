@@ -17,9 +17,8 @@ Which is why provenance is stored per address rather than inferred from shape.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from titan.contracts.evidence import PageEvidence

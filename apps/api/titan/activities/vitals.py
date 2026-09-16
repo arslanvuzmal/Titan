@@ -51,6 +51,8 @@ from titan.workflows.types import (
     ExpireAlarmsResult,
     PingWatchdogInput,
     PingWatchdogResult,
+    SweepStaleEvidenceInput,
+    SweepStaleEvidenceResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -329,6 +331,40 @@ async def check_pipeline_vitals(request: CheckVitalsInput) -> CheckVitalsResult:
     )
 
 
+@activity.defn(name="sweep_stale_evidence")
+async def sweep_stale_evidence_activity(
+    request: SweepStaleEvidenceInput,
+) -> SweepStaleEvidenceResult:
+    """Return leads with ageing claims to the research pipeline.
+
+    The send gate refuses evidence older than thirty days and nothing acted
+    before it, so a draft written on day one sat in the queue until day thirty
+    and then became permanently unsendable. Measured the day the estate moved
+    to its own server: 167 queued drafts already past that limit, and 255 more
+    resting on evidence between two and four weeks old -- each one a claim
+    about a defect the business may have fixed a fortnight ago.
+
+    This re-measures rather than relaxing. The lead goes back to QUALIFIED, the
+    orchestrator plans it like any other, and the research pipeline writes a new
+    draft from what is true today. The old draft is superseded rather than
+    deleted: its claim map is the record of what was asserted and why.
+    """
+    from titan.intelligence.staleness import sweep_stale_evidence
+
+    workspace_id = uuid.UUID(request.workspace_id)
+    async with workspace_unit_of_work(workspace_id) as session:
+        report = await sweep_stale_evidence(
+            session, workspace_id=workspace_id, now=dt.datetime.now(dt.UTC)
+        )
+
+    return SweepStaleEvidenceResult(
+        stale=report.stale,
+        reopened=report.reopened,
+        already_unsendable=report.already_unsendable,
+        oldest_days=report.oldest_days or 0,
+    )
+
+
 @activity.defn(name="expand_markets")
 async def expand_markets(request: ExpandMarketsInput) -> ExpandMarketsResult:
     """Open the next market when the current one is worked out.
@@ -431,6 +467,7 @@ async def ping_watchdog(_: PingWatchdogInput) -> PingWatchdogResult:
 ALL_VITALS_ACTIVITIES = [
     check_pipeline_vitals,
     expand_markets,
+    sweep_stale_evidence_activity,
     expire_stale_alarms_activity,
     ping_watchdog,
 ]

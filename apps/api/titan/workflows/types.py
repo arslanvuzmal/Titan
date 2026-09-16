@@ -223,6 +223,20 @@ class ExpireAlarmsResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class SweepStaleEvidenceInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class SweepStaleEvidenceResult:
+    stale: int = 0
+    reopened: int = 0
+    #: Of those, the ones already past the send gate's own limit when found.
+    already_unsendable: int = 0
+    oldest_days: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
 class ExpandMarketsInput:
     workspace_id: str
 
@@ -763,11 +777,11 @@ __all__ = [
     "CrawlActivityInput",
     "CrawlActivityResult",
     "CycleVerdict",
+    "DailyReportInput",
     "DiscoverActivityInput",
     "DiscoverActivityResult",
     "DraftActivityInput",
     "DraftActivityResult",
-    "DailyReportInput",
     "HealSchedulesInput",
     "OrchestratorStatus",
     "PauseSignal",

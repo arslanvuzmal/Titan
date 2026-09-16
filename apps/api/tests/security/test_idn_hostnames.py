@@ -18,7 +18,6 @@ tests below pin that down from both directions.
 from __future__ import annotations
 
 import pytest
-
 from titan.security.url_guard import BlockReason, to_ascii_hostname, validate_url
 
 

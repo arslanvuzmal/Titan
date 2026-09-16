@@ -324,12 +324,12 @@ def daily_limit(
 
 __all__ = [
     "HEALTH_FACTORS",
-    "probation_allowance",
     "MIN_ACTIVE_LIMIT",
     "RECOVERY_LOOKBACK_DAYS",
     "RECOVERY_START",
     "RECOVERY_STEP",
     "LimitDecision",
     "daily_limit",
+    "probation_allowance",
     "recovery_factor",
 ]

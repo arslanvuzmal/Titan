@@ -348,10 +348,10 @@ async def push_notification(notification: OperatorNotification | None) -> bool:
 __all__ = [
     "DUE_WITHIN",
     "MAILED_INSTANTLY",
-    "mail_notification",
     "PRIORITY",
     "NotificationKind",
     "OperatorNotification",
+    "mail_notification",
     "push_notification",
     "record_notification",
 ]

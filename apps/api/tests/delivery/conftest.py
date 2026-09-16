@@ -25,11 +25,11 @@ from titan.db.enums import (
     WorkspaceRole,
 )
 from titan.db.models import (
-    ContactVerification,
     Campaign,
     CampaignPolicy,
     Contact,
     ContactChannel,
+    ContactVerification,
     Lead,
     Message,
     MessageApproval,

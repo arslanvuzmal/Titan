@@ -59,9 +59,9 @@ from enum import StrEnum
 from typing import Any
 
 from titan.db.enums import CampaignStatus
+from titan.workflows.daily_report import DEFAULT_CRON as DAILY_REPORT_CRON
 from titan.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from titan.workflows.delivery_events import delivery_event_poll_workflow_id
-from titan.workflows.daily_report import DEFAULT_CRON as DAILY_REPORT_CRON
 from titan.workflows.housekeeping import DEFAULT_CRON as HOUSEKEEPING_CRON
 from titan.workflows.housekeeping import housekeeping_workflow_id
 from titan.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON

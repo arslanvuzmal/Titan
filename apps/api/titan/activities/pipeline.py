@@ -26,7 +26,6 @@ from temporalio import activity
 from titan.config import get_settings
 from titan.contracts.evidence import CrawlResult, fingerprint
 from titan.db.enums import (
-    verification_permits_sending,
     ContactSource,
     DraftStatus,
     Industry,
@@ -35,6 +34,7 @@ from titan.db.enums import (
     OutboxStatus,
     Severity,
     VerificationStatus,
+    verification_permits_sending,
 )
 from titan.db.models import (
     AuditFinding,
