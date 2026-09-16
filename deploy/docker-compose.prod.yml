@@ -42,7 +42,7 @@ services:
   migrate:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE, e.g. ghcr.io/arslanvuzmal/titan-api:sha-abc1234}
     restart: "no"
-    env_file: [.env]
+    env_file: [../.env]
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
@@ -52,7 +52,12 @@ services:
   api:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
     restart: unless-stopped
-    env_file: [.env]
+    env_file: [../.env]
+    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # this mount, so without it the file simply is not there and every send
+    # fails to authenticate -- on a host nobody is watching.
+    volumes:
+      - ../secrets:/run/secrets:ro
     # Not published to the host: nginx terminates TLS and is the only ingress.
     expose: ["8000"]
     depends_on:
@@ -76,8 +81,13 @@ services:
   outbox-worker:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
     restart: unless-stopped
-    env_file: [.env]
+    env_file: [../.env]
     command: ["python", "-m", "titan.workers.outbox"]
+    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # this mount, so without it the file simply is not there and every send
+    # fails to authenticate -- on a host nobody is watching.
+    volumes:
+      - ../secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -97,10 +107,47 @@ services:
       retries: 3
       start_period: 20s
 
+  # Reads every mailbox and feeds replies and bounces back into the system.
+  #
+  # **Absent from this file until 16 September**, which would have been an
+  # expensive thing to discover after a migration. Without it: no reply is ever
+  # collected, so the instant alert never fires and the CRM stays empty; and no
+  # bounce is ever ingested, so `suppression_entries` stops growing and the
+  # address-history layer added on the 14th learns nothing. The estate would
+  # have looked healthy -- sending, crawling, drafting -- while quietly losing
+  # both halves of the feedback loop.
+  inbound-worker:
+    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    # on-failure, not unless-stopped. The worker exits zero when IMAP is not
+    # configured, and `unless-stopped` restarts a container whatever its exit
+    # code -- which turns a clean "nothing to do" into a permanent crash loop
+    # that makes the whole stack look unhealthy.
+    restart: on-failure
+    env_file: [../.env]
+    command: ["python", "-m", "titan.workers.inbound"]
+    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # this mount, so without it the file simply is not there and every send
+    # fails to authenticate -- on a host nobody is watching.
+    volumes:
+      - ../secrets:/run/secrets:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [titan_network]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 20s
+
   temporal-worker:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
     restart: unless-stopped
-    env_file: [.env]
+    env_file: [../.env]
     command: ["python", "-m", "titan.workers.temporal_worker"]
     depends_on:
       migrate:
