@@ -109,6 +109,13 @@ RESEARCHABLE_STATUSES = (
     LeadStatus.QUALIFIED,
 )
 
+#: How long a never-researched lead may wait behind better-scoring ones before
+#: the planner reserves it a slot. Not a fairness principle -- a starvation
+#: escape. A lead nobody has measured has no score to compete with, so without
+#: this it loses every comparison for ever, which is exactly what happened
+#: between 5 August and 17 September.
+UNMEASURED_PATIENCE = dt.timedelta(days=7)
+
 #: Sends already made today count against the budget even if they failed, since
 #: an attempt consumed the quota that the outbox worker reserved.
 _SPENT_STATES = (
@@ -477,38 +484,82 @@ async def _select_leads(
         return planned
 
     already = {p.lead_id for p in planned}
-    fresh = (
+
+    candidates = (
+        select(Lead, Organization.canonical_domain)
+        .join(Organization, Organization.id == Lead.organization_id)
+        .where(
+            Lead.campaign_id == campaign_id,
+            Lead.status.in_(RESEARCHABLE_STATUSES),
+            Lead.replied_at.is_(None),
+            Lead.last_contacted_at.is_(None),
+        )
+    )
+
+    # Two pools, drawn separately, because one of them used to be unreachable.
+    #
+    # The single ordering this replaced was
+    #   ORDER BY latest_score DESC NULLS LAST, created_at
+    # and a lead that has never been researched has no score -- scoring happens
+    # *inside* the research pipeline. So every unmeasured lead sorted behind
+    # every measured one, and with thousands of qualified leads ahead of them
+    # the LIMIT window never reached the end. 325 leads with websites sat in
+    # `discovered` from 5 August onwards, never once looked at.
+    #
+    # The filter below already refuses to treat "unscored" as "below threshold",
+    # with a comment saying a fresh lead could otherwise never be researched.
+    # The ordering was quietly doing that anyway, by starvation rather than by
+    # exclusion, which is why the guard did not catch it.
+    scored = (
         await session.execute(
-            select(Lead, Organization.canonical_domain)
-            .join(Organization, Organization.id == Lead.organization_id)
-            .where(
-                Lead.campaign_id == campaign_id,
-                Lead.status.in_(RESEARCHABLE_STATUSES),
-                Lead.replied_at.is_(None),
-                Lead.last_contacted_at.is_(None),
-            )
-            # Highest score first, then oldest: a lead discovered three weeks
-            # ago and never worked is staler evidence than one found today,
-            # and stale evidence is what produces a message about a bug the
-            # business already fixed.
-            .order_by(Lead.latest_score.desc().nullslast(), Lead.created_at)
+            candidates.where(Lead.latest_score.is_not(None))
+            # Highest score first, then oldest: a lead found three weeks ago and
+            # never worked is staler evidence than one found today, and stale
+            # evidence is what produces a message about a bug already fixed.
+            .order_by(Lead.latest_score.desc(), Lead.created_at)
             .limit(remaining * 2)
         )
     ).all()
 
-    for lead, domain in fresh:
-        if len(planned) >= limit:
-            break
-        if str(lead.id) in already:
-            continue
-        # An unscored lead is not below threshold -- it has never been measured.
-        # Filtering it out here would mean a freshly discovered lead could never
-        # be researched, because scoring happens *inside* the research pipeline.
-        if lead.latest_score is not None and lead.latest_score < min_score:
-            continue
-        planned.append(
-            PlannedLead(lead_id=str(lead.id), seed_url=_seed_url(domain), kind="new")
+    unmeasured = (
+        await session.execute(
+            candidates.where(Lead.latest_score.is_(None))
+            .order_by(Lead.created_at)
+            .limit(remaining * 2)
         )
+    ).all()
+
+    def take(rows: list, cap: int) -> None:
+        for lead, domain in rows:
+            if len(planned) >= limit or cap <= 0:
+                return
+            key = str(lead.id)
+            if key in already:
+                continue
+            # An unscored lead is not below threshold -- it has never been
+            # measured. Filtering it out here would mean a freshly discovered
+            # lead could never be researched at all.
+            if lead.latest_score is not None and lead.latest_score < min_score:
+                continue
+            already.add(key)
+            cap -= 1
+            planned.append(
+                PlannedLead(lead_id=key, seed_url=_seed_url(domain), kind="new")
+            )
+
+    # The reservation only exists while something is actually starving, and it
+    # is deliberately small. Once the backlog drains, `stale` goes false and
+    # this returns to plain score order on its own -- a permanent quota for
+    # unmeasured leads would just starve the measured ones instead.
+    oldest = unmeasured[0][0].created_at if unmeasured else None
+    stale = oldest is not None and (now - oldest) > UNMEASURED_PATIENCE
+    if stale:
+        take(unmeasured, max(1, remaining // 4))
+
+    take(scored, limit - len(planned))
+    # Whatever the scored pool could not fill, this one may. A short pool should
+    # not cost the cycle a slot it was entitled to spend.
+    take(unmeasured, limit - len(planned))
 
     return planned
 
