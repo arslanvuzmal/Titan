@@ -116,12 +116,32 @@ class Refusal(StrEnum):
     RATING_BELOW_FLOOR = "rating_below_floor"
 
 
+class LeadKind(StrEnum):
+    """What kind of evidence this lead can ever produce.
+
+    Carried from the admission decision so nothing downstream has to re-derive
+    it from the absence of a domain -- and so that a siteless lead reaching the
+    crawler is a visible contradiction rather than an empty crawl nobody
+    questions.
+    """
+
+    #: Has a website of its own. The ordinary path: crawl it, measure it, cite
+    #: what was measured.
+    AUDITABLE = "auditable"
+    #: No website, or only a profile on somebody else's platform. Nothing here
+    #: may be crawled for findings, because every finding would be about the
+    #: platform's markup. What can be said about them comes from the Places
+    #: listing, and what can be read from a profile is contact details only.
+    SITELESS = "siteless"
+
+
 @dataclass(frozen=True, slots=True)
 class Admission:
     """Whether one business may become a lead, and why not when it may not."""
 
     business: DiscoveredBusiness
     refusal: Refusal | None = None
+    kind: LeadKind = LeadKind.AUDITABLE
 
     @property
     def admitted(self) -> bool:
@@ -189,6 +209,23 @@ def build_query(
     )
 
 
+#: Non-auditable hosts where the business's own contact details may still be
+#: published by the business itself.
+#:
+#: The distinction this draws is the point. "Can I audit this page?" and "might
+#: the business's email be on it?" are different questions, and until now one
+#: list answered both -- so a practice whose only web presence is a Facebook
+#: page was refused outright, when that page routinely carries the owner's
+#: address in a field they filled in themselves.
+#:
+#: Link shorteners and aggregators are deliberately excluded: there is no
+#: profile behind them, only a redirect, so there is nothing of the business's
+#: to read.
+CONTACT_SOURCE_HOSTS: frozenset[str] = NON_AUDITABLE_HOSTS - frozenset(
+    {"linktr.ee", "bit.ly", "linkin.bio", "business.site", "negocio.site"}
+)
+
+
 def is_auditable_host(domain: str | None) -> bool:
     """Whether a crawl of this domain would describe the business itself."""
     if not domain:
@@ -201,6 +238,25 @@ def is_auditable_host(domain: str | None) -> bool:
     )
 
 
+def is_contact_source(domain: str | None) -> bool:
+    """Whether the business's own email might legitimately be found here.
+
+    True for a social or directory profile the business maintains, false for a
+    link shortener -- and false, by construction, for a host that is already
+    auditable, because that case is the ordinary crawl rather than this
+    exception.
+    """
+    if not domain:
+        return False
+    host = domain.strip().lower().removeprefix("www.")
+    if not host:
+        return False
+    return any(
+        host == allowed or host.endswith(f".{allowed}")
+        for allowed in CONTACT_SOURCE_HOSTS
+    )
+
+
 def admit(
     business: DiscoveredBusiness,
     *,
@@ -209,6 +265,7 @@ def admit(
     suppressed_domains: frozenset[str] = frozenset(),
     min_reviews: int = DEFAULT_MIN_REVIEWS,
     min_rating: float = DEFAULT_MIN_RATING,
+    allow_siteless: bool = False,
 ) -> Admission:
     """Decide whether one discovered business becomes a lead.
 
@@ -220,12 +277,29 @@ def admit(
         return Admission(business, Refusal.NOT_OPERATIONAL)
 
     domain = business.canonical_domain
-    if not domain:
-        return Admission(business, Refusal.NO_WEBSITE)
-    if not is_auditable_host(domain):
-        return Admission(business, Refusal.NON_AUDITABLE_HOST)
 
-    if business.place_id in known_place_ids or domain in known_domains:
+    # A business with no auditable site is refused unless this run is looking
+    # for exactly that. `allow_siteless` does not relax the evidence rule -- it
+    # changes which evidence is available. There is no site to measure, so the
+    # claim becomes what Google's own listing says about them, which is a fact
+    # about the business rather than a fact about our crawler.
+    kind = LeadKind.AUDITABLE
+    if not domain:
+        if not allow_siteless:
+            return Admission(business, Refusal.NO_WEBSITE)
+        kind = LeadKind.SITELESS
+    elif not is_auditable_host(domain):
+        if not allow_siteless:
+            return Admission(business, Refusal.NON_AUDITABLE_HOST)
+        if not is_contact_source(domain):
+            # A shortener. Nothing to audit and nothing to read either.
+            return Admission(business, Refusal.NON_AUDITABLE_HOST)
+        kind = LeadKind.SITELESS
+
+    # Dedupe still has to work for a business with no domain to dedupe on. The
+    # place id always exists and is stable, so siteless leads collide on that
+    # alone -- which is why the domain check is guarded rather than dropped.
+    if business.place_id in known_place_ids or (domain and domain in known_domains):
         return Admission(business, Refusal.ALREADY_KNOWN)
 
     # Checked here as well as at send time. Suppression is per address, and this
@@ -233,7 +307,7 @@ def admit(
     # business somebody at that domain has already opted out of, then paying to
     # crawl it before refusing at the last gate, is spend with a guaranteed
     # refusal at the end of it.
-    if domain in suppressed_domains:
+    if domain and domain in suppressed_domains:
         return Admission(business, Refusal.SUPPRESSED_DOMAIN)
 
     if business.review_count is not None and business.review_count < min_reviews:
@@ -241,7 +315,7 @@ def admit(
     if business.rating is not None and business.rating < min_rating:
         return Admission(business, Refusal.RATING_BELOW_FLOOR)
 
-    return Admission(business)
+    return Admission(business, kind=kind)
 
 
 def admit_all(
