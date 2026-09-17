@@ -385,6 +385,16 @@ class Settings(BaseSettings):
     #: sending domain. Checked at send time; cannot be set by an API request.
     email_auth_preflight_acknowledged: bool = False
 
+    #: Which host this is, for the sending claim. Must be stable across
+    #: container recreation, so not the container's hostname -- an identity
+    #: that changed on restart would make the real sender refuse its own claim
+    #: and stop sending entirely. Set it in .env, once, per host.
+    #:
+    #: Empty means this host cannot prove which one it is, and it will not
+    #: send. See titan/delivery/sending_claim.py for why that fails closed.
+    sender_host_id: str = ""
+    sender_host_label: str = ""
+
     outbox_lease_seconds: int = Field(default=60, ge=5, le=600)
     outbox_batch_size: int = Field(default=10, ge=1, le=200)
     outbox_max_attempts: int = Field(default=6, ge=1, le=50)

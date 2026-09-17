@@ -78,6 +78,7 @@ from titan.delivery import (
     quotas,
     sender_health,
     sender_pool,
+    sending_claim,
 )
 from titan.delivery.carrier_routing import carriers_for_workspace, route_for_market
 from titan.delivery.providers.base import (
@@ -477,6 +478,33 @@ class OutboxWorker:
         self._settings = settings or get_settings()
         self._owner = owner or worker_identity()
         self._now = now_fn or (lambda: dt.datetime.now(dt.UTC))
+        #: Refusals repeat every poll -- every two seconds. Logging each one
+        #: would bury the reason in its own noise, so it is said once and then
+        #: at a slow heartbeat.
+        self._claim_refusal_logged = False
+        self._claim_refusal_last: dt.datetime | None = None
+
+    def _report_claim_refusal(self, verdict: sending_claim.ClaimVerdict) -> None:
+        """Say it once, then hourly. Never silently.
+
+        A host that has stopped sending must be loud about it: the failure
+        this guard exists to prevent is invisible, and so is the guard working.
+        Somebody has to be able to tell the two apart.
+        """
+        now = self._now()
+        stale = (
+            self._claim_refusal_last is None
+            or (now - self._claim_refusal_last) > dt.timedelta(hours=1)
+        )
+        if self._claim_refusal_logged and not stale:
+            return
+        self._claim_refusal_logged = True
+        self._claim_refusal_last = now
+        logger.warning(
+            "not sending: %s",
+            verdict.reason,
+            extra={"holder": verdict.holder, "host_id": self._settings.sender_host_id},
+        )
 
     # ------------------------------------------------------------- claiming
     async def claim_batch(self, session: AsyncSession, limit: int) -> list[OutboxMessage]:
@@ -1901,6 +1929,23 @@ class OutboxWorker:
         """One poll cycle. Each row gets its own transaction."""
         maker = get_sessionmaker()
         results: list[ProcessResult] = []
+
+        # Before anything is claimed, before a connection is opened to a
+        # mailbox: is this host the one allowed to send at all? Checked every
+        # cycle rather than at startup, because a worker that asked once would
+        # go on sending for as long as it stayed up after the claim moved --
+        # the same overlap that mailed 29 businesses twice, in a different
+        # costume.
+        async with maker() as session, session.begin():
+            verdict = await sending_claim.hold(
+                session,
+                host_id=self._settings.sender_host_id,
+                host_label=self._settings.sender_host_label,
+            )
+        if not verdict.may_send:
+            self._report_claim_refusal(verdict)
+            return []
+        self._claim_refusal_logged = False
 
         async with maker() as session, session.begin():
             claimed = await self.claim_batch(session, self._settings.outbox_batch_size)

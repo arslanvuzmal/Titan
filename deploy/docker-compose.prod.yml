@@ -100,6 +100,13 @@ services:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
     restart: unless-stopped
     env_file: [../.env]
+    # Which host this is, for the sending claim. Declared here as well as in
+    # .env so the stack refuses to start without it: a sender that cannot prove
+    # which estate it belongs to fails closed and sends nothing, and finding
+    # that out from a silent day is worse than finding it out from compose.
+    environment:
+      TITAN_SENDER_HOST_ID: ${TITAN_SENDER_HOST_ID:?set TITAN_SENDER_HOST_ID, e.g. vps-hetzner-cx33}
+      TITAN_SENDER_HOST_LABEL: ${TITAN_SENDER_HOST_LABEL:-}
     command: ["python", "-m", "titan.workers.outbox"]
     # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
