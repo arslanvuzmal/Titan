@@ -34,6 +34,8 @@ from titan.workflows.types import (
     ContactActivityResult,
     CrawlActivityInput,
     CrawlActivityResult,
+    ReadProfileInput,
+    ReadProfileResult,
     DraftActivityInput,
     DraftActivityResult,
     QueueActivityInput,
@@ -91,6 +93,15 @@ class Recorder:
     calls: list[str] = field(default_factory=list)
     #: Fail the crawl activity this many times before succeeding.
     crawl_failures: int = 0
+    #: What reading the Google listing returns, for a lead with no website.
+    profile: ReadProfileResult = field(
+        default_factory=lambda: ReadProfileResult(
+            status="completed",
+            findings_created=2,
+            pitchable_findings=2,
+            listing_url="https://maps.google.com/?cid=1",
+        )
+    )
 
     def activities(self) -> list:
         recorder = self
@@ -112,6 +123,13 @@ class Recorder:
                 recorder.crawl_failures -= 1
                 raise RuntimeError("transient browser worker failure")
             return recorder.crawl
+
+        @activity.defn(name="read_business_profile")
+        async def read_business_profile(
+            request: ReadProfileInput,
+        ) -> ReadProfileResult:
+            recorder.calls.append("read_business_profile")
+            return recorder.profile
 
         @activity.defn(name="analyse_evidence")
         async def analyse_evidence(
@@ -155,6 +173,7 @@ class Recorder:
             open_research_run,
             close_research_run,
             crawl_lead_website,
+            read_business_profile,
             analyse_evidence,
             score_lead,
             resolve_contact,
@@ -669,3 +688,96 @@ async def test_a_saturated_browser_worker_is_waited_out_not_given_up_on(env) -> 
 
     assert result.outcome == ResearchOutcome.COMPLETED.value
     assert recorder.calls.count("crawl_lead_website") == 7
+
+
+# ==========================================================================
+# A lead with no website is read, not crawled
+# ==========================================================================
+#
+# The two instruments, and the rule for choosing between them. A business with
+# a website gets crawled. A business without one has nothing to crawl, and
+# crawling whatever it does have -- a Facebook page, a directory entry --
+# would audit somebody else's markup and report the findings as theirs.
+#
+# `seed_url` is None exactly when the organisation has no domain on file, so
+# it is the condition itself rather than a stand-in for it.
+
+
+@pytest.mark.asyncio
+async def test_a_lead_with_no_website_reads_the_listing_instead_of_crawling(
+    env,
+) -> None:
+    recorder = Recorder()
+    result, _ = await run_workflow(env, recorder, make_input(seed_url=None))
+
+    assert "read_business_profile" in recorder.calls
+    assert "crawl_lead_website" not in recorder.calls
+    # Nothing was captured, so there is nothing to analyse; the findings are
+    # already written and scoring reads them from the database.
+    assert "analyse_evidence" not in recorder.calls
+    assert result.outcome == ResearchOutcome.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_a_lead_with_a_website_is_still_crawled(env) -> None:
+    recorder = Recorder()
+    await run_workflow(env, recorder, make_input())
+
+    assert "crawl_lead_website" in recorder.calls
+    assert "read_business_profile" not in recorder.calls
+
+
+@pytest.mark.asyncio
+async def test_a_blank_seed_url_counts_as_no_website(env) -> None:
+    """Empty string and None are the same fact about the business."""
+    recorder = Recorder()
+    await run_workflow(env, recorder, make_input(seed_url="   "))
+
+    assert "read_business_profile" in recorder.calls
+
+
+@pytest.mark.asyncio
+async def test_a_complete_listing_stops_before_drafting(env) -> None:
+    """Invariant 7, on the listing side: nothing evidenced, nothing to say.
+
+    This is the outcome the detector produced for every lead before the field
+    mask was passed through -- so the test asserts the *reason* travels with
+    it, and not merely that the run ended.
+    """
+    recorder = Recorder()
+    recorder.profile = ReadProfileResult(
+        status="no_evidence",
+        findings_created=0,
+        pitchable_findings=0,
+        listing_url="https://maps.google.com/?cid=1",
+        reason="listing shows nothing missing",
+    )
+    result, _ = await run_workflow(env, recorder, make_input(seed_url=None))
+
+    assert result.outcome == ResearchOutcome.NO_EVIDENCE.value
+    assert "generate_draft" not in recorder.calls
+    assert "listing shows nothing missing" in (result.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_findings_counted_but_not_yet_sayable_do_not_produce_a_draft(
+    env,
+) -> None:
+    """Absences are staged: detected and stored before they are ever said.
+
+    A listing read that writes three findings none of which clear the pitchable
+    floor must stop, exactly as a crawl with no pitchable findings does. Gating
+    on findings_created instead would draft a message the validator then throws
+    away, after the model had been paid for it.
+    """
+    recorder = Recorder()
+    recorder.profile = ReadProfileResult(
+        status="completed",
+        findings_created=3,
+        pitchable_findings=0,
+        listing_url="https://maps.google.com/?cid=1",
+    )
+    result, _ = await run_workflow(env, recorder, make_input(seed_url=None))
+
+    assert result.outcome == ResearchOutcome.NO_EVIDENCE.value
+    assert "generate_draft" not in recorder.calls

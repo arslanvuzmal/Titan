@@ -41,6 +41,8 @@ with workflow.unsafe.imports_passed_through():
         DraftActivityResult,
         QueueActivityInput,
         QueueActivityResult,
+        ReadProfileInput,
+        ReadProfileResult,
         RecordEventInput,
         ResearchLeadInput,
         ResearchLeadResult,
@@ -201,7 +203,65 @@ class LeadResearchWorkflow:
         if self._should_stop():
             return await self._cancelled(request, research_run_id)
 
-        # ---- 2. crawl -------------------------------------------------
+        # ---- 2. read the evidence --------------------------------------
+        #
+        # Two instruments, one of which is the right one. A business with a
+        # website is crawled; a business without one has nothing to crawl, and
+        # crawling its Facebook page would audit somebody else's markup and
+        # report the findings as theirs.
+        #
+        # `seed_url` is None exactly when the organisation has no domain on
+        # file (orchestration._seed_url), so it is the condition itself rather
+        # than a proxy for it.
+        #
+        # Behind workflow.patched: runs already in flight replayed the crawl
+        # branch and must keep replaying it, whatever their seed_url says.
+        siteless = not (request.seed_url or "").strip()
+        if siteless and workflow.patched("siteless-reads-the-listing"):
+            self._stage = "reading_listing"
+            profile: ReadProfileResult = await workflow.execute_activity(
+                "read_business_profile",
+                ReadProfileInput(
+                    workspace_id=request.workspace_id,
+                    lead_id=request.lead_id,
+                    research_run_id=research_run_id,
+                    idempotency_key=f"{request.run_key}:profile",
+                ),
+                # One HTTP request to Places. It needs neither the browser
+                # worker's lane nor the crawl's timeout.
+                start_to_close_timeout=DB_TIMEOUT,
+                retry_policy=DB_RETRY,
+                result_type=ReadProfileResult,
+            )
+            self._pitchable = profile.pitchable_findings
+            await self._record(
+                request,
+                workflow_id,
+                "listing.read",
+                {
+                    "findings": str(profile.findings_created),
+                    "pitchable": str(profile.pitchable_findings),
+                },
+            )
+            if profile.pitchable_findings == 0:
+                # A listing with nothing missing is a real answer. Invariant 7
+                # holds the same way it does after a crawl: nothing evidenced
+                # means nothing truthful to open with.
+                return await self._finish(
+                    request,
+                    research_run_id,
+                    ResearchOutcome.NO_EVIDENCE,
+                    profile.reason or "listing shows nothing missing",
+                )
+            if self._should_stop():
+                return await self._cancelled(request, research_run_id)
+            # No analyse stage: there are no captured pages to analyse, and
+            # the findings are already written. Scoring reads them from the
+            # database exactly as it does for a crawled lead.
+            return await self._continue_from_scoring(
+                request, workflow_id, research_run_id
+            )
+
         self._stage = "crawling"
         crawl: CrawlActivityResult = await workflow.execute_activity(
             "crawl_lead_website",
@@ -280,6 +340,23 @@ class LeadResearchWorkflow:
                 "no evidence-backed findings",
             )
 
+        return await self._continue_from_scoring(
+            request, workflow_id, research_run_id
+        )
+
+    async def _continue_from_scoring(
+        self,
+        request: ResearchLeadInput,
+        workflow_id: str,
+        research_run_id: str,
+    ) -> ResearchLeadResult:
+        """Everything from scoring on, shared by both ways of gathering evidence.
+
+        Scoring reads findings out of the database rather than taking them from
+        the stage before it, so it does not care whether they came from a crawl
+        or from a listing -- which is the only reason the two branches can meet
+        here at all.
+        """
         # ---- 4. score --------------------------------------------------
         self._stage = "scoring"
         score: ScoreActivityResult = await workflow.execute_activity(

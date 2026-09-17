@@ -21,7 +21,6 @@ nobody notices until the queue is the constraint.
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import logging
 import uuid
@@ -39,24 +38,9 @@ from titan.intelligence.profile_defects import (
     snapshot_from_places,
 )
 from titan.providers.places import PROFILE_FIELDS, GooglePlacesProvider
+from titan.workflows.types import ReadProfileInput, ReadProfileResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class ReadProfileInput:
-    workspace_id: str
-    lead_id: str
-    research_run_id: str
-    idempotency_key: str
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class ReadProfileResult:
-    status: str
-    findings_created: int
-    listing_url: str | None
-    reason: str | None = None
 
 
 @activity.defn(name="read_business_profile")
@@ -90,7 +74,9 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
     if not place_id:
         # Nothing to ask Places about. Not a failure -- this lead came from
         # somewhere other than discovery.
-        return ReadProfileResult("no_evidence", 0, None, "no google_place_id on file")
+        return ReadProfileResult(
+            "no_evidence", 0, 0, None, "no google_place_id on file"
+        )
 
     settings = get_settings()
     provider = GooglePlacesProvider.from_settings(settings)
@@ -101,10 +87,12 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
             "could not read the business profile",
             extra={"lead_id": str(lead_id), "error": str(err)[:200]},
         )
-        return ReadProfileResult("failed", 0, None, str(err)[:200])
+        return ReadProfileResult("failed", 0, 0, None, str(err)[:200])
 
     if not payload:
-        return ReadProfileResult("no_evidence", 0, None, "places returned nothing")
+        return ReadProfileResult(
+            "no_evidence", 0, 0, None, "places returned nothing"
+        )
 
     # PROFILE_FIELDS is passed, not inferred: Places omits a field the
     # business has nothing in rather than returning it empty, so what we asked
@@ -117,9 +105,12 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
     )
     if not findings:
         # A listing with nothing missing is a real answer, and a good one.
-        return ReadProfileResult("no_evidence", 0, snapshot.listing_url or None)
+        return ReadProfileResult(
+            "no_evidence", 0, 0, snapshot.listing_url or None, "listing shows nothing missing"
+        )
 
     created = 0
+    pitchable = 0
     async with workspace_unit_of_work(workspace_id) as session:
         for finding in findings:
             inserted = await session.execute(
@@ -156,6 +147,8 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
             if finding_id is None:
                 continue
             created += 1
+            if finding.is_pitchable():
+                pitchable += 1
             for excerpt, source_url in finding.evidence:
                 await session.execute(
                     pg_insert(FindingEvidence.__table__)  # type: ignore[arg-type]
@@ -176,10 +169,13 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
         extra={
             "lead_id": str(lead_id),
             "findings": created,
+            "pitchable": pitchable,
             "listing": snapshot.listing_url,
         },
     )
-    return ReadProfileResult("completed", created, snapshot.listing_url or None)
+    return ReadProfileResult(
+        "completed", created, pitchable, snapshot.listing_url or None
+    )
 
 
 #: Registered on the worker as a group, like every other activity module.

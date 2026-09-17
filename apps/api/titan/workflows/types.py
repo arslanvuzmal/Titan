@@ -94,6 +94,30 @@ class CrawlActivityResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class ReadProfileInput:
+    """Read a business's Google listing, for a lead with no website to crawl."""
+
+    workspace_id: str
+    lead_id: str
+    research_run_id: str
+    idempotency_key: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadProfileResult:
+    status: str
+    findings_created: int
+    #: How many of those the composer may actually say out loud. The workflow
+    #: gates on this, not on findings_created: an absence detected while the
+    #: class is still being counted rather than sent is stored at a confidence
+    #: below the pitchable floor, and a draft built on nothing sayable is one
+    #: the validator rejects after the work is done.
+    pitchable_findings: int
+    listing_url: str | None
+    reason: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class AnalyseActivityInput:
     workspace_id: str
     lead_id: str
