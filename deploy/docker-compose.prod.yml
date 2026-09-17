@@ -149,6 +149,12 @@ services:
     restart: unless-stopped
     env_file: [../.env]
     command: ["python", "-m", "titan.workers.temporal_worker"]
+    # DailyReportWorkflow and the other operator mail run here, and
+    # mail_the_operator() reads TITAN_MAILBOX_FILE. Without this mount the
+    # worker came up healthy and threw MailboxConfigError once an hour
+    # instead: a stack that looks fine while the operator hears nothing.
+    volumes:
+      - ../secrets:/run/secrets:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -164,6 +170,42 @@ services:
       timeout: 15s
       retries: 3
       start_period: 20s
+
+  # The CRM. nginx has declared a `web:3000` upstream since the first version
+  # of this file, but the service itself was never here -- so nginx died at
+  # startup on "host not found in upstream", port 80 served nothing, and the
+  # portal could only be reached by running the stack on a laptop.
+  #
+  # No env_file: the dashboard reaches the API from the browser, so it needs no
+  # database or mail credentials of its own.
+  #
+  # NEXT_PUBLIC_API_URL has to be supplied twice, in two different ways, and
+  # that is not redundancy. The browser bundle gets its copy compiled in at
+  # build time (`--build-arg`, see apps/web/Dockerfile); setting it only here
+  # would leave the compiled-in value untouched, which is how the dashboard once
+  # shipped calling port 8000 while the API was published on 8010. The runtime
+  # value below is the one server-side rendering reads.
+  web:
+    image: ${TITAN_WEB_IMAGE:?set TITAN_WEB_IMAGE, e.g. titan-web:local}
+    restart: unless-stopped
+    environment:
+      # Origin only, no path: the client appends /api/v1 itself. Read here at
+      # runtime by server-side rendering; the browser bundle carries its own
+      # copy, compiled in at build time -- see apps/web/Dockerfile.
+      NEXT_PUBLIC_API_URL: ${TITAN_PUBLIC_ORIGIN:?set TITAN_PUBLIC_ORIGIN, e.g. http://168.119.161.220}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    expose: ["3000"]
+    depends_on: [api]
+    networks: [titan_network]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # The only component that fetches attacker-controlled URLs, and the only one
   # with no database, email, or model credentials. `env_file` is deliberately
