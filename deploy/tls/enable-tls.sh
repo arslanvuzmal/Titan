@@ -41,10 +41,41 @@ TEMPLATE="$HERE/443.conf.template"
 ACME="$DEPLOY/nginx/acme"
 COMPOSE="$DEPLOY/compose.sh"
 
+# ------------------------------------------------------------------- renewal
+
+# certbot's own timer does the renewing. What is missing is telling nginx,
+# which runs in a container certbot knows nothing about. A deploy hook fires
+# only when a certificate actually changed.
+#
+# Defined before the early exit and called on both paths, because the first
+# version armed this only at the very end -- so a run that found TLS already on
+# skipped it, and so did the run that turned TLS on and then rolled back. The
+# step that matters in sixty days was the one most likely to be stepped over.
+arm_renewal() {
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/titan-nginx.sh <<'HOOK'
+#!/bin/sh
+# Renewal rewrites the files under /etc/letsencrypt, which nginx has already
+# opened. Without this it serves the old certificate until something restarts
+# it -- roughly 60 days of looking fine followed by a hard outage.
+#
+# A reload is right here, unlike the nginx.conf case: /etc/letsencrypt is a
+# directory bind mount, so the container sees the new files and re-opens them.
+# A single-file bind mount would not, because replacing a file changes its
+# inode and the mount keeps pointing at the old one.
+set -eu
+docker exec deploy-nginx-1 nginx -s reload 2>/dev/null || true
+HOOK
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/titan-nginx.sh
+    systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+}
+
 # ---------------------------------------------------------------- already on?
 
 if [ -f "$INSTALLED" ] && [ -s "$LIVE/fullchain.pem" ]; then
-    log "TLS is already on for $DOMAIN; nothing to do"
+    arm_renewal
+    systemctl disable --now titan-tls-bootstrap.timer >/dev/null 2>&1 || true
+    log "TLS is already on for $DOMAIN; renewal re-armed; nothing else to do"
     exit 0
 fi
 
@@ -181,23 +212,9 @@ IP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://$MY_IP/cr
 
 log "TLS is on: https://$DOMAIN/crm -> $CODE (fallback http://$MY_IP/crm -> $IP_CODE)"
 
-# ------------------------------------------------------------------- renewal
+# --------------------------------------------------------- renewal, and done
 
-# certbot's own timer does the renewing. All that is missing is telling nginx,
-# which runs in a container certbot knows nothing about. A deploy hook fires
-# only when a certificate actually changed.
-mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-cat > /etc/letsencrypt/renewal-hooks/deploy/titan-nginx.sh <<'HOOK'
-#!/bin/sh
-# Renewal rewrites the files under /etc/letsencrypt, which nginx has already
-# opened. Without this it would serve the expired certificate until something
-# restarted it -- roughly 60 days of looking fine followed by a hard outage.
-set -eu
-docker exec deploy-nginx-1 nginx -s reload 2>/dev/null || true
-HOOK
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/titan-nginx.sh
-
-systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+arm_renewal
 
 # This script's own timer has done its job and should stop waking up.
 systemctl disable --now titan-tls-bootstrap.timer >/dev/null 2>&1 || true

@@ -20,11 +20,13 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
-    # OCSP stapling: the browser gets the revocation answer from us instead of
-    # pausing to ask the CA on first connect.
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    ssl_trusted_certificate /etc/letsencrypt/live/__DOMAIN__/chain.pem;
+    # No OCSP stapling. Let's Encrypt stopped putting an OCSP responder URL in
+    # its certificates, so `ssl_stapling on` is silently inert and nginx warns
+    # about it on every start and reload:
+    #   "ssl_stapling" ignored, no OCSP responder URL in the certificate
+    # A permanent warning in the logs is worse than the feature is valuable --
+    # it is one more line that has to be recognised and dismissed every time
+    # somebody reads them looking for something real.
     resolver 127.0.0.11 valid=10s ipv6=off;
     resolver_timeout 5s;
 
