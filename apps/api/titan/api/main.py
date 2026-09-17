@@ -37,12 +37,60 @@ from titan.runtime import configure_event_loop
 configure_event_loop()
 
 
+#: Sent on every response, whatever the scheme.
+_SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
+    (
+        b"content-security-policy",
+        b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    ),
+)
+
+#: Sent only over HTTPS. See `_is_https`.
+_HSTS = b"max-age=31536000; includeSubDomains"
+
+
+def _is_https(scope: Any) -> bool:
+    """Whether the *browser* reached us over TLS.
+
+    Not the same question as whether this process was spoken to over TLS. The
+    API runs behind nginx, which terminates the connection and proxies onward
+    in plaintext, so `scope["scheme"]` is `http` on every request that has ever
+    reached production. Only the forwarded scheme knows the truth.
+
+    `X-Forwarded-Proto` is client-supplied in general, but nginx sets it with
+    `proxy_set_header ... $scheme`, which *replaces* whatever the client sent --
+    and the API is not published to the host at all, so nginx is the only way
+    in. Forging it would in any case only pin HSTS in the forger's own browser.
+    """
+    if scope.get("scheme") == "https":
+        return True
+    for key, value in scope.get("headers", ()):
+        if key == b"x-forwarded-proto":
+            # A chain of proxies appends, so the client-facing scheme is first.
+            return value.split(b",")[0].strip().lower() == b"https"
+    return False
+
+
 class SecurityHeadersMiddleware:
     """Strict headers on every response.
 
     Ported from the pre-0.2 middleware (gap analysis K-02) with the CSP
     tightened: the old policy allowed 'unsafe-inline' scripts everywhere, which
     defeats most of the point of having one.
+
+    HSTS is the one header here that is conditional, because it is the one that
+    does damage when it is wrong. It was sent unconditionally, plain HTTP
+    included -- a live trap for any deployment reached by hostname before it has
+    a certificate: one plain-HTTP page view pins that name to HTTPS in the
+    operator's browser for a year, and with no TLS listener the site becomes
+    unreachable with no visible cause and no way out short of
+    chrome://net-internals/#hsts. Browsers ignore HSTS from an IP literal, which
+    is the only reason the 17 September CRM deployment survived it.
     """
 
     def __init__(self, app: Any) -> None:
@@ -53,25 +101,16 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Read from the request, before any response exists.
+        secure = _is_https(scope)
+
         async def send_wrapper(message: Any) -> None:
             if message["type"] == "http.response.start":
                 headers = message.setdefault("headers", [])
-                for key, value in (
-                    (b"x-content-type-options", b"nosniff"),
-                    (b"x-frame-options", b"DENY"),
-                    (b"referrer-policy", b"no-referrer"),
-                    (b"cross-origin-opener-policy", b"same-origin"),
-                    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
-                    (
-                        b"strict-transport-security",
-                        b"max-age=31536000; includeSubDomains",
-                    ),
-                    (
-                        b"content-security-policy",
-                        b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-                    ),
-                ):
+                for key, value in _SECURITY_HEADERS:
                     headers.append((key, value))
+                if secure:
+                    headers.append((b"strict-transport-security", _HSTS))
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
