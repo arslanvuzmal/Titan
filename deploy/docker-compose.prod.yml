@@ -26,9 +26,20 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    # 443 is deliberately NOT published while there is no certificate.
+    #
+    # Publishing it bound docker-proxy to the port with nothing behind it, so a
+    # browser opening https://<host> completed the TCP handshake and then waited
+    # for a TLS server that does not exist. That is worse than closed: a refused
+    # connection makes a browser fall back to http:// immediately, whereas this
+    # looked like a live server and timed out as "site can't be reached" -- and
+    # Chrome tries https first, so the CRM appeared to be down while it was
+    # serving perfectly well on 80.
+    #
+    # Add it back in the same change that adds a `listen 443 ssl` block and a
+    # real certificate, never before.
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
