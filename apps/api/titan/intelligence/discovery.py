@@ -112,6 +112,7 @@ class Refusal(StrEnum):
     NON_AUDITABLE_HOST = "non_auditable_host"
     ALREADY_KNOWN = "already_known"
     SUPPRESSED_DOMAIN = "suppressed_domain"
+    NO_CONTACT_ROUTE = "no_contact_route"
     TOO_FEW_REVIEWS = "too_few_reviews"
     RATING_BELOW_FLOOR = "rating_below_floor"
 
@@ -189,6 +190,7 @@ def build_query(
     max_results: int = 20,
     min_rating: float | None = DEFAULT_MIN_RATING,
     min_review_count: int | None = DEFAULT_MIN_REVIEWS,
+    require_website: bool = True,
 ) -> DiscoveryQuery:
     """Turn a campaign's targeting into one bounded search.
 
@@ -204,7 +206,7 @@ def build_query(
         included_region=(country_code or "").strip().upper() or None,
         min_rating=min_rating,
         min_review_count=min_review_count,
-        require_website=True,
+        require_website=require_website,
         max_results=max(1, min(max_results, MAX_RESULTS_PER_SEARCH)),
     )
 
@@ -287,7 +289,16 @@ def admit(
     if not domain:
         if not allow_siteless:
             return Admission(business, Refusal.NO_WEBSITE)
-        kind = LeadKind.SITELESS
+        # Admitting this would recreate the trap the original rule avoided, in
+        # the opposite direction. Titan sends email. A business Places reports
+        # with no URL of any kind has no page anywhere for an address to be
+        # read from -- not a site, not a profile -- so the lead could be
+        # discovered, stored, scored and never written to. Paying to find
+        # somebody unreachable is worse than not finding them.
+        #
+        # Their Google listing still says something worth saying. It cannot be
+        # said by email, which is the only thing this system does.
+        return Admission(business, Refusal.NO_CONTACT_ROUTE)
     elif not is_auditable_host(domain):
         if not allow_siteless:
             return Admission(business, Refusal.NON_AUDITABLE_HOST)
@@ -327,6 +338,7 @@ def admit_all(
     min_reviews: int = DEFAULT_MIN_REVIEWS,
     min_rating: float = DEFAULT_MIN_RATING,
     limit: int | None = None,
+    allow_siteless: bool = False,
 ) -> tuple[list[Admission], dict[str, int]]:
     """Admit a batch, deduplicating *within* it as well as against what is known.
 
@@ -354,6 +366,7 @@ def admit_all(
             suppressed_domains=suppressed_domains,
             min_reviews=min_reviews,
             min_rating=min_rating,
+            allow_siteless=allow_siteless,
         )
         admissions.append(decision)
 

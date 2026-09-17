@@ -431,6 +431,12 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         geography=geography,
         country_code=country_code,
         max_results=request.max_results,
+        # Places drops businesses with no website before billing for them,
+        # which is the right default and exactly wrong when those are the
+        # businesses being looked for. The local `admit` check stays either
+        # way: the provider filter is advisory, and Places returns records
+        # with an empty websiteUri regardless.
+        require_website=not settings.discover_siteless,
     )
 
     provider = GooglePlacesProvider.from_settings(settings)
@@ -528,6 +534,7 @@ async def _record(
             known_place_ids=known_place_ids,
             suppressed_domains=suppressed,
             limit=max_new_leads,
+            allow_siteless=get_settings().discover_siteless,
         )
         admitted = [a.business for a in admissions if a.admitted]
 

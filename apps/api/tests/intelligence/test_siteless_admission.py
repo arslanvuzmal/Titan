@@ -112,10 +112,19 @@ def test_a_host_is_never_both(
 # ------------------------------------------------------- with the flag raised
 
 
-def test_no_website_is_admitted_as_siteless_when_asked_for() -> None:
+def test_a_business_with_no_page_anywhere_is_refused_even_then() -> None:
+    """The trap the original rule avoided, in the opposite direction.
+
+    Titan sends email. A business Places reports with no URL of any kind has
+    no page anywhere an address could be read from -- not a site, not a
+    profile -- so it could be discovered, stored, scored and never written to.
+    Paying to find somebody unreachable is worse than not finding them.
+
+    Their listing still says something worth saying. It cannot be said by
+    email, which is the only thing this system does.
+    """
     admission = admit(_business(domain=None), allow_siteless=True)
-    assert admission.admitted
-    assert admission.kind is LeadKind.SITELESS
+    assert admission.refusal is Refusal.NO_CONTACT_ROUTE
 
 
 def test_a_social_profile_is_admitted_as_siteless() -> None:
@@ -147,12 +156,13 @@ def test_a_closed_business_is_refused_before_anything_else() -> None:
 
 
 def test_quality_floors_still_apply_to_a_siteless_business() -> None:
+    """"The business should be proper" is not waived by the flag."""
     assert (
-        admit(_business(domain=None, reviews=1), allow_siteless=True).refusal
+        admit(_business(domain="facebook.com", reviews=1), allow_siteless=True).refusal
         is Refusal.TOO_FEW_REVIEWS
     )
     assert (
-        admit(_business(domain=None, rating=2.0), allow_siteless=True).refusal
+        admit(_business(domain="facebook.com", rating=2.0), allow_siteless=True).refusal
         is Refusal.RATING_BELOW_FLOOR
     )
 
@@ -165,7 +175,7 @@ def test_a_siteless_business_still_dedupes_on_its_place_id() -> None:
     """
     seen = frozenset({"place-1"})
     admission = admit(
-        _business(domain=None, place_id="place-1"),
+        _business(domain="facebook.com", place_id="place-1"),
         known_place_ids=seen,
         allow_siteless=True,
     )
@@ -173,13 +183,17 @@ def test_a_siteless_business_still_dedupes_on_its_place_id() -> None:
 
 
 def test_suppression_does_not_crash_on_a_business_with_no_domain() -> None:
-    """The suppression check reads a domain that may not exist."""
+    """The suppression check reads a domain that may not exist.
+
+    It is reached only when a domain exists now, but the guard stays: the
+    ordering of these rules has changed twice already today.
+    """
     admission = admit(
         _business(domain=None),
         suppressed_domains=frozenset({"someone.co.uk"}),
         allow_siteless=True,
     )
-    assert admission.admitted
+    assert admission.refusal is Refusal.NO_CONTACT_ROUTE
 
 
 def test_a_suppressed_domain_is_still_refused_with_the_flag_on() -> None:
@@ -194,3 +208,38 @@ def test_a_suppressed_domain_is_still_refused_with_the_flag_on() -> None:
 def test_the_admission_default_kind_is_auditable() -> None:
     """Anything constructing an Admission without saying must mean the old path."""
     assert Admission(_business(domain="x.co.uk")).kind is LeadKind.AUDITABLE
+
+
+# ------------------------------------------------- the batch passes it through
+
+
+def test_admit_all_carries_the_flag() -> None:
+    """A per-call flag that the batch helper drops is a flag that does nothing.
+
+    The activity calls admit_all, never admit, so this is the only path that
+    matters in production.
+    """
+    from titan.intelligence.discovery import admit_all
+
+    businesses = [_business(domain="facebook.com", place_id="p-social")]
+
+    without, _ = admit_all(businesses)
+    assert without[0].refusal is Refusal.NON_AUDITABLE_HOST
+
+    with_flag, _ = admit_all(businesses, allow_siteless=True)
+    assert with_flag[0].admitted
+    assert with_flag[0].kind is LeadKind.SITELESS
+
+
+def test_the_places_filter_follows_the_same_switch() -> None:
+    """Places drops siteless businesses before billing for them.
+
+    Right default, and exactly wrong when those are the businesses being
+    looked for -- the local check would never see one to admit.
+    """
+    from titan.intelligence.discovery import build_query
+
+    assert build_query(business_type="dentists", geography="Leeds").require_website
+    assert not build_query(
+        business_type="dentists", geography="Leeds", require_website=False
+    ).require_website

@@ -395,6 +395,18 @@ class Settings(BaseSettings):
     sender_host_id: str = ""
     sender_host_label: str = ""
 
+    #: Whether discovery may admit businesses with no website of their own.
+    #:
+    #: These are reached through the profile they do maintain -- a Facebook or
+    #: directory page -- and written to about what their Google listing shows
+    #: rather than about a site they do not have. A business with no page
+    #: anywhere is still refused, because there is nowhere to read an address
+    #: from; see `titan.intelligence.discovery.admit`.
+    #:
+    #: Off by default. Turning it on changes which businesses enter the estate,
+    #: not merely how they are written to.
+    discover_siteless: bool = False
+
     #: Override the reserve target with an absolute number of reachable leads.
     #:
     #: 0 leaves it derived from send capacity, which is the normal state. Set
