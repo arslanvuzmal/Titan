@@ -52,23 +52,23 @@ UNPITCHABLE_CONFIDENCE = 0.5
 #: returned to, which is the thing being observed.
 MIN_PHOTOS = 3
 
-#: Below this share of reviews answered, nobody is replying as a matter of
-#: habit. Set low on purpose: the claim is "almost none", not "not enough".
-MIN_REVIEW_REPLY_RATE = 0.1
-
-#: Only businesses with at least this many reviews *read* are judged on
-#: replies. Two unanswered reviews is not a policy.
-#:
-#: Read, not held: Places returns a maximum of five reviews however many the
-#: business has. So the denominator is the sample we actually looked at, never
-#: `userRatingCount` -- dividing five observations by forty reviews would put a
-#: number in front of a stranger that nobody could arrive at from the listing.
-MIN_REVIEWS_TO_JUDGE_REPLIES = 5
-
-#: What Places will return at most, regardless of the business's review count.
-#: Named so the wording of the claim can say so out loud.
-MAX_REVIEWS_RETURNED = 5
-
+# There is deliberately no reply-rate detector, and `reviews` is deliberately
+# not in the field mask.
+#
+# The Places Review object has no reply field: `name`, `text`, `originalText`,
+# `rating`, `authorAttribution`, `publishTime`, `flagContentUri`,
+# `googleMapsUri`, `visitDate` -- and nothing for the owner's response. Google
+# does not expose owner replies through this API at all.
+#
+# So a reply habit cannot be measured from here, at any sample size. Reading
+# every returned review and finding no reply field said "nobody replies" about
+# twelve consecutive businesses, when what it actually described was the
+# response shape. The other route -- reading the place page -- is the one
+# Google's robots.txt disallows, and the one-pager attached to every message
+# says robots.txt is obeyed. So this stays unmeasured and unsaid.
+#
+# Dropping `reviews` from the mask is also what takes the profile read off the
+# Enterprise SKU for everything except photos.
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ProfileSnapshot:
@@ -86,13 +86,10 @@ class ProfileSnapshot:
     website_uri: str | None = None
     has_opening_hours: bool | None = None
     photo_count: int | None = None
-    #: Every review the business has, as Google counts them.
+    #: Every review the business has, as Google counts them. Carried as
+    #: context, not as a claim -- nothing in the listing makes a review count
+    #: a defect.
     review_count: int | None = None
-    #: How many of those Places actually returned -- five at the most. The
-    #: denominator of any claim about replies, because it is the only number
-    #: that describes what was read.
-    sampled_review_count: int | None = None
-    replied_review_count: int | None = None
 
 
 def _finding(
@@ -199,42 +196,6 @@ def findings_from_profile(
             )
         )
 
-    # Judged on the reviews Places returned, never on the review count. The
-    # observed value names the sample so the recipient can check it: five
-    # reviews are on the listing, and either they have replies under them or
-    # they do not.
-    sampled = snapshot.sampled_review_count
-    if (
-        sampled is not None
-        and snapshot.replied_review_count is not None
-        and sampled >= MIN_REVIEWS_TO_JUDGE_REPLIES
-    ):
-        rate = snapshot.replied_review_count / sampled
-        if rate < MIN_REVIEW_REPLY_RATE:
-            total = snapshot.review_count
-            holding = f", of {total} altogether" if total and total > sampled else ""
-            out.append(
-                _finding(
-                    issue_type="reviews_go_unanswered",
-                    category=FindingCategory.RETENTION,
-                    title="Reviews on the Google listing are not replied to",
-                    observed=(
-                        f"{snapshot.replied_review_count} of the {sampled} "
-                        f"reviews Google shows on the listing{holding} have a "
-                        "reply from the business"
-                    ),
-                    expected="a reply to each review, particularly the unhappy ones",
-                    impact=(
-                        "An unanswered complaint is the last thing a prospective "
-                        "customer reads about you, and replying is the only part "
-                        "of it you control"
-                    ),
-                    solution="Automatic review requests, and drafted replies to approve",
-                    listing_url=snapshot.listing_url,
-                    pitchable=pitchable,
-                )
-            )
-
     # There is deliberately no "listing has no description" finding here.
     #
     # The only description field Places exposes is `editorialSummary`, and that
@@ -314,28 +275,6 @@ def snapshot_from_places(
         return bool(payload.get(key)) if _measured(key) else None
 
     website = payload.get("websiteUri")
-    reviews = payload.get("reviews")
-    replied = None
-    if isinstance(reviews, list):
-        # Google nests the owner's response under the review it answers.
-        replied = sum(
-            1
-            for r in reviews
-            if isinstance(r, dict)
-            and r.get("authorAttribution")
-            and r.get("originalText")
-            and r.get("reply")
-        )
-        if not any(isinstance(r, dict) and "reply" in r for r in reviews):
-            # The field is not in this response shape at all, so "none replied"
-            # would be our omission wearing their name.
-            replied = None
-    elif _measured("reviews"):
-        # Asked for and not returned: no reviews to reply to. Not a reply
-        # habit, so it stays unmeasured rather than becoming a zero -- the
-        # review-count gate below would exclude it anyway, and a business with
-        # no reviews has not failed to answer any.
-        replied = None
 
     photos = payload.get("photos")
     if isinstance(photos, list):
@@ -354,15 +293,11 @@ def snapshot_from_places(
         has_opening_hours=_flag("regularOpeningHours"),
         photo_count=photo_count,
         review_count=payload.get("userRatingCount"),
-        sampled_review_count=(len(reviews) if isinstance(reviews, list) else None),
-        replied_review_count=replied,
     )
 
 
 __all__ = [
     "MIN_PHOTOS",
-    "MIN_REVIEWS_TO_JUDGE_REPLIES",
-    "MIN_REVIEW_REPLY_RATE",
     "PROFILE_CONFIDENCE",
     "ProfileSnapshot",
     "findings_from_profile",

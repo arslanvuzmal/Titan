@@ -102,9 +102,13 @@ PROFILE_FIELDS: tuple[str, ...] = (
     "googleMapsUri",
     "regularOpeningHours",
     "photos",
-    "reviews",
 )
 
+#: Not asked for, on purpose: `reviews` carries no owner-reply field -- Google
+#: does not expose replies through this API -- so it can only fund a claim
+#: about the response shape. It is also an Enterprise SKU driver, so asking for
+#: it cost money to learn nothing.
+#:
 #: Not asked for, on purpose: `editorialSummary` is Google's own copy about the
 #: place, not the description the owner wrote -- that one lives in the Business
 #: Profile and this API does not return it. Since every field in the list above

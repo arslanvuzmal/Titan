@@ -16,7 +16,6 @@ from __future__ import annotations
 import pytest
 from titan.intelligence.profile_defects import (
     MIN_PHOTOS,
-    MIN_REVIEWS_TO_JUDGE_REPLIES,
     ProfileSnapshot,
     findings_from_profile,
     snapshot_from_places,
@@ -43,7 +42,7 @@ def test_an_empty_snapshot_produces_no_findings() -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["has_opening_hours", "photo_count", "sampled_review_count"],
+    ["has_opening_hours", "photo_count"],
 )
 def test_an_unreturned_field_is_never_an_absence(field: str) -> None:
     """None is "not asked for", not "not there".
@@ -90,66 +89,10 @@ def test_a_listing_with_enough_photos_is_not(
     assert "listing_has_almost_no_photos" not in _types(_snap(photo_count=MIN_PHOTOS))
 
 
-def test_unanswered_reviews_are_detected() -> None:
-    assert "reviews_go_unanswered" in _types(
-        _snap(review_count=40, sampled_review_count=5, replied_review_count=0)
-    )
 
 
-def test_a_business_that_replies_is_not_accused_of_not_replying() -> None:
-    assert "reviews_go_unanswered" not in _types(
-        _snap(review_count=40, sampled_review_count=5, replied_review_count=3)
-    )
 
 
-def test_too_few_reviews_to_judge_a_reply_habit() -> None:
-    """Two unanswered reviews is not a policy."""
-    assert "reviews_go_unanswered" not in _types(
-        _snap(
-            review_count=40,
-            sampled_review_count=MIN_REVIEWS_TO_JUDGE_REPLIES - 1,
-            replied_review_count=0,
-        )
-    )
-
-
-def test_reply_rate_needs_both_numbers() -> None:
-    """Knowing the review count without the reply count proves nothing."""
-    assert "reviews_go_unanswered" not in _types(
-        _snap(review_count=40, sampled_review_count=5, replied_review_count=None)
-    )
-
-
-def test_the_reply_claim_counts_only_the_reviews_it_actually_read() -> None:
-    """Places returns five reviews at most, whatever the review count says.
-
-    Dividing five observations by forty reviews produced "0 of 40 reviews have
-    a reply" -- a number nobody could arrive at from the listing, sent to a
-    stranger as a measurement. The claim has to name its own sample.
-    """
-    finding = next(
-        f
-        for f in findings_from_profile(
-            _snap(review_count=40, sampled_review_count=5, replied_review_count=0),
-            pitchable=True,
-        )
-        if f.issue_type == "reviews_go_unanswered"
-    )
-    assert "0 of the 5 reviews" in finding.observed_value
-    assert "of 40 altogether" in finding.observed_value
-    assert "0 of 40" not in finding.observed_value
-
-
-def test_a_business_whose_reviews_all_fit_in_the_sample_is_not_told_a_total() -> None:
-    finding = next(
-        f
-        for f in findings_from_profile(
-            _snap(review_count=5, sampled_review_count=5, replied_review_count=0),
-            pitchable=True,
-        )
-        if f.issue_type == "reviews_go_unanswered"
-    )
-    assert "altogether" not in finding.observed_value
 
 
 def test_a_neglected_listing_yields_every_finding_at_once() -> None:
@@ -159,15 +102,11 @@ def test_a_neglected_listing_yields_every_finding_at_once() -> None:
             website_uri="",
             has_opening_hours=False,
             photo_count=1,
-            review_count=40,
-            sampled_review_count=5,
-            replied_review_count=0,
         )
     ) == {
         "no_website_listed",
         "no_opening_hours_listed",
         "listing_has_almost_no_photos",
-        "reviews_go_unanswered",
     }
 
 
@@ -231,26 +170,6 @@ def test_an_empty_photo_list_is_a_real_zero() -> None:
     assert snapshot_from_places(_payload()).photo_count is None
 
 
-def test_reply_counting_needs_the_reply_field_to_exist() -> None:
-    """Reviews without a reply field are a response shape, not a habit.
-
-    Counting them as unanswered would be our omission wearing their name.
-    """
-    without = snapshot_from_places(
-        _payload(userRatingCount=40, reviews=[{"originalText": {}} for _ in range(40)])
-    )
-    assert without.replied_review_count is None
-
-    with_field = snapshot_from_places(
-        _payload(
-            userRatingCount=40,
-            reviews=[
-                {"originalText": {}, "authorAttribution": {}, "reply": None} for _ in range(40)
-            ],
-        )
-    )
-    assert with_field.replied_review_count == 0
-
 
 def test_the_listing_url_is_carried_through_as_the_citation() -> None:
     assert snapshot_from_places(_payload()).listing_url == LISTING
@@ -279,7 +198,6 @@ ASKED = (
     "websiteUri",
     "regularOpeningHours",
     "photos",
-    "reviews",
     "userRatingCount",
 )
 
@@ -328,11 +246,6 @@ def test_photos_we_asked_for_and_did_not_get_are_a_gallery_with_nothing_in_it() 
     assert _asked(photos=[{}, {}, {}]).photo_count == 3
 
 
-def test_a_business_with_no_reviews_is_not_accused_of_ignoring_them() -> None:
-    """Absent reviews mean none to answer, which is not a failure to answer."""
-    assert _asked(userRatingCount=0).replied_review_count is None
-    assert "reviews_go_unanswered" not in _types(_asked(userRatingCount=0))
-
 
 def test_not_asking_still_claims_nothing_even_when_something_else_was_asked() -> None:
     """The rule the fix had to keep: only a field we asked about can be a claim."""
@@ -363,17 +276,38 @@ def test_the_mask_and_the_claimable_fields_cannot_drift() -> None:
     from titan.providers.places import PROFILE_FIELD_MASK, PROFILE_FIELDS
 
     assert PROFILE_FIELD_MASK.split(",") == list(PROFILE_FIELDS)
-    for field in ("websiteUri", "regularOpeningHours", "photos", "reviews"):
+    for field in ("websiteUri", "regularOpeningHours", "photos"):
         assert field in PROFILE_FIELDS
 
 
 def test_a_neglected_listing_read_the_real_way_yields_every_finding() -> None:
     """End to end, in the shape Places actually answers in: by omission."""
-    assert _types(_asked(userRatingCount=40, reviews=[
-        {"authorAttribution": {}, "originalText": {}, "reply": None} for _ in range(5)
-    ])) == {
+    assert _types(_asked(userRatingCount=40)) == {
         "no_website_listed",
         "no_opening_hours_listed",
         "listing_has_almost_no_photos",
-        "reviews_go_unanswered",
     }
+
+
+def test_owner_replies_are_never_claimed_because_places_does_not_return_them() -> None:
+    """Measured live: no review Places returned carried a reply field.
+
+    The Review object has no reply on it -- Google does not expose owner
+    responses through this API. A detector reading their absence said "nobody
+    replies" about twelve consecutive businesses, when what it described was
+    the response shape. `reviews` is not asked for, and nothing claims it.
+    """
+    from titan.providers.places import PROFILE_FIELDS
+
+    assert "reviews" not in PROFILE_FIELDS
+    payload = _payload(
+        userRatingCount=40,
+        reviews=[{"authorAttribution": {}, "originalText": {}} for _ in range(5)],
+    )
+    types = {
+        f.issue_type
+        for f in findings_from_profile(
+            snapshot_from_places(payload, requested=ASKED), pitchable=True
+        )
+    }
+    assert "reviews_go_unanswered" not in types
