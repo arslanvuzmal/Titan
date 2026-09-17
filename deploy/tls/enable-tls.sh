@@ -85,6 +85,43 @@ fi
 
 log "certificate in hand: $(openssl x509 -enddate -noout -in "$LIVE/fullchain.pem" 2>/dev/null || echo '?')"
 
+# --------------------------------------------- the bundle has to move with us
+
+# NEXT_PUBLIC_API_URL is compiled into the browser bundle, so the image built
+# against http://<ip> keeps calling http://<ip> from an https:// page -- which
+# the browser blocks as mixed content. The CRM would load and then fail every
+# request, which looks like the API being down. Nothing about turning on TLS
+# fixes this by itself, so it happens here, before the listener exists.
+
+cp "$ENV_FILE" "$ENV_FILE.pre-tls"
+
+set_env() {
+    if grep -q "^$1=" "$ENV_FILE"; then
+        sed -i "s#^$1=.*#$1=$2#" "$ENV_FILE"
+    else
+        echo "$1=$2" >> "$ENV_FILE"
+    fi
+}
+
+set_env TITAN_PUBLIC_ORIGIN "https://$DOMAIN"
+# CORS. The bare IP stays allowed on purpose: it is the way back in when DNS or
+# the certificate breaks, and a diagnostic page that renders but cannot call the
+# API is not much of a way back in.
+set_env TITAN_FRONTEND_URL "https://$DOMAIN"
+set_env TITAN_EXTRA_CORS_ORIGINS "http://$MY_IP"
+
+log "rebuilding the CRM bundle against https://$DOMAIN"
+build_web() {
+    (cd "$ROOT" && docker build -q -f apps/web/Dockerfile \
+        --build-arg "NEXT_PUBLIC_API_URL=$1" \
+        -t titan-web:local . >/dev/null 2>&1)
+}
+
+if ! build_web "https://$DOMAIN"; then
+    cp "$ENV_FILE.pre-tls" "$ENV_FILE"
+    later "the CRM image would not build; nothing changed"
+fi
+
 # ------------------------------------------------------- turn the listener on
 
 sed "s/__DOMAIN__/$DOMAIN/g" "$TEMPLATE" > "$INSTALLED"
@@ -92,13 +129,16 @@ sed "s/__DOMAIN__/$DOMAIN/g" "$TEMPLATE" > "$INSTALLED"
 rollback() {
     log "ROLLING BACK to plain HTTP"
     rm -f "$INSTALLED"
-    "$COMPOSE" up -d nginx >/dev/null 2>&1 || true
+    cp "$ENV_FILE.pre-tls" "$ENV_FILE"
+    build_web "http://$MY_IP" || true
+    "$COMPOSE" up -d web api nginx >/dev/null 2>&1 || true
     log "ingress restored on port 80"
 }
 
 # `up -d` rather than a reload: the 443 port publish is a container property,
-# so nginx has to be recreated for it to exist at all.
-"$COMPOSE" up -d nginx >/dev/null 2>&1 || { rollback; die "nginx would not come up with TLS"; }
+# so nginx has to be recreated for it to exist at all. `web` takes the rebuilt
+# bundle and `api` takes the new CORS origins.
+"$COMPOSE" up -d web api nginx >/dev/null 2>&1 || { rollback; die "the stack would not come up with TLS"; }
 
 sleep 5
 if ! docker exec deploy-nginx-1 nginx -t >/dev/null 2>&1; then
@@ -113,7 +153,11 @@ if [ "$CODE" != "200" ] && [ "$CODE" != "307" ]; then
     die "https://$DOMAIN/crm answered $CODE; TLS not enabled"
 fi
 
-log "TLS is on: https://$DOMAIN/crm -> $CODE"
+# The escape hatch must still work, or there is no way back in.
+IP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "http://$MY_IP/crm" 2>/dev/null || echo 000)
+[ "$IP_CODE" = "200" ] || log "WARNING: http://$MY_IP/crm answered $IP_CODE; the plain-HTTP fallback is not serving"
+
+log "TLS is on: https://$DOMAIN/crm -> $CODE (fallback http://$MY_IP/crm -> $IP_CODE)"
 
 # ------------------------------------------------------------------- renewal
 
