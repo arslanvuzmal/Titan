@@ -29,6 +29,7 @@ from titan.activities import mailbox_ramp as mailbox_ramp_activities
 from titan.activities import optouts as optout_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
+from titan.activities import profile as profile_activities
 from titan.activities import readmission as readmission_activities
 from titan.activities import reporting as reporting_activities
 from titan.activities import research as research_activities
@@ -115,6 +116,7 @@ async def main() -> None:
             *reporting_activities.ALL_REPORTING_ACTIVITIES,
             *verification_activities.ALL_VERIFICATION_ACTIVITIES,
             *pipeline_activities.ALL_PIPELINE_ACTIVITIES,
+            *profile_activities.ALL_PROFILE_ACTIVITIES,
             *stranded_activities.ALL_STRANDED_ACTIVITIES,
             *schedule_healing_activities.ALL_SCHEDULE_HEALING_ACTIVITIES,
             *daily_report_activities.ALL_DAILY_REPORT_ACTIVITIES,
