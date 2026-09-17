@@ -1,0 +1,15 @@
+# Publishes 443. Layered on top of docker-compose.prod.yml, and only once a
+# certificate exists -- deploy/compose.sh adds it automatically when
+# nginx/tls/443.conf is present, so nothing has to remember a flag.
+#
+# Kept out of the main file on purpose. Publishing 443 with no TLS listener
+# behind it is worse than leaving it closed: Docker binds the port and accepts
+# the connection, so a browser opening https:// completes its handshake against
+# docker-proxy and then waits for a server that does not exist. That reads as
+# "site can't be reached" after a timeout, instead of failing instantly and
+# falling back to http.
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"

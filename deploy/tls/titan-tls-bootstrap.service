@@ -1,0 +1,12 @@
+[Unit]
+Description=Turn on TLS for Titan as soon as DNS allows it
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/titan/deploy/tls/enable-tls.sh
+# 75 is EX_TEMPFAIL: preconditions not met yet, which is the normal state
+# while an A record is still missing. Not a failure, so the timer keeps going
+# and systemctl does not paint the unit red.
+SuccessExitStatus=75

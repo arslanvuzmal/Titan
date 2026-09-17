@@ -1,0 +1,92 @@
+# The TLS listener. Installed into deploy/nginx/tls/443.conf by
+# deploy/tls/enable-tls.sh, which substitutes __DOMAIN__, and never by hand --
+# the file must not exist unless a certificate does, because nginx refuses to
+# start when `ssl_certificate` points at nothing and that would cost all
+# ingress, which is the failure this whole directory exists to avoid.
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__DOMAIN__/privkey.pem;
+
+    # Mozilla "intermediate". TLS 1.2 stays because the operator's phone is not
+    # worth locking out for a threat model that is one dashboard.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:TitanTLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # OCSP stapling: the browser gets the revocation answer from us instead of
+    # pausing to ask the CA on first connect.
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/__DOMAIN__/chain.pem;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-XSS-Protection "1; mode=block";
+    add_header X-Content-Type-Options "nosniff";
+
+    # Same two upstreams as the :80 server, resolved per request for the same
+    # reason: a recreated container must not cost a restart. See nginx.conf.
+    set $api_upstream http://api:8000;
+    set $web_upstream http://web:3000;
+
+    location /api/ {
+        proxy_pass $api_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # The API decides whether to send HSTS from this header, because nginx
+        # terminates TLS and everything behind it is plaintext. Getting this
+        # wrong here means HSTS never fires at all.
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /ws/ {
+        proxy_pass $api_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+    location / {
+        proxy_pass $web_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# Plain HTTP on the *name* redirects to TLS. Plain HTTP on the bare IP does
+# not, and that is deliberate: the IP is the way back in if DNS or the
+# certificate ever breaks, and HSTS does not apply to an IP literal, so it
+# cannot get itself pinned shut.
+server {
+    listen 80;
+    server_name __DOMAIN__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+        access_log off;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

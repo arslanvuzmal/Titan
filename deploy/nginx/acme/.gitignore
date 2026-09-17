@@ -1,0 +1,2 @@
+# certbot HTTP-01 challenge files, written and deleted during issuance.
+.well-known/

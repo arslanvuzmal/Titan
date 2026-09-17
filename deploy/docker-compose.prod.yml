@@ -43,6 +43,13 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      # Written by certbot on the host, read by nginx to answer the HTTP-01
+      # challenge. Empty until the first issuance.
+      - ./nginx/acme:/var/www/acme:ro
+      # The 443 server block, dropped in by deploy/tls/enable-tls.sh once a
+      # certificate exists. Empty means no TLS listener, which is deliberate.
+      - ./nginx/tls:/etc/nginx/tls:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       api:
         condition: service_healthy

@@ -1,0 +1,2 @@
+# Written by deploy/tls/enable-tls.sh once a certificate exists.
+*.conf

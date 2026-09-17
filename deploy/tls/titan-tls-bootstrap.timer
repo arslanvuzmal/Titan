@@ -1,0 +1,12 @@
+[Unit]
+Description=Retry Titan TLS setup until it takes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+# enable-tls.sh disables this timer itself once TLS is on, so the retries stop
+# without anyone noticing they were happening.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
