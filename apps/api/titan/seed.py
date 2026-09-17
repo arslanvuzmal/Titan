@@ -37,6 +37,7 @@ from titan.db.models import (
     WorkspaceMember,
 )
 from titan.db.session import dispose_engine, get_sessionmaker
+from titan.outreach.provisioning import ensure_sequence
 from titan.providers.places import DiscoveryQuery, GooglePlacesProvider
 from titan.runtime import configure_event_loop
 
@@ -169,6 +170,15 @@ async def ensure_campaign(
         )
         if sender is not None:
             campaign.sender_identity_id = sender.id
+
+        # Seeded campaigns get one too. They are real rows in a real workspace
+        # -- the CRM cannot tell them apart from any other campaign, and
+        # neither can the follow-up scheduler. Leaving it out here would mean
+        # the demo data quietly behaves differently from production, which is
+        # the opposite of what seeding is for.
+        await ensure_sequence(
+            session, workspace_id=workspace_id, campaign_id=campaign.id
+        )
         return campaign.id
 
 

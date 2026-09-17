@@ -41,6 +41,7 @@ from titan.config import OperatingMode
 from titan.db.enums import CampaignStatus
 from titan.db.models import Campaign, CampaignPolicy, SenderIdentity
 from titan.intelligence import territories
+from titan.outreach.provisioning import ensure_sequence
 from titan.policy.schedule import default_window_for
 
 logger = logging.getLogger(__name__)
@@ -337,6 +338,22 @@ async def expand(
                 send_days=list(window.days),
             )
         )
+
+        # A campaign without a sequence cannot be followed up, ever. The
+        # scheduler builds its plan from `email_sequences`, finds nothing, and
+        # every lead in the campaign is contacted exactly once -- silently,
+        # because a campaign with no follow-ups due looks identical to one that
+        # is up to date.
+        #
+        # This was D20, and autonomous expansion was making it worse every time
+        # it opened a market: by 17 September, 49 active campaigns had no
+        # sequence and 205 leads sat past their next_action_at with nowhere to
+        # go. Creating the campaign and its right to follow up in the same
+        # transaction is what stops that recurring.
+        await ensure_sequence(
+            session, workspace_id=workspace_id, campaign_id=campaign.id
+        )
+
         logger.info(
             "opened a new market",
             extra={

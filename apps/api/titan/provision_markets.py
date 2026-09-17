@@ -42,6 +42,7 @@ from titan.db.enums import CampaignStatus, Industry, SubRegion
 from titan.db.models import Campaign, CampaignPolicy, SenderIdentity, Workspace
 from titan.db.session import dispose_engine, get_sessionmaker
 from titan.intelligence import territories
+from titan.outreach.provisioning import ensure_sequence
 from titan.policy.schedule import default_window_for
 from titan.runtime import configure_event_loop
 
@@ -324,6 +325,16 @@ async def provision(workspace_id: uuid.UUID, *, apply: bool) -> list[str]:
                     send_window_end_hour=window.end_hour,
                     send_days=list(window.days),
                 )
+            )
+
+            # Same reason as intelligence/expansion.py: a campaign without a
+            # sequence can never follow up, and the absence is invisible --
+            # nothing due looks exactly like nothing owed. Both paths that
+            # create a campaign now create its sequence in the same
+            # transaction, so the only way to get one without the other is to
+            # add a third path and forget again.
+            await ensure_sequence(
+                session, workspace_id=workspace_id, campaign_id=campaign.id
             )
     return lines
 
