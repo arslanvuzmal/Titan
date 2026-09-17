@@ -541,6 +541,57 @@ _SOLUTION_DETAIL: dict[str, str] = {
 #: now -- which is entailed by the finding and therefore carries the same
 #: evidence. It is a conditional about their site, so it is a claim, so it goes
 #: in the claim map beside the finding that justifies it.
+#: What the sender does about this exact absence, overriding the industry line.
+#:
+#: `automation_capability` is one sentence per industry, written when the only
+#: operational finding was `no_booking_or_enquiry_path`. With nine of them it
+#: mismatches: a message that opened on a missing chat assistant closed by
+#: talking about booking confirmations -- both true absences on that business,
+#: and the wrong pair. The paragraph answers a different question from the one
+#: the message asked, which a careful reader notices and a careless one feels.
+#:
+#: Same shape as `family_capability` for QUALITY: an override when there is a
+#: better sentence, the industry line when there is not.
+_CAPABILITY_BY_ISSUE: dict[str, str] = {
+    "no_conversational_capability": (
+        "I build assistants that sit on the site, answer what gets asked most "
+        "and take the enquiry when they cannot."
+    ),
+    "no_self_service_booking": (
+        "I build booking that works off your real availability, confirms on "
+        "the spot and sends the reminders itself."
+    ),
+    "no_follow_up_automation": (
+        "I build follow-up sequences that run on their own after an enquiry "
+        "and stop the moment somebody replies."
+    ),
+    "no_review_automation": (
+        "I set up review requests that go out automatically after a visit, to "
+        "everyone rather than to whoever somebody remembered to ask."
+    ),
+    "no_website_listed": (
+        "I build small sites for businesses that have been running on a phone "
+        "number and a Google listing, and put something on them that answers "
+        "out of hours."
+    ),
+    "no_opening_hours_listed": (
+        "I look after the Google listing alongside the site, so the hours and "
+        "the booking link stay right without anybody maintaining them."
+    ),
+    "listing_has_almost_no_photos": (
+        "I keep listings current -- photographs, hours, description -- as part "
+        "of the same work as the site."
+    ),
+    "reviews_go_unanswered": (
+        "I set up review requests that go out on their own and draft the "
+        "replies for you to approve rather than write."
+    ),
+    "listing_has_no_description": (
+        "I write the listing copy and build the site it points at, so the "
+        "first thing anybody reads about you is yours."
+    ),
+}
+
 _UPSIDE_DETAIL: dict[str, str] = {
     "no_website_listed": (
         "The people finding you on Google already are the ones this reaches "
@@ -1157,6 +1208,9 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     capability = capability_for(vern, engine)
     if engine is Engine.QUALITY:
         capability = family_capability(family) or capability
+    # The industry sentence is a fallback, not the answer, once one engine
+    # covers nine different absences. See _CAPABILITY_BY_ISSUE.
+    capability = _CAPABILITY_BY_ISSUE.get(finding.issue_type, capability)
     # 4. What the sender does about this class of problem. A claim about the
     #    sender only -- the moment it becomes a claim about the recipient's
     #    peers it is "businesses like yours" again, which is refused.
