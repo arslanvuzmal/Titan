@@ -1,0 +1,12 @@
+# Keep LF in files Linux executes or parses, whoever commits them.
+#
+# Preventive, not a fix for an observed break: the repository is committed from
+# Windows, and a shell script or systemd unit that arrives with CRLF does not
+# run at all -- `#!/bin/sh\r` is not an interpreter, and the error says
+# "Permission denied" or "bad interpreter", neither of which mentions line
+# endings. Cheap to state here, expensive to diagnose on a server.
+*.sh            text eol=lf
+*.service       text eol=lf
+*.timer         text eol=lf
+deploy/**       text eol=lf
+Dockerfile      text eol=lf
