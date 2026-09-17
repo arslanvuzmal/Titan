@@ -97,6 +97,12 @@ _SUPERSEDE = text("""
     UPDATE message_drafts
        SET status = :superseded, updated_at = :now
      WHERE id = ANY(:drafts)
+       -- Scoped here, not by the id alone. The id came from a workspace-scoped
+       -- read, so today this predicate changes no row; the session adds no
+       -- filter of its own to raw SQL, so the day the id list comes from
+       -- anywhere else it is the only thing standing between this write and
+       -- another workspace's rows.
+       AND workspace_id = :ws
 """)
 
 #: Back to QUALIFIED, which is a RESEARCHABLE_STATUS, so the campaign
@@ -110,6 +116,12 @@ _REOPEN = text("""
            status_reason = :reason,
            updated_at = :now
      WHERE id = ANY(:leads)
+       -- Scoped here, not by the id alone. The id came from a workspace-scoped
+       -- read, so today this predicate changes no row; the session adds no
+       -- filter of its own to raw SQL, so the day the id list comes from
+       -- anywhere else it is the only thing standing between this write and
+       -- another workspace's rows.
+       AND workspace_id = :ws
        AND status = ANY(:reopenable)
        AND replied_at IS NULL
 """)
@@ -192,7 +204,7 @@ async def sweep_stale_evidence(
 
     await session.execute(
         _SUPERSEDE,
-        {"superseded": DraftStatus.SUPERSEDED.value, "now": now, "drafts": draft_ids},
+        {"superseded": DraftStatus.SUPERSEDED.value, "now": now, "drafts": draft_ids, "ws": workspace_id},
     )
     result = await session.execute(
         _REOPEN,
@@ -201,6 +213,7 @@ async def sweep_stale_evidence(
             "reason": f"evidence older than {STALE_AFTER.days} days; re-measuring",
             "now": now,
             "leads": lead_ids,
+            "ws": workspace_id,
             "reopenable": list(_REOPENABLE),
         },
     )

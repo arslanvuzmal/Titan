@@ -80,12 +80,24 @@ _MARK_CONTRADICTED = text("""
            contradiction_reason = :reason,
            updated_at = :now
      WHERE id = :finding_id
+       -- Scoped here, not by the id alone. The id came from a workspace-scoped
+       -- read, so today this predicate changes no row; the session adds no
+       -- filter of its own to raw SQL, so the day the id list comes from
+       -- anywhere else it is the only thing standing between this write and
+       -- another workspace's rows.
+       AND workspace_id = :ws
 """)
 
 _SUPERSEDE = text("""
     UPDATE message_drafts
        SET status = :superseded, updated_at = :now
      WHERE id = :draft_id
+       -- Scoped here, not by the id alone. The id came from a workspace-scoped
+       -- read, so today this predicate changes no row; the session adds no
+       -- filter of its own to raw SQL, so the day the id list comes from
+       -- anywhere else it is the only thing standing between this write and
+       -- another workspace's rows.
+       AND workspace_id = :ws
 """)
 
 #: Back to a researchable status so the site is re-crawled and a true message
@@ -94,6 +106,12 @@ _REOPEN = text("""
     UPDATE leads
        SET status = :qualified, status_reason = :reason, updated_at = :now
      WHERE id = :lead_id
+       -- Scoped here, not by the id alone. The id came from a workspace-scoped
+       -- read, so today this predicate changes no row; the session adds no
+       -- filter of its own to raw SQL, so the day the id list comes from
+       -- anywhere else it is the only thing standing between this write and
+       -- another workspace's rows.
+       AND workspace_id = :ws
        AND replied_at IS NULL
        AND status = ANY(:reopenable)
 """)
@@ -175,6 +193,7 @@ async def recheck_pending_claims(request: RecheckClaimsInput) -> RecheckClaimsRe
                         "reason": check.detail[:500],
                         "now": now,
                         "finding_id": row.finding_id,
+                        "ws": workspace_id,
                     },
                 )
                 await session.execute(
@@ -183,6 +202,7 @@ async def recheck_pending_claims(request: RecheckClaimsInput) -> RecheckClaimsRe
                         "superseded": DraftStatus.SUPERSEDED.value,
                         "now": now,
                         "draft_id": row.draft_id,
+                        "ws": workspace_id,
                     },
                 )
                 await session.execute(
@@ -192,6 +212,7 @@ async def recheck_pending_claims(request: RecheckClaimsInput) -> RecheckClaimsRe
                         "reason": "claim no longer true; re-measuring",
                         "now": now,
                         "lead_id": row.lead_id,
+                        "ws": workspace_id,
                         "reopenable": list(_REOPENABLE),
                     },
                 )
