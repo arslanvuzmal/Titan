@@ -65,7 +65,7 @@ from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
 from titan.intelligence import case_studies
-from titan.intelligence.absence import findings_from_gap
+from titan.intelligence.absence import ABSENCE_ISSUE_TYPES, findings_from_gap
 from titan.intelligence.address_history import AddressHistory, read_many
 from titan.intelligence.bounce_risk import BounceRisk, assess
 from titan.intelligence.composer import ComposerContext, compose, family_for
@@ -692,6 +692,68 @@ async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
             pitchable=get_settings().absence_pitching_enabled,
         )
     )
+
+    # Store what the gap produced. Without this the absence is real, scored,
+    # and unsayable: the composer picks the lead finding from `audit_findings`,
+    # and a finding that exists only in this function's local list cannot be
+    # picked, cited or evidenced. It was the last reason the AI-automation half
+    # of the offer stayed dark after the detector itself was repaired.
+    #
+    # Same insert shape as analyse_evidence, and the same conflict key, so a
+    # re-score of the same research run adds nothing a second time.
+    absences = [f for f in detected if f.issue_type in ABSENCE_ISSUE_TYPES]
+    if absences:
+        async with workspace_unit_of_work(workspace_id) as session:
+            for finding in absences:
+                inserted = await session.execute(
+                    pg_insert(AuditFinding.__table__)  # type: ignore[arg-type]
+                    .values(
+                        workspace_id=workspace_id,
+                        research_run_id=uuid.UUID(request.research_run_id),
+                        lead_id=uuid.UUID(request.lead_id),
+                        # No page_id: an absence is a statement about the pages
+                        # read as a set, not about one of them. page_url below
+                        # carries the page it is cited against.
+                        page_id=None,
+                        category=finding.category.value,
+                        issue_type=finding.issue_type,
+                        title=finding.title,
+                        page_url=finding.page_url,
+                        selector=finding.selector,
+                        observed_value=finding.observed_value,
+                        expected_behavior=finding.expected_behavior,
+                        severity=finding.severity.value,
+                        confidence=finding.confidence,
+                        business_impact=finding.business_impact,
+                        recommended_solution=finding.recommended_solution,
+                        estimated_effort=finding.estimated_effort,
+                        verification_method=finding.verification_method.value,
+                        finding_fingerprint=finding.fingerprint,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["research_run_id", "finding_fingerprint"]
+                    )
+                    .returning(AuditFinding.__table__.c.id)
+                )
+                finding_id = inserted.scalar_one_or_none()
+                if finding_id is None:
+                    continue
+                for excerpt, source_url in finding.evidence:
+                    await session.execute(
+                        pg_insert(FindingEvidence.__table__)  # type: ignore[arg-type]
+                        .values(
+                            workspace_id=workspace_id,
+                            finding_id=finding_id,
+                            page_id=None,
+                            excerpt=excerpt,
+                            excerpt_fingerprint=fingerprint(
+                                {"e": excerpt, "u": source_url}
+                            ),
+                            source_url=source_url,
+                            captured_at=_now(),
+                        )
+                        .on_conflict_do_nothing()
+                    )
 
     evidenced_types = {f.issue_type for f in detected if f.is_pitchable()}
     offers = select_offers(org_snapshot["industry"], evidenced_types)
