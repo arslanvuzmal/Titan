@@ -9,6 +9,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { recheckUrl, runCrawl } from './crawler.js';
+import { discoverOnMaps } from './mapsDiscovery.js';
 import type { ResearchRequest } from './contract.js';
 import { WORKER_VERSION } from './contract.js';
 
@@ -94,8 +95,13 @@ const server = http.createServer(async (req, res) => {
   // still true -- see recheckUrl in crawler.ts for why it lives on this side
   // of the credential boundary.
   const isRecheck = req.method === 'POST' && url.pathname === '/recheck';
+  // Maps search, which robots.txt allows, as a supplement to the Places API
+  // rather than a replacement for it. Places is cheaper and licensed; what it
+  // cannot do is return more than sixty results for a query. See
+  // mapsDiscovery.ts for the robots boundary this is held inside.
+  const isDiscover = req.method === 'POST' && url.pathname === '/discover';
 
-  if (!isResearch && !isRecheck) {
+  if (!isResearch && !isRecheck && !isDiscover) {
     return send(res, 404, { error: 'not_found' });
   }
 
@@ -124,6 +130,28 @@ const server = http.createServer(async (req, res) => {
             : 'TitanBot/1.0 (+https://arslanvuzmallone.com/titan)',
         timeoutSeconds:
           typeof body?.timeout_seconds === 'number' ? body.timeout_seconds : 25,
+      });
+      send(res, 200, result);
+      return;
+    }
+    if (isDiscover) {
+      const query = typeof body?.query === 'string' ? body.query : '';
+      if (!query) throw new Error('query is required');
+      const result = await discoverOnMaps({
+        query,
+        userAgent:
+          typeof body?.user_agent === 'string' && body.user_agent
+            ? body.user_agent
+            : 'TitanBot/1.0 (+https://arslanvuzmallone.com/titan)',
+        timeoutSeconds:
+          typeof body?.timeout_seconds === 'number' ? body.timeout_seconds : 90,
+        // Bounded here as well as by the caller: an unbounded scroll is a
+        // request that never ends and a worker lane that never frees.
+        maxResults: Math.max(
+          1,
+          Math.min(typeof body?.max_results === 'number' ? body.max_results : 120, 400),
+        ),
+        hl: typeof body?.hl === 'string' ? body.hl : 'en',
       });
       send(res, 200, result);
       return;
