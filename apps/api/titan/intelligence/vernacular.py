@@ -77,7 +77,26 @@ _ALWAYS_CONVERSION: frozenset[str] = frozenset(
 #: other operational gap worth naming (enquiries not routed, trials not
 #: followed up) is invisible to a crawler, and a claim about how a business
 #: works internally that nothing observed is a claim this system does not make.
-_OPERATIONAL: frozenset[str] = frozenset({"no_booking_or_enquiry_path"})
+_OPERATIONAL: frozenset[str] = frozenset(
+    {
+        "no_booking_or_enquiry_path",
+        # What a business does not run, read from its site.
+        "no_conversational_capability",
+        "no_self_service_booking",
+        "no_follow_up_automation",
+        "no_review_automation",
+        # What its Google listing does not contain. These belong here for the
+        # same reason as the original member: nothing is broken. Left in
+        # QUALITY they inherit a consequence sentence about pages being harder
+        # to use -- which, for a business whose listing has no website on it,
+        # describes something that does not exist.
+        "no_website_listed",
+        "no_opening_hours_listed",
+        "listing_has_almost_no_photos",
+        "reviews_go_unanswered",
+        "listing_has_no_description",
+    }
+)
 
 #: Path fragments that mean the visitor had already decided.
 #:

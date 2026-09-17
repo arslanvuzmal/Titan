@@ -248,6 +248,60 @@ def _attr(value: str) -> str:
 #: nothing else -- none asserts anything about the recipient's revenue,
 #: traffic or customers, because Titan measures pages and nothing else.
 _PROBLEM_DETAIL: dict[str, str] = {
+    "no_website_listed": (
+        "Everyone who finds you on Google and wants to know more -- your "
+        "prices, whether you take their insurance, what the place looks "
+        "like -- has nowhere to go and nothing to read. The listing is "
+        "doing the whole job of a website, and it can only show a name, a "
+        "map pin and whatever other people have said about you."
+    ),
+    "no_opening_hours_listed": (
+        "Where Google would normally say open or closed, your listing says "
+        "nothing. Somebody deciding at eight in the evening whether to ring "
+        "in the morning has no answer, and the results either side of yours "
+        "do have one."
+    ),
+    "listing_has_almost_no_photos": (
+        "The listing is the first thing most people see of you and there is "
+        "almost nothing on it to look at. Next to competitors showing their "
+        "rooms and their staff, an empty gallery reads as a business nobody "
+        "has looked after for a while -- which is usually not true, and is "
+        "the impression it gives anyway."
+    ),
+    "reviews_go_unanswered": (
+        "People read the replies as much as the reviews, because the reply "
+        "is the only part of it you write. An unanswered complaint is "
+        "currently the last thing a prospective customer reads about you, "
+        "and a happy review that gets no acknowledgement reads as one "
+        "nobody noticed."
+    ),
+    "listing_has_no_description": (
+        "Google fills the gap with whatever it can infer from your category "
+        "and your reviews, so the one paragraph describing your business is "
+        "the only copy about you that you did not write."
+    ),
+    "no_conversational_capability": (
+        "An enquiry that arrives outside opening hours waits until somebody "
+        "is back at the desk. Most of them do wait. The ones that do not are "
+        "the people who contacted three businesses at once and went with "
+        "whoever answered first, and you never see those at all."
+    ),
+    "no_self_service_booking": (
+        "Every booking has to pass through somebody answering the phone, so "
+        "the number you can take is capped by the hours that desk is "
+        "staffed. Evenings and weekends convert at whatever the answerphone "
+        "converts at, which is usually close to nothing."
+    ),
+    "no_follow_up_automation": (
+        "Following up depends on somebody having the time that week, so it "
+        "is the first thing dropped when the business is busy -- which is "
+        "exactly when there is most to follow up on."
+    ),
+    "no_review_automation": (
+        "Reviews arrive only from people motivated enough to leave one "
+        "unprompted. That is a different population from your customers, and "
+        "it skews towards the ones who had something to complain about."
+    ),
     "broken_primary_cta": (
         "The button itself is fine -- it is the address behind it that no "
         "longer exists, so the server answers with a not-found page instead "
@@ -339,6 +393,56 @@ _PROBLEM_DETAIL: dict[str, str] = {
 #: not "I can help with that". A reader who cannot picture the work has no
 #: way to judge whether twenty minutes of their time is worth spending.
 _SOLUTION_DETAIL: dict[str, str] = {
+    "no_website_listed": (
+        "I would build a small site that answers the questions the phone "
+        "currently answers -- what you do, what it costs, when you are open, "
+        "how to book -- and put an assistant on it that handles the rest. "
+        "Then point the Google listing at it, so the people already finding "
+        "you have somewhere to land."
+    ),
+    "no_opening_hours_listed": (
+        "The hours themselves take five minutes to add. The part worth doing "
+        "properly is what happens outside them: somewhere to book or ask a "
+        "question at eight in the evening, so the answer is not simply that "
+        "you are shut."
+    ),
+    "listing_has_almost_no_photos": (
+        "A dozen photographs of the place, the people and the work, and "
+        "something that keeps adding to them rather than relying on somebody "
+        "remembering. The listing is the shop window for everyone who has "
+        "not been yet."
+    ),
+    "reviews_go_unanswered": (
+        "I would set up review requests that go out after a visit without "
+        "anybody remembering, and drafted replies you approve rather than "
+        "write -- so answering becomes a minute a week instead of a job "
+        "nobody owns."
+    ),
+    "listing_has_no_description": (
+        "A written description that says what you actually do and who for, "
+        "and a site it can point at, so the first paragraph anybody reads "
+        "about you is one you chose."
+    ),
+    "no_conversational_capability": (
+        "An assistant on the site that answers the questions you get asked "
+        "most, and captures the enquiry with a name and a number when it "
+        "cannot. It does not need to be clever -- it needs to be there at "
+        "nine in the evening."
+    ),
+    "no_self_service_booking": (
+        "Self-service booking on the site, taking from your real "
+        "availability so nothing is double-booked, with the confirmations "
+        "and reminders going out on their own."
+    ),
+    "no_follow_up_automation": (
+        "A follow-up sequence that runs after an enquiry or a visit without "
+        "anybody starting it -- a message the next day, another the "
+        "following week, stopping the moment they reply."
+    ),
+    "no_review_automation": (
+        "A request that goes out automatically a day or two after a visit, "
+        "to everyone rather than to whoever somebody remembered to ask."
+    ),
     "broken_primary_cta": (
         "The repair is to point the button at the page that exists now and "
         "put a redirect on the old address so anything still linking to it "
@@ -438,6 +542,51 @@ _SOLUTION_DETAIL: dict[str, str] = {
 #: evidence. It is a conditional about their site, so it is a claim, so it goes
 #: in the claim map beside the finding that justifies it.
 _UPSIDE_DETAIL: dict[str, str] = {
+    "no_website_listed": (
+        "The people finding you on Google already are the ones this reaches "
+        "first -- they are searching for what you do, in your town, and "
+        "currently arriving at a listing that cannot answer them. Nothing "
+        "about your marketing has to change for that traffic to start "
+        "landing somewhere."
+    ),
+    "no_opening_hours_listed": (
+        "Google starts showing you as open when you are, which is what turns "
+        "a listing from a map pin into a result somebody acts on."
+    ),
+    "listing_has_almost_no_photos": (
+        "Listings with photographs get looked at for longer and clicked "
+        "through more often, and the comparison being made is with the two "
+        "results either side of yours rather than with some ideal."
+    ),
+    "reviews_go_unanswered": (
+        "Replies are the part of your reputation you control. A complaint "
+        "with a straight answer under it reads completely differently from "
+        "the same complaint sitting on its own."
+    ),
+    "listing_has_no_description": (
+        "The first paragraph anybody reads about you becomes one you wrote, "
+        "saying what you actually do rather than what a category label "
+        "implies."
+    ),
+    "no_conversational_capability": (
+        "The enquiries that arrive when the desk is closed stop going to "
+        "whoever answers first. Those are not extra visitors -- they are the "
+        "ones already coming to you at the wrong hour."
+    ),
+    "no_self_service_booking": (
+        "Bookings stop being capped by the hours somebody can answer the "
+        "phone, and the evening and weekend traffic you already have starts "
+        "converting instead of waiting."
+    ),
+    "no_follow_up_automation": (
+        "The follow-up happens in the busy weeks too, which are the weeks it "
+        "was always being dropped in."
+    ),
+    "no_review_automation": (
+        "Reviews start arriving from your ordinary satisfied customers "
+        "rather than only from the people with a reason to write one "
+        "unprompted, which moves both the rating and how many there are."
+    ),
     "broken_primary_cta": (
         "Once the button points somewhere that exists, the visitors who "
         "were already convinced enough to click it reach the form instead "
@@ -573,6 +722,19 @@ _MEETING_REGISTERS: tuple[str, ...] = (
     "and agree what is worth doing first.",
     "If you want to take it further, twenty minutes on a call would cover it "
     "and you can decide from there.",
+)
+
+#: Openers for a finding read from a Google listing.
+#:
+#: They name the business rather than a domain, because the population this is
+#: for may not have one -- and "I came across example.com" written to somebody
+#: whose listing has no website on it is false in the first six words, in the
+#: same message that goes on to point out they have no website.
+_LISTING_OBSERVATION_REGISTERS: tuple[str, ...] = (
+    "I was looking at how {business} comes up on Google and noticed {description}.",
+    "I came across {business} on Google and noticed {description}.",
+    "I was looking through your Google listing for {business} and noticed {description}.",
+    "Quick note on how {business} shows up on Google: I noticed {description}.",
 )
 
 _OBSERVATION_REGISTERS: tuple[str, ...] = (
@@ -780,6 +942,28 @@ _MILLISECONDS = re.compile(r"(\d+)\s*ms", re.IGNORECASE)
 _RATIO = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
 
 
+#: Findings read from a Google listing rather than from a website.
+#:
+#: Kept as a set rather than inferred from the URL, because the URL is data and
+#: this decides what the message is allowed to claim. A finding added here
+#: without copy that names the listing would produce a sentence about a website
+#: that may not exist.
+LISTING_ISSUES: frozenset[str] = frozenset(
+    {
+        "no_website_listed",
+        "no_opening_hours_listed",
+        "listing_has_almost_no_photos",
+        "reviews_go_unanswered",
+        "listing_has_no_description",
+    }
+)
+
+
+def _is_listing(url: str) -> bool:
+    host = (url or "").split("://")[-1].split("/")[0].lower()
+    return host.endswith("google.com") or host.endswith("goo.gl")
+
+
 def _page_name(finding: FindingLike) -> str:
     """How a page is named to somebody who owns it.
 
@@ -794,6 +978,11 @@ def _page_name(finding: FindingLike) -> str:
     reads as English and "your https://example.com/book page" does not.
     """
     url = (finding.page_url or "").strip()
+    # A listing is not a page of theirs, and naming it as one is the kind of
+    # error that ends the reader's trust in the first sentence: they click it,
+    # land on Google, and know the message was assembled rather than written.
+    if _is_listing(url):
+        return "your Google listing"
     if not url:
         return "the page"
     path = url.split("://", 1)[-1]
@@ -832,6 +1021,34 @@ def _describe(finding: FindingLike) -> str:
         return f"the enquiry form on {page} asks for {observed or 'a lot of fields'}"
     if issue == "no_booking_or_enquiry_path":
         return "there is no booking link or enquiry form anywhere on the site"
+
+    # Listing findings. These name Google rather than the site, because that is
+    # where they were read -- and because for most of this population there is
+    # no site to name. Saying "your website" here would be the one thing this
+    # system refuses: a claim the recipient cannot check against the thing we
+    # actually looked at.
+    if issue == "no_website_listed":
+        return "your Google listing does not have a website on it"
+    if issue == "no_opening_hours_listed":
+        return "your Google listing does not show any opening hours"
+    if issue == "listing_has_almost_no_photos":
+        return f"your Google listing has {observed or 'almost no photographs'}"
+    if issue == "reviews_go_unanswered":
+        return f"on your Google listing, {observed or 'the reviews have no replies'}"
+    if issue == "listing_has_no_description":
+        return "your Google listing has no description written on it"
+
+    # Absences read from the site itself. Phrased as what was looked for and
+    # not found, never as what the business "has" -- a crawl that missed a
+    # widget is a fact about the crawl.
+    if issue == "no_conversational_capability":
+        return "I could not find anything on the site that answers a visitor without a person"
+    if issue == "no_self_service_booking":
+        return "I could not find a way to book on the site without telephoning"
+    if issue == "no_follow_up_automation":
+        return "I could not find anything that follows up on an enquiry automatically"
+    if issue == "no_review_automation":
+        return "I could not find anything that asks customers for a review automatically"
     if issue == "no_visible_phone_number":
         return "there is no phone number on any page I looked at"
     if issue == "images_missing_alt_text":
@@ -912,9 +1129,16 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     # 1. The observation. The only sentence that asserts a fact about the site,
     #    and the one the claim map is anchored on.
     description = _describe(finding)
-    observation = _OBSERVATION_REGISTERS[index].format(
-        domain=ctx.org_domain, description=description
-    )
+    if finding.issue_type in LISTING_ISSUES:
+        # Named, not domained. See _LISTING_OBSERVATION_REGISTERS.
+        subject_name = (ctx.business_name or "").strip() or ctx.org_domain
+        observation = _LISTING_OBSERVATION_REGISTERS[
+            index % len(_LISTING_OBSERVATION_REGISTERS)
+        ].format(business=subject_name, description=description)
+    else:
+        observation = _OBSERVATION_REGISTERS[index].format(
+            domain=ctx.org_domain, description=description
+        )
     if ctx.step_number > 0:
         opener = _FOLLOWUP_OPENERS[index % len(_FOLLOWUP_OPENERS)].format(
             domain=ctx.org_domain
@@ -1285,6 +1509,10 @@ def _evidence_anchor(finding: FindingLike, org_domain: str) -> Anchor | None:
     url = _clean_href(finding.page_url)
     if url is None:
         return None
+    if _is_listing(url):
+        # Google's URL, not one of theirs. The root branch below would call it
+        # "your home page", which is the one phrase it certainly is not.
+        return Anchor(text="your Google listing", href=url)
     noun = _page_noun(url)
     if noun is None and not urlsplit(url).path.strip("/"):
         # The root. _page_noun has no segment to read and returns None, but the
@@ -1310,6 +1538,13 @@ def _evidence_anchor(finding: FindingLike, org_domain: str) -> Anchor | None:
 #: nothing. ``test_composer_four_part.py`` holds this by composing every issue
 #: type through the real validator.
 EVIDENCE_LABEL = "Page examined"
+
+#: The same, for a finding read from a Google listing rather than a page.
+#:
+#: Same constraint as EVIDENCE_LABEL: a bare noun, no article paired with a
+#: site word, or the claim validator reads the citation block as an assertion
+#: about the recipient.
+LISTING_EVIDENCE_LABEL = "Listing examined"
 
 REFERENCES_HEADING = "References"
 
@@ -1393,9 +1628,12 @@ def _reference_block(
     """
     block: list[Reference] = []
     if evidence is not None:
-        block.append(
-            Reference(publisher="", title=EVIDENCE_LABEL, url=evidence.href)
+        # "Page examined" pointing at maps.google.com invites exactly the
+        # question the citation exists to close.
+        label = (
+            LISTING_EVIDENCE_LABEL if _is_listing(evidence.href) else EVIDENCE_LABEL
         )
+        block.append(Reference(publisher="", title=label, url=evidence.href))
     block.extend(references_for(issue_type))
     if one_pager_url:
         block.append(
