@@ -38,7 +38,7 @@ from titan.intelligence.profile_defects import (
     findings_from_profile,
     snapshot_from_places,
 )
-from titan.providers.places import GooglePlacesProvider
+from titan.providers.places import PROFILE_FIELDS, GooglePlacesProvider
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,12 @@ async def read_business_profile(request: ReadProfileInput) -> ReadProfileResult:
     if not payload:
         return ReadProfileResult("no_evidence", 0, None, "places returned nothing")
 
-    snapshot = snapshot_from_places(payload, place_id=place_id)
+    # PROFILE_FIELDS is passed, not inferred: Places omits a field the
+    # business has nothing in rather than returning it empty, so what we asked
+    # for is the only thing that can tell an absence from a silence.
+    snapshot = snapshot_from_places(
+        payload, place_id=place_id, requested=PROFILE_FIELDS
+    )
     findings = findings_from_profile(
         snapshot, pitchable=settings.absence_pitching_enabled
     )

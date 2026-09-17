@@ -29,6 +29,7 @@ customers in the evenings" would be neither.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Collection
 
 from titan.db.enums import FindingCategory, Severity, VerificationMethod
 from titan.intelligence.findings import DetectedFinding
@@ -55,9 +56,18 @@ MIN_PHOTOS = 3
 #: habit. Set low on purpose: the claim is "almost none", not "not enough".
 MIN_REVIEW_REPLY_RATE = 0.1
 
-#: Only businesses with at least this many reviews are judged on replies. Two
-#: unanswered reviews is not a policy.
+#: Only businesses with at least this many reviews *read* are judged on
+#: replies. Two unanswered reviews is not a policy.
+#:
+#: Read, not held: Places returns a maximum of five reviews however many the
+#: business has. So the denominator is the sample we actually looked at, never
+#: `userRatingCount` -- dividing five observations by forty reviews would put a
+#: number in front of a stranger that nobody could arrive at from the listing.
 MIN_REVIEWS_TO_JUDGE_REPLIES = 5
+
+#: What Places will return at most, regardless of the business's review count.
+#: Named so the wording of the claim can say so out loud.
+MAX_REVIEWS_RETURNED = 5
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -76,9 +86,13 @@ class ProfileSnapshot:
     website_uri: str | None = None
     has_opening_hours: bool | None = None
     photo_count: int | None = None
+    #: Every review the business has, as Google counts them.
     review_count: int | None = None
+    #: How many of those Places actually returned -- five at the most. The
+    #: denominator of any claim about replies, because it is the only number
+    #: that describes what was read.
+    sampled_review_count: int | None = None
     replied_review_count: int | None = None
-    has_description: bool | None = None
 
 
 def _finding(
@@ -185,21 +199,29 @@ def findings_from_profile(
             )
         )
 
+    # Judged on the reviews Places returned, never on the review count. The
+    # observed value names the sample so the recipient can check it: five
+    # reviews are on the listing, and either they have replies under them or
+    # they do not.
+    sampled = snapshot.sampled_review_count
     if (
-        snapshot.review_count is not None
+        sampled is not None
         and snapshot.replied_review_count is not None
-        and snapshot.review_count >= MIN_REVIEWS_TO_JUDGE_REPLIES
+        and sampled >= MIN_REVIEWS_TO_JUDGE_REPLIES
     ):
-        rate = snapshot.replied_review_count / snapshot.review_count
+        rate = snapshot.replied_review_count / sampled
         if rate < MIN_REVIEW_REPLY_RATE:
+            total = snapshot.review_count
+            holding = f", of {total} altogether" if total and total > sampled else ""
             out.append(
                 _finding(
                     issue_type="reviews_go_unanswered",
                     category=FindingCategory.RETENTION,
                     title="Reviews on the Google listing are not replied to",
                     observed=(
-                        f"{snapshot.replied_review_count} of "
-                        f"{snapshot.review_count} reviews have a reply from the business"
+                        f"{snapshot.replied_review_count} of the {sampled} "
+                        f"reviews Google shows on the listing{holding} have a "
+                        "reply from the business"
                     ),
                     expected="a reply to each review, particularly the unhappy ones",
                     impact=(
@@ -213,73 +235,127 @@ def findings_from_profile(
                 )
             )
 
-    if snapshot.has_description is False:
-        out.append(
-            _finding(
-                issue_type="listing_has_no_description",
-                category=FindingCategory.CONTENT,
-                title="The Google listing has no description",
-                observed="the Google listing has no business description",
-                expected="a description saying what the business does",
-                impact=(
-                    "Google shows whatever it can infer instead, which is the "
-                    "one piece of copy about you that you did not write"
-                ),
-                solution="A written profile, and a site it can point at",
-                listing_url=snapshot.listing_url,
-                pitchable=pitchable,
-            )
-        )
+    # There is deliberately no "listing has no description" finding here.
+    #
+    # The only description field Places exposes is `editorialSummary`, and that
+    # is Google's own copy about the place -- the documentation requires it to
+    # be shown exactly as provided. The description the *owner* writes lives in
+    # their Business Profile, which this API does not return at all.
+    #
+    # So an absent editorialSummary means Google has not written a summary for
+    # this business. Saying "your listing has no description" on that evidence
+    # would be a claim the recipient disproves in one click by opening their
+    # profile and reading the description they wrote -- in a system whose whole
+    # standing rests on the opposite. Measured live, the field was absent from
+    # every listing read, so this would have been said to nearly everybody.
+    # The copy for the issue type is left in the composer against the day an
+    # owner-authorised source can answer it honestly.
 
     return out
 
 
-def snapshot_from_places(payload: dict, *, place_id: str | None = None) -> ProfileSnapshot:
+def snapshot_from_places(
+    payload: dict,
+    *,
+    place_id: str | None = None,
+    requested: Collection[str] | None = None,
+) -> ProfileSnapshot:
     """Map a Places profile response onto a snapshot.
 
-    The whole of this function is the rule that `None` means *not returned*.
-    Places omits a key entirely when the field was not asked for **and** when
-    the business genuinely has nothing there, and those two cases must not
-    collapse -- one is a fact about them, the other a fact about our mask.
+    The whole of this function is the rule that an unmeasured field must never
+    become a claim. What changed, and why it had to:
 
-    `regularOpeningHours` and `editorialSummary` are omitted in both cases, so
-    they are read as measured only when the mask asked for them; the caller
-    passes a payload fetched with PROFILE_FIELD_MASK, which did. `photos` and
-    `reviews` come back as lists, and an empty list is a genuine zero rather
-    than a silence.
+    **Places omits a field entirely when the business has nothing in it.** It
+    does not return it blank. Measured against live listings, ``websiteUri``,
+    ``regularOpeningHours`` and ``editorialSummary`` were simply absent from
+    the payload rather than present-and-empty -- ``editorialSummary`` was
+    missing from every profile read, on a mask that explicitly asked for it.
+
+    So key presence cannot distinguish the two cases. Reading absence as "not
+    returned" made every absence unclaimable: the three detectors above could
+    never fire, and this function's caller reported ``no_evidence`` on a
+    business with no website at all. That is the failure this codebase keeps
+    meeting -- a pass that runs, logs nothing, and is indistinguishable from a
+    healthy one.
+
+    **What can answer it is our own field mask.** We know what we asked for,
+    because we wrote it. `requested` carries that list:
+
+    * asked for, and present   -> they have it
+    * asked for, and absent    -> they do not (a claim, checkable in one click)
+    * not asked for            -> unmeasured, and nothing is said
+
+    `requested` is not optional in spirit. Omitting it falls back to key
+    presence, which claims nothing -- safe, and wrong in the direction that
+    loses findings rather than the one that invents them.
+
+    **Why an absent field is trustworthy here.** Places v1 rejects a bad field
+    mask with an error rather than quietly dropping fields, so a response that
+    arrived at all had its mask honoured. That inference is what makes omission
+    a fact about the business; it is checked below by requiring the response to
+    carry its own identity before any absence is read from it.
     """
-    def _asked(key: str) -> bool:
-        # A key present at all -- even empty -- means Places answered on it.
-        return key in payload
+    asked = frozenset(requested or ())
+
+    # A response too thin to identify is not a listing with nothing in it. If
+    # Places ever does start returning degraded payloads, this is the line that
+    # keeps the degradation from being published as a claim about every
+    # business at once.
+    answered = bool(payload) and bool(payload.get("id") or payload.get("googleMapsUri"))
+
+    def _measured(key: str) -> bool:
+        """Did we get an answer about this field -- either way?"""
+        if key in payload:
+            return True
+        return answered and key in asked
+
+    def _flag(key: str) -> bool | None:
+        """True/False when measured, None when the field was never asked."""
+        return bool(payload.get(key)) if _measured(key) else None
 
     website = payload.get("websiteUri")
     reviews = payload.get("reviews")
     replied = None
     if isinstance(reviews, list):
         # Google nests the owner's response under the review it answers.
-        replied = sum(1 for r in reviews if isinstance(r, dict) and r.get("authorAttribution") and r.get("originalText") and r.get("reply"))
+        replied = sum(
+            1
+            for r in reviews
+            if isinstance(r, dict)
+            and r.get("authorAttribution")
+            and r.get("originalText")
+            and r.get("reply")
+        )
         if not any(isinstance(r, dict) and "reply" in r for r in reviews):
             # The field is not in this response shape at all, so "none replied"
             # would be our omission wearing their name.
             replied = None
+    elif _measured("reviews"):
+        # Asked for and not returned: no reviews to reply to. Not a reply
+        # habit, so it stays unmeasured rather than becoming a zero -- the
+        # review-count gate below would exclude it anyway, and a business with
+        # no reviews has not failed to answer any.
+        replied = None
 
     photos = payload.get("photos")
+    if isinstance(photos, list):
+        photo_count = len(photos)
+    elif _measured("photos"):
+        # Asked for, nothing came back: a listing with no photographs at all.
+        photo_count = 0
+    else:
+        photo_count = None
 
     return ProfileSnapshot(
         place_id=str(place_id or payload.get("id") or ""),
         listing_url=str(payload.get("googleMapsUri") or ""),
-        # "" means Places answered and the field was blank; None means it did
-        # not answer. Only the first is a claim.
-        website_uri=("" if _asked("websiteUri") and not website else website),
-        has_opening_hours=(
-            bool(payload.get("regularOpeningHours")) if _asked("regularOpeningHours") else None
-        ),
-        photo_count=(len(photos) if isinstance(photos, list) else None),
+        # "" is the claim "they have no website"; None is "we never asked".
+        website_uri=("" if _measured("websiteUri") and not website else website),
+        has_opening_hours=_flag("regularOpeningHours"),
+        photo_count=photo_count,
         review_count=payload.get("userRatingCount"),
+        sampled_review_count=(len(reviews) if isinstance(reviews, list) else None),
         replied_review_count=replied,
-        has_description=(
-            bool(payload.get("editorialSummary")) if _asked("editorialSummary") else None
-        ),
     )
 
 

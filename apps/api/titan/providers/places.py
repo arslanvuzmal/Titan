@@ -82,21 +82,37 @@ DETAIL_FIELD_MASK = ",".join(
 #: multiply the bill for a field most of those runs never read. Asked for only
 #: when a business is about to be judged on its listing -- which is the case
 #: where the listing is the only thing there is to judge.
-PROFILE_FIELD_MASK = ",".join(
-    (
-        "id",
-        "displayName",
-        "websiteUri",
-        "rating",
-        "userRatingCount",
-        "businessStatus",
-        "googleMapsUri",
-        "regularOpeningHours",
-        "photos",
-        "reviews",
-        "editorialSummary",
-    )
+#: The fields this system asks Places for when it reads a listing.
+#:
+#: Kept as the tuple rather than only the joined string because the *set of
+#: fields we asked for* is load-bearing downstream, not just the header value.
+#: Places omits a field entirely when the business has nothing in it -- it does
+#: not return it empty -- so key presence in the response cannot tell "we did
+#: not ask" from "they do not have one". Only this list can, which is why
+#: `profile_defects.snapshot_from_places` is handed PROFILE_FIELDS and not left
+#: to infer it. Anything added here becomes claimable; anything removed stops
+#: being claimable the same day, with no other edit.
+PROFILE_FIELDS: tuple[str, ...] = (
+    "id",
+    "displayName",
+    "websiteUri",
+    "rating",
+    "userRatingCount",
+    "businessStatus",
+    "googleMapsUri",
+    "regularOpeningHours",
+    "photos",
+    "reviews",
 )
+
+#: Not asked for, on purpose: `editorialSummary` is Google's own copy about the
+#: place, not the description the owner wrote -- that one lives in the Business
+#: Profile and this API does not return it. Since every field in the list above
+#: becomes claimable by its absence, asking for this one would turn "Google has
+#: written no summary" into "your listing has no description", which is not the
+#: same sentence and is not true. See titan.intelligence.profile_defects.
+
+PROFILE_FIELD_MASK = ",".join(PROFILE_FIELDS)
 
 #: Places caps text search at 3 pages of 20.
 MAX_PAGES = 3
@@ -490,6 +506,7 @@ class GooglePlacesProvider:
 
 __all__ = [
     "DETAIL_FIELD_MASK",
+    "PROFILE_FIELDS",
     "PROFILE_FIELD_MASK",
     "SEARCH_FIELD_MASK",
     "DiscoveredBusiness",

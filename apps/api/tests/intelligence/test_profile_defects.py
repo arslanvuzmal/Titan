@@ -43,7 +43,7 @@ def test_an_empty_snapshot_produces_no_findings() -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["has_opening_hours", "photo_count", "has_description"],
+    ["has_opening_hours", "photo_count", "sampled_review_count"],
 )
 def test_an_unreturned_field_is_never_an_absence(field: str) -> None:
     """None is "not asked for", not "not there".
@@ -92,28 +92,64 @@ def test_a_listing_with_enough_photos_is_not(
 
 def test_unanswered_reviews_are_detected() -> None:
     assert "reviews_go_unanswered" in _types(
-        _snap(review_count=40, replied_review_count=0)
+        _snap(review_count=40, sampled_review_count=5, replied_review_count=0)
     )
 
 
 def test_a_business_that_replies_is_not_accused_of_not_replying() -> None:
     assert "reviews_go_unanswered" not in _types(
-        _snap(review_count=40, replied_review_count=20)
+        _snap(review_count=40, sampled_review_count=5, replied_review_count=3)
     )
 
 
 def test_too_few_reviews_to_judge_a_reply_habit() -> None:
     """Two unanswered reviews is not a policy."""
     assert "reviews_go_unanswered" not in _types(
-        _snap(review_count=MIN_REVIEWS_TO_JUDGE_REPLIES - 1, replied_review_count=0)
+        _snap(
+            review_count=40,
+            sampled_review_count=MIN_REVIEWS_TO_JUDGE_REPLIES - 1,
+            replied_review_count=0,
+        )
     )
 
 
 def test_reply_rate_needs_both_numbers() -> None:
     """Knowing the review count without the reply count proves nothing."""
     assert "reviews_go_unanswered" not in _types(
-        _snap(review_count=40, replied_review_count=None)
+        _snap(review_count=40, sampled_review_count=5, replied_review_count=None)
     )
+
+
+def test_the_reply_claim_counts_only_the_reviews_it_actually_read() -> None:
+    """Places returns five reviews at most, whatever the review count says.
+
+    Dividing five observations by forty reviews produced "0 of 40 reviews have
+    a reply" -- a number nobody could arrive at from the listing, sent to a
+    stranger as a measurement. The claim has to name its own sample.
+    """
+    finding = next(
+        f
+        for f in findings_from_profile(
+            _snap(review_count=40, sampled_review_count=5, replied_review_count=0),
+            pitchable=True,
+        )
+        if f.issue_type == "reviews_go_unanswered"
+    )
+    assert "0 of the 5 reviews" in finding.observed_value
+    assert "of 40 altogether" in finding.observed_value
+    assert "0 of 40" not in finding.observed_value
+
+
+def test_a_business_whose_reviews_all_fit_in_the_sample_is_not_told_a_total() -> None:
+    finding = next(
+        f
+        for f in findings_from_profile(
+            _snap(review_count=5, sampled_review_count=5, replied_review_count=0),
+            pitchable=True,
+        )
+        if f.issue_type == "reviews_go_unanswered"
+    )
+    assert "altogether" not in finding.observed_value
 
 
 def test_a_neglected_listing_yields_every_finding_at_once() -> None:
@@ -124,15 +160,14 @@ def test_a_neglected_listing_yields_every_finding_at_once() -> None:
             has_opening_hours=False,
             photo_count=1,
             review_count=40,
+            sampled_review_count=5,
             replied_review_count=0,
-            has_description=False,
         )
     ) == {
         "no_website_listed",
         "no_opening_hours_listed",
         "listing_has_almost_no_photos",
         "reviews_go_unanswered",
-        "listing_has_no_description",
     }
 
 
@@ -219,3 +254,126 @@ def test_reply_counting_needs_the_reply_field_to_exist() -> None:
 
 def test_the_listing_url_is_carried_through_as_the_citation() -> None:
     assert snapshot_from_places(_payload()).listing_url == LISTING
+
+
+# ------------------------- an absence Places expressed by saying nothing at all
+
+# The bug these cover, found by running the activity against live listings
+# rather than by reading the code:
+#
+# Places omits a field entirely when the business has nothing in it. It does
+# not return it empty. `editorialSummary` was absent from every profile read,
+# on a mask that asked for it by name.
+#
+# Reading that omission as "not returned" -- which the tests above assert for
+# the case where we genuinely did not ask -- made three of the five detectors
+# unable to fire at all, including `no_website_listed`, the one finding this
+# whole module exists to produce. The activity dutifully reported `no_evidence`
+# and looked exactly like a healthy pass.
+#
+# The distinguishing fact is our own field mask, so it is passed in.
+
+ASKED = (
+    "id",
+    "googleMapsUri",
+    "websiteUri",
+    "regularOpeningHours",
+    "photos",
+    "reviews",
+    "userRatingCount",
+)
+
+
+def _asked(**kw) -> ProfileSnapshot:
+    return snapshot_from_places(_payload(**kw), requested=ASKED)
+
+
+def test_a_website_we_asked_for_and_did_not_get_is_a_business_with_no_website() -> None:
+    """The headline finding, which could never fire before.
+
+    A siteless business's payload simply has no `websiteUri` key. If that reads
+    as "unmeasured", the module cannot say the one thing it was built to say.
+    """
+    snapshot = _asked()
+    assert snapshot.website_uri == ""
+    assert "no_website_listed" in {
+        f.issue_type for f in findings_from_profile(snapshot, pitchable=True)
+    }
+
+
+def test_hours_we_asked_for_and_did_not_get_are_hours_they_have_not_published() -> None:
+    assert _asked().has_opening_hours is False
+    assert _asked(regularOpeningHours={"periods": []}).has_opening_hours is True
+
+
+def test_googles_own_summary_is_never_turned_into_a_claim_about_their_copy() -> None:
+    """The reason `editorialSummary` is not asked for at all.
+
+    It is Google's copy about the place, not the description the owner wrote --
+    that lives in the Business Profile, which this API does not return. Absent
+    from every listing measured, so claiming it would have told nearly every
+    recipient their listing has no description, which they disprove by opening
+    their own profile.
+    """
+    from titan.providers.places import PROFILE_FIELDS
+
+    assert "editorialSummary" not in PROFILE_FIELDS
+    assert "listing_has_no_description" not in _types(
+        _asked(editorialSummary={"text": "A dental practice"})
+    )
+
+
+def test_photos_we_asked_for_and_did_not_get_are_a_gallery_with_nothing_in_it() -> None:
+    assert _asked().photo_count == 0
+    assert _asked(photos=[{}, {}, {}]).photo_count == 3
+
+
+def test_a_business_with_no_reviews_is_not_accused_of_ignoring_them() -> None:
+    """Absent reviews mean none to answer, which is not a failure to answer."""
+    assert _asked(userRatingCount=0).replied_review_count is None
+    assert "reviews_go_unanswered" not in _types(_asked(userRatingCount=0))
+
+
+def test_not_asking_still_claims_nothing_even_when_something_else_was_asked() -> None:
+    """The rule the fix had to keep: only a field we asked about can be a claim."""
+    snapshot = snapshot_from_places(_payload(), requested=("id", "googleMapsUri"))
+    assert snapshot.website_uri is None
+    assert snapshot.has_opening_hours is None
+    assert snapshot.photo_count is None
+    assert findings_from_profile(snapshot, pitchable=True) == []
+
+
+def test_a_payload_that_cannot_identify_itself_is_a_failed_read_not_an_empty_listing(
+) -> None:
+    """The guard against publishing our own degradation as their listing.
+
+    If Places ever returns a stripped response, every field we asked for would
+    otherwise become an absence -- and the system would tell every business on
+    the list, in the same hour, that they have no website.
+    """
+    snapshot = snapshot_from_places({}, place_id="p1", requested=ASKED)
+    assert snapshot.website_uri is None
+    assert snapshot.has_opening_hours is None
+    assert snapshot.photo_count is None
+    assert findings_from_profile(snapshot, pitchable=True) == []
+
+
+def test_the_mask_and_the_claimable_fields_cannot_drift() -> None:
+    """One list, used for the request and for what may be claimed from it."""
+    from titan.providers.places import PROFILE_FIELD_MASK, PROFILE_FIELDS
+
+    assert PROFILE_FIELD_MASK.split(",") == list(PROFILE_FIELDS)
+    for field in ("websiteUri", "regularOpeningHours", "photos", "reviews"):
+        assert field in PROFILE_FIELDS
+
+
+def test_a_neglected_listing_read_the_real_way_yields_every_finding() -> None:
+    """End to end, in the shape Places actually answers in: by omission."""
+    assert _types(_asked(userRatingCount=40, reviews=[
+        {"authorAttribution": {}, "originalText": {}, "reply": None} for _ in range(5)
+    ])) == {
+        "no_website_listed",
+        "no_opening_hours_listed",
+        "listing_has_almost_no_photos",
+        "reviews_go_unanswered",
+    }
