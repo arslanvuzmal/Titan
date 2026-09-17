@@ -44,13 +44,26 @@ def state(**overrides) -> FuelState:
 
 def test_the_budget_does_not_depend_on_sends_left_today() -> None:
     """The whole point. ``research_budget`` takes no argument for remaining
-    sends, so the coupling cannot be reintroduced by accident."""
+    sends, so the coupling cannot be reintroduced by accident.
+
+    The set is exact rather than a subset check, and deliberately so: a new
+    parameter here is how the coupling would come back, wearing a different
+    name. Anything added has to be argued for in this test rather than slipping
+    in behind a ``not in`` assertion.
+
+    ``floor`` was added on 17 September and is not that coupling. It is an
+    absolute reserve target -- a number of leads, set once to measure what
+    research can do independently of what sending is allowed to do. It says
+    nothing about today, and unlike ``remaining`` it cannot shrink the budget:
+    ``reserve_target`` takes the larger of the derived target and the floor,
+    which its own tests pin in both directions.
+    """
     import inspect
 
     params = set(inspect.signature(research_budget).parameters)
 
     assert "remaining" not in params
-    assert params == {"state", "per_cycle_ceiling", "days"}
+    assert params == {"state", "per_cycle_ceiling", "days", "floor"}
 
 
 def test_a_spent_send_budget_still_orders_research() -> None:

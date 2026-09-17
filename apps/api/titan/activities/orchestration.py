@@ -56,6 +56,7 @@ from titan.autonomy.apply import apply_all
 from titan.autonomy.health import CampaignHealth, CampaignWindow
 from titan.autonomy.health import classify as classify_campaign
 from titan.autonomy.manager import ManagedState, plan
+from titan.config import get_settings
 from titan.db.enums import (
     POSITIVE_REPLY_CLASSES,
     TERMINAL_LEAD_STATUSES,
@@ -226,7 +227,11 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
     # can never form; and because only about a third of crawled sites yield an
     # address, sustaining S sends a day needs roughly 3S researched. Capping at
     # S drained the pipeline to 71 usable leads. See titan.intelligence.fuel.
-    fuel_budget = research_budget(fuel, per_cycle_ceiling=request.max_new_research)
+    fuel_budget = research_budget(
+        fuel,
+        per_cycle_ceiling=request.max_new_research,
+        floor=get_settings().reserve_target_leads,
+    )
 
     if remaining == 0 and fuel_budget.leads == 0:
         return CampaignCyclePlan(

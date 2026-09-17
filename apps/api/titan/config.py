@@ -395,6 +395,14 @@ class Settings(BaseSettings):
     sender_host_id: str = ""
     sender_host_label: str = ""
 
+    #: Override the reserve target with an absolute number of reachable leads.
+    #:
+    #: 0 leaves it derived from send capacity, which is the normal state. Set
+    #: it only to measure what research can do on its own -- see
+    #: `titan.intelligence.fuel.reserve_target` for why a standing reserve
+    #: above roughly 21 days of sending costs money instead of saving it.
+    reserve_target_leads: int = Field(default=0, ge=0, le=100_000)
+
     outbox_lease_seconds: int = Field(default=60, ge=5, le=600)
     outbox_batch_size: int = Field(default=10, ge=1, le=200)
     outbox_max_attempts: int = Field(default=6, ge=1, le=50)

@@ -194,13 +194,36 @@ def usable_rate(measured: float | None) -> float:
     return max(measured, MIN_USABLE_EXTRACTION_RATE)
 
 
-def reserve_target(daily_send_capacity: int, *, days: int = RESERVE_DAYS) -> int:
-    """How many reachable leads the workspace should be holding."""
-    return max(0, daily_send_capacity) * days
+def reserve_target(
+    daily_send_capacity: int, *, days: int = RESERVE_DAYS, floor: int = 0
+) -> int:
+    """How many reachable leads the workspace should be holding.
+
+    ``floor`` overrides the derived target when it is larger, and exists for
+    one honest purpose: measuring what the research side can actually do,
+    independently of what the sending side is allowed to do.
+
+    It is not a way to bank leads indefinitely, and using it as one costs money
+    rather than saving it. Research rate is send rate plus reserve growth --
+    that is subtraction, not policy -- and a lead sits in the reserve until it
+    is written to. Evidence goes stale at :data:`titan.intelligence.staleness.
+    STALE_AFTER` (21 days) and the send gate refuses it outright at 30, so a
+    reserve larger than roughly ``21 * send_rate`` is a set of leads that will
+    be re-crawled before they are ever mailed. The crawl is then paid for
+    twice, and the second one throws away the first.
+
+    Left at 0, the target is derived from send capacity exactly as before.
+    """
+    derived = max(0, daily_send_capacity) * days
+    return max(derived, max(0, floor))
 
 
 def research_budget(
-    state: FuelState, *, per_cycle_ceiling: int, days: int = RESERVE_DAYS
+    state: FuelState,
+    *,
+    per_cycle_ceiling: int,
+    days: int = RESERVE_DAYS,
+    floor: int = 0,
 ) -> FuelBudget:
     """How many leads to research this cycle.
 
@@ -210,7 +233,7 @@ def research_budget(
     if per_cycle_ceiling <= 0:
         return FuelBudget(0, "the cycle allows no new research")
 
-    target = reserve_target(state.daily_send_capacity, days=days)
+    target = reserve_target(state.daily_send_capacity, days=days, floor=floor)
     if target == 0:
         # Nothing can send, so nothing is being consumed. Research anyway, at a
         # trickle: a workspace whose mailboxes are all paused still wants a warm
@@ -251,9 +274,12 @@ def research_budget(
     )
     return FuelBudget(
         min(needed, per_cycle_ceiling),
-        f"{state.days_of_fuel:.1f} days of fuel against a {days}-day target; "
-        f"{deficit} short after counting {state.in_flight} in flight, "
-        f"{needed} to research at {measured}",
+        (
+            f"{state.days_of_fuel:.1f} days of fuel against a target of {target}"
+            + (f" (floor of {floor})" if floor and floor > state.daily_send_capacity * days else f" ({days}-day)")
+            + f"; {deficit} short after counting {state.in_flight} in flight, "
+            f"{needed} to research at {measured}"
+        ),
     )
 
 
