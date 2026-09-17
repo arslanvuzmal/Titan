@@ -19,6 +19,7 @@ from titan.intelligence.profile_defects import (
     MIN_REVIEWS_TO_JUDGE_REPLIES,
     ProfileSnapshot,
     findings_from_profile,
+    snapshot_from_places,
 )
 
 LISTING = "https://maps.google.com/?cid=123"
@@ -156,3 +157,65 @@ def test_every_finding_cites_the_listing_it_was_read_from() -> None:
     for f in findings:
         assert f.evidence
         assert all(url == LISTING for _observed, url in f.evidence)
+
+
+# ------------------------------------------- mapping the Places payload in
+
+
+def _payload(**kw) -> dict:
+    base = {"id": "p1", "googleMapsUri": LISTING}
+    base.update(kw)
+    return base
+
+
+def test_a_thin_payload_claims_nothing() -> None:
+    """A mask that asked for nothing extra must produce no findings.
+
+    This is the mapping's whole job. Places omits a key both when we did not
+    ask and when the business has nothing there, and collapsing those two is
+    how "our request" becomes "their listing".
+    """
+    snapshot = snapshot_from_places(_payload(rating=4.5))
+    assert findings_from_profile(snapshot, pitchable=True) == []
+
+
+def test_a_blank_website_field_is_a_claim_but_a_missing_one_is_not() -> None:
+    assert snapshot_from_places(_payload(websiteUri="")).website_uri == ""
+    assert snapshot_from_places(_payload()).website_uri is None
+
+
+def test_opening_hours_are_only_read_when_places_answered() -> None:
+    assert snapshot_from_places(_payload(regularOpeningHours=None)).has_opening_hours is False
+    assert snapshot_from_places(_payload(regularOpeningHours={"x": 1})).has_opening_hours is True
+    assert snapshot_from_places(_payload()).has_opening_hours is None
+
+
+def test_an_empty_photo_list_is_a_real_zero() -> None:
+    """A list that came back empty is an answer; an absent key is not."""
+    assert snapshot_from_places(_payload(photos=[])).photo_count == 0
+    assert snapshot_from_places(_payload()).photo_count is None
+
+
+def test_reply_counting_needs_the_reply_field_to_exist() -> None:
+    """Reviews without a reply field are a response shape, not a habit.
+
+    Counting them as unanswered would be our omission wearing their name.
+    """
+    without = snapshot_from_places(
+        _payload(userRatingCount=40, reviews=[{"originalText": {}} for _ in range(40)])
+    )
+    assert without.replied_review_count is None
+
+    with_field = snapshot_from_places(
+        _payload(
+            userRatingCount=40,
+            reviews=[
+                {"originalText": {}, "authorAttribution": {}, "reply": None} for _ in range(40)
+            ],
+        )
+    )
+    assert with_field.replied_review_count == 0
+
+
+def test_the_listing_url_is_carried_through_as_the_citation() -> None:
+    assert snapshot_from_places(_payload()).listing_url == LISTING

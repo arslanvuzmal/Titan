@@ -234,6 +234,55 @@ def findings_from_profile(
     return out
 
 
+def snapshot_from_places(payload: dict, *, place_id: str | None = None) -> ProfileSnapshot:
+    """Map a Places profile response onto a snapshot.
+
+    The whole of this function is the rule that `None` means *not returned*.
+    Places omits a key entirely when the field was not asked for **and** when
+    the business genuinely has nothing there, and those two cases must not
+    collapse -- one is a fact about them, the other a fact about our mask.
+
+    `regularOpeningHours` and `editorialSummary` are omitted in both cases, so
+    they are read as measured only when the mask asked for them; the caller
+    passes a payload fetched with PROFILE_FIELD_MASK, which did. `photos` and
+    `reviews` come back as lists, and an empty list is a genuine zero rather
+    than a silence.
+    """
+    def _asked(key: str) -> bool:
+        # A key present at all -- even empty -- means Places answered on it.
+        return key in payload
+
+    website = payload.get("websiteUri")
+    reviews = payload.get("reviews")
+    replied = None
+    if isinstance(reviews, list):
+        # Google nests the owner's response under the review it answers.
+        replied = sum(1 for r in reviews if isinstance(r, dict) and r.get("authorAttribution") and r.get("originalText") and r.get("reply"))
+        if not any(isinstance(r, dict) and "reply" in r for r in reviews):
+            # The field is not in this response shape at all, so "none replied"
+            # would be our omission wearing their name.
+            replied = None
+
+    photos = payload.get("photos")
+
+    return ProfileSnapshot(
+        place_id=str(place_id or payload.get("id") or ""),
+        listing_url=str(payload.get("googleMapsUri") or ""),
+        # "" means Places answered and the field was blank; None means it did
+        # not answer. Only the first is a claim.
+        website_uri=("" if _asked("websiteUri") and not website else website),
+        has_opening_hours=(
+            bool(payload.get("regularOpeningHours")) if _asked("regularOpeningHours") else None
+        ),
+        photo_count=(len(photos) if isinstance(photos, list) else None),
+        review_count=payload.get("userRatingCount"),
+        replied_review_count=replied,
+        has_description=(
+            bool(payload.get("editorialSummary")) if _asked("editorialSummary") else None
+        ),
+    )
+
+
 __all__ = [
     "MIN_PHOTOS",
     "MIN_REVIEWS_TO_JUDGE_REPLIES",
@@ -241,4 +290,5 @@ __all__ = [
     "PROFILE_CONFIDENCE",
     "ProfileSnapshot",
     "findings_from_profile",
+    "snapshot_from_places",
 ]

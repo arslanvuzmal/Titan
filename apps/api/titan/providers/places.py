@@ -74,6 +74,30 @@ DETAIL_FIELD_MASK = ",".join(
     )
 )
 
+#: The Business Profile fields, for reading a listing rather than a website.
+#:
+#: Separate from DETAIL_FIELD_MASK and never merged into it, because these are
+#: the expensive ones. `reviews` and `photos` move the request to the Enterprise
+#: SKU, so folding them into the mask every discovery run already uses would
+#: multiply the bill for a field most of those runs never read. Asked for only
+#: when a business is about to be judged on its listing -- which is the case
+#: where the listing is the only thing there is to judge.
+PROFILE_FIELD_MASK = ",".join(
+    (
+        "id",
+        "displayName",
+        "websiteUri",
+        "rating",
+        "userRatingCount",
+        "businessStatus",
+        "googleMapsUri",
+        "regularOpeningHours",
+        "photos",
+        "reviews",
+        "editorialSummary",
+    )
+)
+
 #: Places caps text search at 3 pages of 20.
 MAX_PAGES = 3
 PAGE_SIZE = 20
@@ -318,6 +342,23 @@ class GooglePlacesProvider:
     def _count(result: DiscoveryResult, reason: str) -> None:
         result.filtered_out[reason] = result.filtered_out.get(reason, 0) + 1
 
+    # -------------------------------------------------------------- profile
+    async def get_profile(self, place_id: str) -> dict[str, Any] | None:
+        """The Business Profile payload, verbatim.
+
+        Returns the raw response rather than a DiscoveredBusiness because
+        nothing here is about the business as a lead -- it is about what their
+        Google listing does and does not contain. The mapping into a claim
+        lives in titan.intelligence.profile_defects, which is also where the
+        rule about unreturned fields is enforced.
+
+        Billed at a higher SKU than the search or detail passes. See
+        PROFILE_FIELD_MASK.
+        """
+        if not place_id.strip():
+            raise ValueError("place_id must not be empty")
+        return await self._get(f"/places/{place_id}", PROFILE_FIELD_MASK)
+
     # -------------------------------------------------------------- details
     async def get_details(self, place_id: str) -> DiscoveredBusiness | None:
         """Fetch the richer field set for one place."""
@@ -449,6 +490,7 @@ class GooglePlacesProvider:
 
 __all__ = [
     "DETAIL_FIELD_MASK",
+    "PROFILE_FIELD_MASK",
     "SEARCH_FIELD_MASK",
     "DiscoveredBusiness",
     "DiscoveryQuery",
