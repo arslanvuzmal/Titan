@@ -417,6 +417,21 @@ def merge(profiles: Iterable[ModernisationProfile]) -> ModernisationProfile:
     six NOT_MEASURED pages yields NOT_MEASURED, which is the honest answer for a
     site that was obstructed throughout.
     """
+    # Materialised, and that is the whole of this line's job. The loop below
+    # walks `profiles` once per capability, so a generator -- which is exactly
+    # what activities/pipeline.py passes -- is exhausted by the first capability
+    # and every later one reads an empty list as NOT_MEASURED.
+    #
+    # It fails in the quietest possible way: CONVERSATIONAL, first in VENDORS,
+    # was measured correctly, so the profile looked populated. The other five
+    # came back NOT_MEASURED, `gap` needs MIN_MEASURED_CAPABILITIES of them and
+    # returned None, and `findings_from_gap` therefore produced nothing. Zero
+    # absence findings exist in the estate's entire history -- 22,000 pages
+    # crawled with the signals sitting in them, read once each.
+    #
+    # Measured on one real crawl: as a generator, 1 of 6 capabilities and
+    # gap=None. As a list, 6 of 6 and gap=0.92.
+    profiles = list(profiles)
     merged: dict[Capability, Signal] = {}
     for capability in VENDORS:
         seen = [p.signals.get(capability, Signal.NOT_MEASURED) for p in profiles]
