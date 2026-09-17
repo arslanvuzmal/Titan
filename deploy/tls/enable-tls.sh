@@ -108,7 +108,14 @@ set_env TITAN_PUBLIC_ORIGIN "https://$DOMAIN"
 # the certificate breaks, and a diagnostic page that renders but cannot call the
 # API is not much of a way back in.
 set_env TITAN_FRONTEND_URL "https://$DOMAIN"
-set_env TITAN_EXTRA_CORS_ORIGINS "http://$MY_IP"
+# A JSON array, not a bare URL. `extra_cors_origins` is `list[str]`, and
+# pydantic-settings parses a complex type from the environment as JSON -- a
+# bare value raises SettingsError, which is raised while *settings load*, so
+# every service that reads config dies at startup rather than at the point of
+# use. That is what took the stack down on the first run of this script: the
+# migrate one-shot exited 1, api could not start behind it, and the failure
+# looked like TLS because TLS was what had just changed.
+set_env TITAN_EXTRA_CORS_ORIGINS "[\"http://$MY_IP\"]"
 
 log "rebuilding the CRM bundle against https://$DOMAIN"
 build_web() {
@@ -138,7 +145,22 @@ rollback() {
 # `up -d` rather than a reload: the 443 port publish is a container property,
 # so nginx has to be recreated for it to exist at all. `web` takes the rebuilt
 # bundle and `api` takes the new CORS origins.
-"$COMPOSE" up -d web api nginx >/dev/null 2>&1 || { rollback; die "the stack would not come up with TLS"; }
+# Output kept, not discarded. The first failure of this script reported only
+# "the stack would not come up", while compose had said exactly what was wrong
+# -- `service "migrate" didn't complete successfully: exit 1` -- and swallowing
+# it turned a one-line diagnosis into an investigation.
+if ! "$COMPOSE" up -d web api nginx 2>&1 | tee /tmp/titan-tls-up.log; then
+    log "compose refused to bring the stack up; its output:"
+    sed 's/^/    /' /tmp/titan-tls-up.log | tail -15
+    rollback
+    die "the stack would not come up with TLS"
+fi
+if grep -q "didn't complete successfully\|Error response from daemon" /tmp/titan-tls-up.log; then
+    log "compose reported a failure while bringing the stack up:"
+    sed 's/^/    /' /tmp/titan-tls-up.log | tail -15
+    rollback
+    die "the stack would not come up with TLS"
+fi
 
 sleep 5
 if ! docker exec deploy-nginx-1 nginx -t >/dev/null 2>&1; then
