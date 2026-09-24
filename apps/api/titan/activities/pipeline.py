@@ -1263,6 +1263,17 @@ _SEVERITY_ORDER: dict[Severity, int] = {
 }
 
 
+#: The worst tier a message may still open with. Tier 0 is a live conversion
+#: defect and tier 1 is "there is no way to book or enquire at all"; both are
+#: things an owner recognises as costing them money. Tier 2 is everything a
+#: developer notices and a proprietor does not.
+#:
+#: Raising this to 2 restores the old behaviour, where any true statement was
+#: considered good enough to open with. It was not: 1,008 messages went out on
+#: that basis and not one produced a genuine reply.
+_WORTH_OPENING_WITH = 1
+
+
 def lead_rank(issue_type: str, page_url: str | None) -> int:
     """Which findings deserve to be the one thing a message says.
 
@@ -1564,6 +1575,33 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             draft_id="",
             validation_passed=False,
             violation_codes=("no_evidence_backed_claims",),
+        )
+
+    # The opener has to be worth opening.
+    #
+    # Sorting put the best available finding first. If that best one is still
+    # tier 2 -- alt text, a console error, a missing header, absent structured
+    # data -- then everything we have to say about this business is true,
+    # checkable, and of no interest to the person paying the bills. Measured
+    # across 1,008 delivered messages: not one genuine reply. The three
+    # commonest openers in the estate were missing alt attributes (1,471
+    # leads), absent security headers (1,654) and no structured data (1,543),
+    # against 498 leads where nobody can book at all.
+    #
+    # So this is a refusal, not a downgrade. A lead whose only defects are
+    # cosmetic is not a lead to write to worse -- it is a lead to leave alone
+    # until a conversion or automation finding exists for it, which the next
+    # research pass may well produce. Spending it on a weak opener burns the
+    # address, the sending reputation and the one chance to be read.
+    #
+    # Tier 0 is a live conversion defect: somebody tried to buy and could not.
+    # Tier 1 is no way to book or enquire at all -- the most legible thing this
+    # system can tell an owner. Either earns a message. Tier 2 alone does not.
+    if lead_rank(pitchable[0].issue_type, pitchable[0].page_url) > _WORTH_OPENING_WITH:
+        return DraftActivityResult(
+            draft_id="",
+            validation_passed=False,
+            violation_codes=("no_finding_worth_opening_with",),
         )
 
     # A follow-up leads with something the recipient has not been shown yet.
