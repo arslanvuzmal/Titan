@@ -238,6 +238,25 @@ services:
   browser-worker:
     image: ${TITAN_BROWSER_WORKER_IMAGE:?set TITAN_BROWSER_WORKER_IMAGE}
     restart: unless-stopped
+    # Docker's tini as PID 1, whose only job is to reap orphaned children.
+    #
+    # Without it `node` is PID 1. Chromium spawns child processes, and when
+    # their immediate parent exits the kernel re-parents them to PID 1 --
+    # which is supposed to wait() on them. node does not, because reaping
+    # strangers is an init's job and node is not an init. So every crawl left
+    # zombies behind: they hold a PID each and are never released.
+    #
+    # Measured on 24 September: 9,151 zombie headless_shell processes against
+    # a cgroup ceiling of 9,255. Every fork() in the container was returning
+    # EAGAIN, so no browser could launch, every crawl failed, every research
+    # run failed, no drafts were written, and sending fell from 100 a day to
+    # 2 and then 0 over the following two days. The container's own health
+    # check had been failing for 10,003 consecutive attempts, because `docker
+    # exec` needs to fork too.
+    #
+    # Restarting the container clears the zombies and hides this for about
+    # five days. This line is what stops it coming back.
+    init: true
     environment:
       BROWSER_WORKER_PORT: "8800"
       BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:?set TITAN_BROWSER_WORKER_TOKEN}
