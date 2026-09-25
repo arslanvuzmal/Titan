@@ -75,22 +75,35 @@ def test_the_offer_still_answers_the_finding_that_leads() -> None:
     assert "select_offers(org_industry, evidenced" not in src
 
 
-def test_the_gap_this_recovers_is_real() -> None:
-    """The automation findings with no offer, which used to sink the lead.
+def test_the_walk_is_still_needed_after_the_playbook_gaps_were_filled() -> None:
+    """Why this stays, now that the campaign industries are complete.
 
-    These are genuinely unanswerable by the current playbooks -- the fix is not
-    to invent an offer for them, it is to keep looking at the lead's other
-    evidence instead of discarding it.
+    The three industries carrying live campaigns can answer every automation
+    finding -- ``test_automation_offers.py`` asserts that outright. Thirteen
+    other playbooks still cannot, and the next detector added to the crawler
+    will land in the same position all four automation detectors did: present
+    in the evidence, absent from every playbook.
+
+    The walk is what stops that costing the lead. Filling a gap is the better
+    fix when the industry is one being sold into; not discarding the lead over
+    it is the fix that holds for the ones nobody has written yet.
     """
-    unanswerable = [
-        t
-        for t in ("no_conversational_capability", "no_follow_up_automation",
-                  "no_review_automation")
-        if not select_offers(Industry.DENTIST, {t})
+    gaps = [
+        (industry, issue_type)
+        for industry in Industry
+        for issue_type in (
+            "no_self_service_booking",
+            "no_conversational_capability",
+            "no_follow_up_automation",
+            "no_review_automation",
+        )
+        if not select_offers(industry, {issue_type})
     ]
-    assert unanswerable, "expected at least one tier-1 finding with no offer"
+    assert gaps, (
+        "if every playbook answered every finding the walk would be dead code "
+        "-- update this test rather than deleting it when that day comes"
+    )
 
-    # ...while the ones that carry the campaign are answerable, so a lead
-    # holding both now leads with the second rather than being thrown away.
-    assert select_offers(Industry.DENTIST, {"broken_internal_link"})
-    assert select_offers(Industry.DENTIST, {"high_friction_contact_form"})
+    # The campaign industries are not among them.
+    campaign = {Industry.DENTIST, Industry.MED_SPA, Industry.LAW_FIRM}
+    assert not (campaign & {industry for industry, _ in gaps})

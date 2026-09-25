@@ -265,15 +265,48 @@ LAW_FIRM = Playbook(
             "consultation_scheduling",
             "Consultation scheduling",
             "Self-service consultation booking with reminders",
-            frozenset({"no_booking_or_enquiry_path", "broken_primary_cta"}),
+            frozenset(
+                {
+                    "no_booking_or_enquiry_path",
+                    "broken_primary_cta",
+                    "no_self_service_booking",
+                }
+            ),
             2800,
         ),
         Offer(
             "missed_enquiry_followup",
             "Missed-enquiry follow-up",
             "Automatic follow-up when an enquiry goes unanswered",
-            frozenset({"no_booking_or_enquiry_path", "no_visible_phone_number"}),
+            frozenset(
+                {
+                    "no_booking_or_enquiry_path",
+                    "no_visible_phone_number",
+                    "no_follow_up_automation",
+                }
+            ),
             2200,
+        ),
+        # The four automation detectors were added to the crawler long after
+        # these playbooks were written, so nothing here answered them. A lead
+        # whose only openable findings were "no online booking", "no way to
+        # ask a question out of hours", "nothing follows up" and "nobody
+        # collects reviews" -- the exact work this business does -- was
+        # refused with no_offer_matching_the_evidence and thrown away.
+        # Measured 25 September: 23% of every research run in the estate.
+        Offer(
+            "out_of_hours_enquiries",
+            "Out-of-hours enquiry handling",
+            "An assistant that captures and qualifies enquiries outside office hours",
+            frozenset({"no_conversational_capability"}),
+            3200,
+        ),
+        Offer(
+            "review_collection",
+            "Review collection",
+            "Automatic review requests once a matter concludes",
+            frozenset({"no_review_automation"}),
+            1700,
         ),
         Offer(
             "website_conversion",
@@ -664,15 +697,42 @@ MED_SPA = Playbook(
             "calendar_automation",
             "Calendar automation",
             "Online consultation booking with availability",
-            frozenset({"no_booking_or_enquiry_path", "broken_primary_cta"}),
+            frozenset(
+                {
+                    "no_booking_or_enquiry_path",
+                    "broken_primary_cta",
+                    "no_self_service_booking",
+                }
+            ),
             2700,
         ),
         Offer(
             "consultation_reminders",
             "Consultation reminders",
             "Reminder sequence that reduces no-shows",
-            frozenset({"no_booking_or_enquiry_path"}),
+            frozenset({"no_booking_or_enquiry_path", "no_follow_up_automation"}),
             1700,
+        ),
+        # The four automation detectors were added to the crawler long after
+        # these playbooks were written, so nothing here answered them. A lead
+        # whose only openable findings were "no online booking", "no way to
+        # ask a question out of hours", "nothing follows up" and "nobody
+        # collects reviews" -- the exact work this business does -- was
+        # refused with no_offer_matching_the_evidence and thrown away.
+        # Measured 25 September: 23% of every research run in the estate.
+        Offer(
+            "out_of_hours_enquiries",
+            "Out-of-hours enquiry handling",
+            "An assistant that answers treatment questions when the clinic is closed",
+            frozenset({"no_conversational_capability"}),
+            3000,
+        ),
+        Offer(
+            "review_collection",
+            "Review collection",
+            "Automatic review requests after a treatment",
+            frozenset({"no_review_automation"}),
+            1600,
         ),
         Offer(
             "lead_nurturing",
@@ -747,15 +807,45 @@ DENTIST = Playbook(
             "booking_improvement",
             "Booking improvement",
             "Online appointment booking for new and existing patients",
-            frozenset({"no_booking_or_enquiry_path", "broken_primary_cta"}),
+            frozenset(
+                {
+                    "no_booking_or_enquiry_path",
+                    "broken_primary_cta",
+                    # The same fix, reached by a different detector: a practice
+                    # with no self-service booking and one whose booking path
+                    # is broken both end with a patient who cannot book.
+                    "no_self_service_booking",
+                }
+            ),
             2600,
         ),
         Offer(
             "recall_automation",
             "Recall automation",
             "Automatic check-up recall sequence",
-            frozenset({"no_booking_or_enquiry_path"}),
+            frozenset({"no_booking_or_enquiry_path", "no_follow_up_automation"}),
             2200,
+        ),
+        # The four automation detectors were added to the crawler long after
+        # these playbooks were written, so nothing here answered them. A lead
+        # whose only openable findings were "no online booking", "no way to
+        # ask a question out of hours", "nothing follows up" and "nobody
+        # collects reviews" -- the exact work this business does -- was
+        # refused with no_offer_matching_the_evidence and thrown away.
+        # Measured 25 September: 23% of every research run in the estate.
+        Offer(
+            "out_of_hours_enquiries",
+            "Out-of-hours enquiry handling",
+            "An assistant that answers and captures enquiries when reception is closed",
+            frozenset({"no_conversational_capability"}),
+            3000,
+        ),
+        Offer(
+            "review_collection",
+            "Review collection",
+            "Automatic review requests after an appointment",
+            frozenset({"no_review_automation"}),
+            1600,
         ),
         Offer(
             "patient_reactivation",
