@@ -113,6 +113,20 @@ services:
     # fails to authenticate -- on a host nobody is watching.
     volumes:
       - ../secrets:/run/secrets:ro
+      # The one-page brief attached to every message.
+      #
+      # `.env` has pointed TITAN_ONE_PAGER_ATTACHMENT_PATH at
+      # /run/one-pager/one-pager.pdf since the migration to this host, and the
+      # directory was never mounted -- so `with_one_pager` read a path that did
+      # not exist, failed open exactly as designed, and every message went
+      # without the attachment.
+      #
+      # Failing open is the right behaviour: a brief is not worth failing a
+      # send over, and the sentence announcing it is written by the same
+      # function that attaches the file, so no message ever claimed an
+      # attachment it did not carry. What it cost was silence -- one warning
+      # line per send, in a log nobody reads, for nine days.
+      - ../docs/one-pager:/run/one-pager:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
