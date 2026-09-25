@@ -1694,33 +1694,6 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             violation_codes=("no_evidence_backed_claims",),
         )
 
-    # The opener has to be worth opening.
-    #
-    # Sorting put the best available finding first. If that best one is still
-    # tier 2 -- alt text, a console error, a missing header, absent structured
-    # data -- then everything we have to say about this business is true,
-    # checkable, and of no interest to the person paying the bills. Measured
-    # across 1,008 delivered messages: not one genuine reply. The three
-    # commonest openers in the estate were missing alt attributes (1,471
-    # leads), absent security headers (1,654) and no structured data (1,543),
-    # against 498 leads where nobody can book at all.
-    #
-    # So this is a refusal, not a downgrade. A lead whose only defects are
-    # cosmetic is not a lead to write to worse -- it is a lead to leave alone
-    # until a conversion or automation finding exists for it, which the next
-    # research pass may well produce. Spending it on a weak opener burns the
-    # address, the sending reputation and the one chance to be read.
-    #
-    # Tier 0 is a live conversion defect: somebody tried to buy and could not.
-    # Tier 1 is no way to book or enquire at all -- the most legible thing this
-    # system can tell an owner. Either earns a message. Tier 2 alone does not.
-    if lead_rank(pitchable[0].issue_type, pitchable[0].page_url) > _WORTH_OPENING_WITH:
-        return DraftActivityResult(
-            draft_id="",
-            validation_passed=False,
-            violation_codes=("no_finding_worth_opening_with",),
-        )
-
     # A follow-up leads with something the recipient has not been shown yet.
     # Mission section 13: each step must contribute new evidence rather than
     # restating the first message, and the cheapest way to violate that is to
@@ -1745,29 +1718,57 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             )
         pitchable = unused
 
-    headline = pitchable[0]
-    # From the headline finding alone, never from the set.
+    # Which finding leads, and which offer answers it, are one decision.
     #
-    # Passing every pitchable issue type here is how a message that opened with
-    # a broken navigation link closed by offering "follow-up for enquiries that
-    # do not book immediately" -- an offer some *other* finding on the same site
-    # justified, attached to a paragraph that had nothing to do with it. The
-    # rule is that the evidence hook and the offer are the same subject.
-    offers = select_offers(org_industry, {headline.issue_type})
-    if not offers:
-        # No draft rather than a mismatched one. This used to fall back to a
-        # generic offer, so a lead whose evidence matched nothing in its
-        # industry's playbook was told "I build enquiry capture and follow-up
-        # automation" directly after being shown a broken booking button -- a
-        # capability claim unrelated to the evidence beside it, which is the
-        # kind of small wrong that reads as a template.
-        #
-        # ``select_offers`` already documents an empty result as "there is
-        # nothing truthful to offer". Refusing here is agreeing with it.
+    # Two constraints, both of which must hold for the same finding:
+    #
+    # 1. The opener has to be worth opening. Tier 0 is a live conversion defect
+    #    -- somebody tried to buy and could not. Tier 1 is no way to book or
+    #    enquire at all, the most legible thing this system can tell an owner.
+    #    Tier 2 is alt text, console errors, headers, structured data: true,
+    #    checkable, and of no interest to whoever pays the bills. Measured over
+    #    1,008 delivered messages led by tier 2: not one genuine reply.
+    #
+    # 2. This industry's playbook has to contain an offer answering that same
+    #    finding. An offer answering a *different* one is how a message opened
+    #    with a broken navigation link and closed by offering "follow-up for
+    #    enquiries that do not book immediately" -- a capability claim
+    #    unrelated to the evidence beside it, which is the kind of small wrong
+    #    that reads as a template.
+    #
+    # Testing only the first candidate and refusing on a miss threw the lead
+    # away over its best finding: 23% of all research runs ended
+    # `no_offer_matching_the_evidence` with a perfectly answerable second
+    # finding sitting unexamined underneath. Walking the ranked list keeps both
+    # rules exactly as they were -- what leads is still the highest-ranked
+    # finding that can actually be answered -- without discarding the lead for
+    # the first miss.
+    headline = None
+    offers: list = []
+    considered = 0
+    for candidate in pitchable:
+        if lead_rank(candidate.issue_type, candidate.page_url) > _WORTH_OPENING_WITH:
+            # The list is rank-sorted, so everything below here is tier 2 too.
+            break
+        considered += 1
+        matching = select_offers(org_industry, {candidate.issue_type})
+        if matching:
+            headline = candidate
+            offers = matching
+            break
+
+    if headline is None:
+        # The two refusals are acted on differently, so they stay distinct:
+        # nothing worth opening with means wait for the next research pass,
+        # while evidence nothing can answer means the playbook has a gap.
         return DraftActivityResult(
             draft_id="",
             validation_passed=False,
-            violation_codes=("no_offer_matching_the_evidence",),
+            violation_codes=(
+                ("no_offer_matching_the_evidence",)
+                if considered
+                else ("no_finding_worth_opening_with",)
+            ),
         )
     offer = offers[0]
 
