@@ -1310,20 +1310,43 @@ _VERIFY_BUDGET_SECONDS = 20.0
 #:
 #: A blocked port is not a transient fault: it will still be blocked for the
 #: next lead. Without this, every lead pays the budget above to learn the same
-#: thing. Reset by any verification that completes, so opening the port
-#: restores probing without a deploy.
+#: thing.
 _VERIFY_TIMEOUTS_BEFORE_GIVING_UP = 3
 
+#: How long the breaker stays open before one lead is allowed to try again.
+#:
+#: It has to reopen on a timer, not on a success. The first version of this
+#: reset only when a verification completed -- which it never could, because
+#: once the breaker was open nothing asked again. It would have stayed shut
+#: until the worker restarted, so the hour outbound port 25 was unblocked would
+#: have passed unnoticed and every address would still have fallen back to
+#: provenance. A breaker that cannot observe the recovery it is waiting for is
+#: not a breaker, it is an outage with a comment claiming otherwise.
+#:
+#: Ten minutes costs one lead the budget above per interval and is the whole
+#: mechanism by which opening the port restores probing with no deploy.
+_VERIFY_RETRY_AFTER = dt.timedelta(minutes=10)
+
 _verify_timeouts = 0
+_verify_opened_at: dt.datetime | None = None
 
 
 def _verification_is_unreachable() -> bool:
-    return _verify_timeouts >= _VERIFY_TIMEOUTS_BEFORE_GIVING_UP
+    """True while the breaker is open and the retry interval has not elapsed."""
+    if _verify_timeouts < _VERIFY_TIMEOUTS_BEFORE_GIVING_UP:
+        return False
+    if _verify_opened_at is None:
+        return True
+    return dt.datetime.now(dt.UTC) - _verify_opened_at < _VERIFY_RETRY_AFTER
 
 
 def _record_verification_timeout() -> None:
-    global _verify_timeouts
+    global _verify_timeouts, _verify_opened_at
     _verify_timeouts += 1
+    # Stamped on every timeout, including the probe that reopened the breaker:
+    # a retry that also times out must start the interval again rather than
+    # leave it expired and let every subsequent lead pay the budget.
+    _verify_opened_at = dt.datetime.now(dt.UTC)
     if _verify_timeouts == _VERIFY_TIMEOUTS_BEFORE_GIVING_UP:
         # Said once, loudly. The quiet version of this cost four days of
         # sending before anybody asked why the number was three.
@@ -1336,10 +1359,14 @@ def _record_verification_timeout() -> None:
 
 
 def _record_verification_reached() -> None:
-    global _verify_timeouts
+    global _verify_timeouts, _verify_opened_at
     if _verify_timeouts:
-        logger.info("mailbox verification reachable again")
+        logger.info(
+            "mailbox verification is reachable again; resuming probing",
+            extra={"after_timeouts": _verify_timeouts},
+        )
     _verify_timeouts = 0
+    _verify_opened_at = None
 
 
 #: The worst tier a message may still open with. Tier 0 is a live conversion
