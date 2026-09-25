@@ -264,6 +264,11 @@ async def test_full_research_run_queues_a_message(env) -> None:
         "generate_draft",
         "requires_human_approval",
         "queue_message",
+        # The success path closes its own run. It never used to: analyse_evidence
+        # stamped the run "completed" three activities earlier, which also meant
+        # close_research_run declined to write the real outcome on every failing
+        # path. See test_every_terminal_outcome_is_recorded below.
+        "close_research_run",
     ]
 
 
@@ -665,14 +670,29 @@ async def test_a_crawl_that_never_succeeds_closes_the_run(env) -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_happy_path_does_not_double_close(env) -> None:
-    """``analyse_evidence`` already wrote 'completed'. A second terminal write
-    here would overwrite the outcome that actually reached the end."""
+async def test_the_happy_path_closes_its_run_exactly_once(env) -> None:
+    """Corrected 25 September, along with the behaviour it described.
+
+    This used to assert the happy path closed nothing, reasoning that
+    ``analyse_evidence`` had already written 'completed' and a second terminal
+    write would overwrite the real outcome.
+
+    Both halves were wrong. ``close_research_run`` only writes to a run still
+    marked "running", so it could never overwrite anything -- and the early
+    stamp was not harmless bookkeeping, it was the thing *discarding* the real
+    outcome on every failing path, because those paths closed a run that was no
+    longer "running". Nothing had ever recorded below_threshold,
+    no_eligible_contact or draft_rejected.
+
+    Analysis now writes counters only, so the success path has to close its own
+    run like every other exit -- once.
+    """
     recorder = Recorder()
     result, _ = await run_workflow(env, recorder, make_input())
 
     assert result.outcome == ResearchOutcome.COMPLETED.value
-    assert recorder.closures == []
+    assert len(recorder.closures) == 1
+    assert recorder.closures[0][1] == ResearchOutcome.COMPLETED.value
 
 
 @pytest.mark.asyncio
@@ -781,3 +801,96 @@ async def test_findings_counted_but_not_yet_sayable_do_not_produce_a_draft(
 
     assert result.outcome == ResearchOutcome.NO_EVIDENCE.value
     assert "generate_draft" not in recorder.calls
+
+
+# ==========================================================================
+# Every way a run can end must be recorded as the way it ended
+# ==========================================================================
+#
+# `analyse_evidence` used to write status="completed" on the run row three
+# activities before the workflow reached its verdict, and `close_research_run`
+# declines to overwrite a run that is no longer "running". So the outcome the
+# workflow actually reached was thrown away.
+#
+# Measured on the live estate: `below_threshold`, `no_eligible_contact` and
+# `draft_rejected` had never once been written, on any run, ever. Every run
+# that died at scoring, at contact resolution or at drafting was recorded as a
+# success with no failure reason -- so the system reported eighty completed
+# research runs an hour while producing no drafts, and nothing disagreed.
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_stops_at_scoring_is_recorded_as_below_threshold(env) -> None:
+    recorder = Recorder()
+    recorder.score = ScoreActivityResult(
+        total=12, band="cold", threshold=55, passed_threshold=False
+    )
+
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.BELOW_THRESHOLD.value
+    assert "close_research_run" in recorder.calls
+    assert recorder.closures[-1][1] == ResearchOutcome.BELOW_THRESHOLD.value
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_no_reachable_contact_says_so(env) -> None:
+    recorder = Recorder()
+    recorder.contact = ContactActivityResult(
+        eligible_channel_id=None,
+        rejected_reasons=("no email address published on the crawled pages",),
+    )
+
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.NO_ELIGIBLE_CONTACT.value
+    assert recorder.closures[-1][1] == ResearchOutcome.NO_ELIGIBLE_CONTACT.value
+
+
+@pytest.mark.asyncio
+async def test_a_refused_draft_is_recorded_as_a_refused_draft(env) -> None:
+    recorder = Recorder()
+    recorder.draft = DraftActivityResult(
+        draft_id="",
+        validation_passed=False,
+        violation_codes=("no_offer_matching_the_evidence",),
+    )
+
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.DRAFT_REJECTED.value
+    assert recorder.closures[-1][1] == ResearchOutcome.DRAFT_REJECTED.value
+    assert "no_offer_matching_the_evidence" in (result.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_a_successful_run_is_also_recorded(env) -> None:
+    """The path that never closed its run at all."""
+    recorder = Recorder()
+
+    result, _ = await run_workflow(env, recorder, make_input())
+
+    assert result.outcome == ResearchOutcome.COMPLETED.value
+    assert recorder.closures[-1][1] == ResearchOutcome.COMPLETED.value
+
+
+def test_analysis_does_not_close_the_run() -> None:
+    """Structural: the premature stamp must not come back.
+
+    Checked against the source because the behaviour it guards only shows up
+    three activities later, in a table, on a path this test cannot reach
+    without a database.
+    """
+    import inspect
+
+    from titan.activities import pipeline
+
+    src = inspect.getsource(pipeline.analyse_evidence)
+    # Scoped to the ResearchRun write. The CrawlRun row in the same function
+    # legitimately completes here -- the crawl really has finished.
+    research_run_write = src.split("ResearchRun.__table__.update()")[1][:600]
+    assert 'status="completed"' not in research_run_write, (
+        "analyse_evidence must not close the run: it runs before scoring, "
+        "contact resolution and drafting, and closing here discards whichever "
+        "outcome the workflow actually reaches"
+    )

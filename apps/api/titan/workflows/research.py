@@ -562,6 +562,21 @@ class LeadResearchWorkflow:
             "message.queued",
             {"outbox_id": queued.outbox_id or ""},
         )
+        # Every other exit closes the run through _finish; this one returns
+        # directly and never did, because `analyse_evidence` used to stamp the
+        # run "completed" long before the workflow got here. That stamp is gone
+        # -- it was overwriting the real outcome on every failing path -- so
+        # the success path has to record its own, like the rest.
+        #
+        # Behind a patch: runs already in flight did not schedule this activity
+        # and must not start expecting it on replay.
+        if workflow.patched("close-run-on-success"):
+            await self._close_run(
+                request,
+                research_run_id,
+                ResearchOutcome.COMPLETED,
+                f"queued {queued.outbox_id or ''}".strip(),
+            )
         return ResearchLeadResult(
             outcome=ResearchOutcome.COMPLETED.value,
             lead_id=request.lead_id,

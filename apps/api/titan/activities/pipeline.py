@@ -450,23 +450,34 @@ async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResu
             if finding.is_pitchable():
                 pitchable += 1
 
-        # Close the run, not just its counters. Without the status write every
-        # research run stayed 'running' for ever -- 1,071 of them, 873 older
-        # than six hours, none ever marked completed. A run row that never
-        # closes cannot be retried, cannot be swept, and cannot be counted, so
-        # every rate derived from research was measuring an empty set.
+        # Counters only. The run is *not* closed here, and that is the whole
+        # point of this shape.
         #
-        # This sits inside the unit of work with _persist_opportunities below,
-        # so a failure there rolls the completion back and the run correctly
-        # stays open.
+        # It used to write status="completed" and finished_at at this line,
+        # which is three activities before the workflow reaches its verdict.
+        # ``close_research_run`` then declines to overwrite a run that is no
+        # longer "running", so the outcome the workflow actually reached was
+        # discarded: below_threshold, no_eligible_contact and draft_rejected
+        # had never once been written to this table, on any run, ever.
+        #
+        # What that cost is the reason for the change. Every run that died at
+        # scoring, at contact resolution or at drafting was recorded as a
+        # success with no failure reason, so the estate reported eighty
+        # completed research runs an hour while producing no drafts at all and
+        # nothing anywhere disagreed. Four days of near-zero sending were
+        # invisible in the one table built to explain it.
+        #
+        # A run left open by a workflow that dies is swept by
+        # ``intelligence.stale_runs``, which is what that module is for. "Still
+        # running" is also the truthful state for a run whose outcome nobody
+        # recorded -- unlike "completed", which was a claim the data could not
+        # support.
         await session.execute(
             ResearchRun.__table__.update()  # type: ignore[attr-defined]
             .where(ResearchRun.id == uuid.UUID(request.research_run_id))
             .values(
                 findings_count=created,
                 pages_crawled=len(evidence),
-                status="completed",
-                finished_at=_now(),
             )
         )
 

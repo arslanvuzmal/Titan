@@ -44,17 +44,40 @@ def test_researching_is_not_a_status_the_orchestrator_returns_to() -> None:
     )
 
 
-def test_the_terminal_activity_now_closes_the_run() -> None:
-    """Planted violation: revert the status write in ``analyse_evidence`` and
-    this fails. Counters alone left every run open for ever."""
+def test_analysis_records_counters_without_closing_the_run() -> None:
+    """The guard this replaces, and why it moved. Corrected 25 September.
+
+    It used to assert that ``analyse_evidence`` writes status="completed" and
+    finished_at, planted when runs were staying open for ever -- 1,071 of them,
+    none closed.
+
+    That write fixed the open runs and created a worse problem in their place.
+    Analysis runs three activities before the workflow reaches a verdict, and
+    ``close_research_run`` declines to write to a run that is no longer
+    "running" -- so the outcome the workflow actually reached was discarded.
+    Measured on the live estate: below_threshold, no_eligible_contact and
+    draft_rejected had never been written on any run, ever. Every run that died
+    at scoring, at contact resolution or at drafting was filed as a success
+    with no failure reason, and eighty "completed" research runs an hour
+    produced no drafts with nothing anywhere disagreeing.
+
+    The run is still always closed -- by the workflow, on every terminal path
+    including success, which ``tests/workflows/test_research_workflow.py``
+    asserts outcome by outcome. A run whose workflow dies before that is left
+    open for this module to sweep, which is the honest state and the reason
+    this module exists.
+    """
     import inspect
 
     from titan.activities import pipeline
 
     source = inspect.getsource(pipeline.analyse_evidence)
+    research_run_write = source.split("ResearchRun.__table__.update()")[1][:600]
 
-    assert 'status="completed"' in source
-    assert "finished_at=" in source
+    assert "findings_count=" in research_run_write
+    assert "pages_crawled=" in research_run_write
+    assert 'status="completed"' not in research_run_write
+    assert "finished_at=" not in research_run_write
 
 
 # ------------------------------------------------------------ what it presumes
