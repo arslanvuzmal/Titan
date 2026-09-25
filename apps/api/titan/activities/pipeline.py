@@ -1193,8 +1193,27 @@ async def _assess_bounce_risk(
         return risk
 
     verifier = build_verifier(get_settings().mailbox_verifier)
+
+    if _verification_is_unreachable():
+        # Already established that this host cannot reach a mail server. Asking
+        # again costs the budget below per candidate and learns nothing.
+        return risk
+
     try:
-        result: VerificationResult = await verifier.verify(candidate.normalized)
+        result: VerificationResult = await asyncio.wait_for(
+            verifier.verify(candidate.normalized), timeout=_VERIFY_BUDGET_SECONDS
+        )
+    except TimeoutError:
+        # Not an outage at their end -- a fact about ours. See the note on
+        # _VERIFY_BUDGET_SECONDS: the probe dials port 25, and a host whose
+        # provider drops those packets waits the full socket timeout for every
+        # candidate and every MX host until the activity itself is killed.
+        _record_verification_timeout()
+        logger.warning(
+            "mailbox verification timed out; proceeding on local signals",
+            extra={"verifier": verifier.name, "budget_s": _VERIFY_BUDGET_SECONDS},
+        )
+        return risk
     except Exception as exc:
         # A verification outage must not discard a lead whose address is
         # probably fine. The local layers already ran; their answer stands.
@@ -1203,6 +1222,8 @@ async def _assess_bounce_risk(
             extra={"error_code": type(exc).__name__, "verifier": verifier.name},
         )
         return risk
+
+    _record_verification_reached()
 
     if not result.is_conclusive:
         return risk
@@ -1261,6 +1282,64 @@ _SEVERITY_ORDER: dict[Severity, int] = {
     Severity.MEDIUM: 2,
     Severity.LOW: 3,
 }
+
+
+#: How long all mailbox verification for one candidate may take.
+#:
+#: `resolve_contact` is given 60 seconds by the workflow. The SMTP verifier
+#: dials port 25, and outbound 25 is blocked by most cloud providers -- Hetzner
+#: included, on the host this runs on. A blocked port does not refuse, it
+#: silently drops, so every probe waits its full socket timeout, once per MX
+#: host and once per candidate address. Three candidates with two MX hosts each
+#: is 72 seconds of waiting inside a 60-second activity.
+#:
+#: What happened then is worth naming, because it is why this is a budget and
+#: not a bigger timeout: Temporal cancelled the activity, and
+#: `asyncio.CancelledError` is a BaseException, so the `except Exception`
+#: below never saw it. The failure went past every local handler, failed the
+#: research run, and produced no draft. 109 runs died that way in six hours
+#: while every container reported itself healthy, and sending fell to three
+#: messages a day.
+#:
+#: The budget is well under the activity's own so a slow verifier degrades to
+#: "unknown" -- which the local provenance layers already handle -- instead of
+#: taking the whole run down with it.
+_VERIFY_BUDGET_SECONDS = 20.0
+
+#: Consecutive verification timeouts before this process stops asking.
+#:
+#: A blocked port is not a transient fault: it will still be blocked for the
+#: next lead. Without this, every lead pays the budget above to learn the same
+#: thing. Reset by any verification that completes, so opening the port
+#: restores probing without a deploy.
+_VERIFY_TIMEOUTS_BEFORE_GIVING_UP = 3
+
+_verify_timeouts = 0
+
+
+def _verification_is_unreachable() -> bool:
+    return _verify_timeouts >= _VERIFY_TIMEOUTS_BEFORE_GIVING_UP
+
+
+def _record_verification_timeout() -> None:
+    global _verify_timeouts
+    _verify_timeouts += 1
+    if _verify_timeouts == _VERIFY_TIMEOUTS_BEFORE_GIVING_UP:
+        # Said once, loudly. The quiet version of this cost four days of
+        # sending before anybody asked why the number was three.
+        logger.error(
+            "mailbox verification is unreachable from this host; "
+            "falling back to provenance for every address until one succeeds. "
+            "Outbound port 25 is the usual cause.",
+            extra={"consecutive_timeouts": _verify_timeouts},
+        )
+
+
+def _record_verification_reached() -> None:
+    global _verify_timeouts
+    if _verify_timeouts:
+        logger.info("mailbox verification reachable again")
+    _verify_timeouts = 0
 
 
 #: The worst tier a message may still open with. Tier 0 is a live conversion
