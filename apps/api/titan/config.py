@@ -97,6 +97,15 @@ class Settings(BaseSettings):
     #: email, models, or the database (threat model: browser escape).
     browser_worker_url: AnyHttpUrl = AnyHttpUrl("http://localhost:8800")
     browser_worker_token: SecretStr | None = None
+
+    #: Shared secret the voice agent presents when it calls the calling API.
+    #:
+    #: A bearer token rather than a user session because the caller is a
+    #: runtime, not a person: there is nobody to log in, nothing to refresh and
+    #: no prompt to answer mid-call. Unset means the calling API refuses every
+    #: request, which is the right default for an endpoint that hands out
+    #: phone numbers and the sentence to say to them.
+    call_agent_token: SecretStr | None = None
     #: How many crawls the browser worker will serve at once. Must match the
     #: worker's own ``BROWSER_WORKER_CONCURRENCY``: this side uses it to stop
     #: sending more crawls than there are lanes to run them, and a number
