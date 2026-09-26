@@ -70,6 +70,7 @@ from titan.db.models import (
     Lead,
     Message,
     Organization,
+    ResearchRun,
     SenderHealthSnapshot,
     SenderIdentity,
     Workspace,
@@ -116,6 +117,27 @@ RESEARCHABLE_STATUSES = (
 #: this it loses every comparison for ever, which is exactly what happened
 #: between 5 August and 17 September.
 UNMEASURED_PATIENCE = dt.timedelta(days=7)
+
+#: How long a lead rests after being researched before it may be planned again.
+#:
+#: Nothing enforced this, and the ordering below is deterministic: highest
+#: score first, then oldest. A high-scoring lead whose site publishes no
+#: address is researched, ends `no_eligible_contact`, is set back to RESEARCHED
+#: -- which is a RESEARCHABLE_STATUS -- and sorts straight back to the top of
+#: the next cycle. It cannot escape, and nothing else can get past it.
+#:
+#: Measured on 26 September: **1,978 research runs in 24 hours across 136
+#: distinct leads**, each one worked 19 to 24 times in a day, 48 of the last 53
+#: runs on leads that have never had an address. The entire research budget of
+#: the estate was being spent re-reading the same few dozen websites, which is
+#: why a day's sending was 24 messages rather than the hundred it is allowed.
+#:
+#: Twenty hours rather than twenty-four: a daily rhythm that drifts later each
+#: day eventually falls outside the send window, and a lead should not lose its
+#: turn because yesterday's cycle ran slightly late. It does not interfere with
+#: re-measurement, which happens at 21 days through the staleness sweep and is
+#: about evidence ageing rather than about leads being re-picked within a day.
+RESEARCH_COOLDOWN = dt.timedelta(hours=20)
 
 #: Sends already made today count against the budget even if they failed, since
 #: an attempt consumed the quota that the outbox worker reserved.
@@ -498,6 +520,16 @@ async def _select_leads(
             Lead.status.in_(RESEARCHABLE_STATUSES),
             Lead.replied_at.is_(None),
             Lead.last_contacted_at.is_(None),
+            # Rested since its last run. See RESEARCH_COOLDOWN: without this
+            # the same lead is re-planned every cycle for ever, because the
+            # ordering is deterministic and finishing a run does not change
+            # anything the ordering reads.
+            ~select(ResearchRun.id)
+            .where(
+                ResearchRun.lead_id == Lead.id,
+                ResearchRun.started_at > _now() - RESEARCH_COOLDOWN,
+            )
+            .exists(),
         )
     )
 
