@@ -252,6 +252,25 @@ services:
   browser-worker:
     image: ${TITAN_BROWSER_WORKER_IMAGE:?set TITAN_BROWSER_WORKER_IMAGE}
     restart: unless-stopped
+    # Stated here rather than left to the default, because it has a partner.
+    #
+    # The API client keeps its own semaphore of
+    # TITAN_BROWSER_WORKER_CONCURRENCY lanes and will happily dispatch that
+    # many crawls at once. This worker refuses anything past its own limit with
+    # a 503. The client's default was 4 and this worker's was 2, neither set
+    # anywhere, so two of every four concurrent crawls were refused by design
+    # -- config.py's own comment calls a mismatch here "asking for 503s on
+    # purpose", and that is what was happening.
+    #
+    # It stayed invisible while sixty campaigns split the daily budget and
+    # nothing ran concurrently enough to reach the ceiling. Narrowing to one
+    # niche raised the concurrency and turned it into 28 failed crawls in 15
+    # minutes.
+    #
+    # Two is the number that matters, not four: the pipeline already produces
+    # around 430 drafts a day against a 100-a-day send cap, so crawl capacity
+    # is nowhere near the binding constraint and the cheaper fix is to stop
+    # dispatching work that will be refused.
     # Docker's tini as PID 1, whose only job is to reap orphaned children.
     #
     # Without it `node` is PID 1. Chromium spawns child processes, and when
@@ -272,6 +291,7 @@ services:
     # five days. This line is what stops it coming back.
     init: true
     environment:
+      BROWSER_WORKER_CONCURRENCY: "2"
       BROWSER_WORKER_PORT: "8800"
       BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:?set TITAN_BROWSER_WORKER_TOKEN}
     expose: ["8800"]
