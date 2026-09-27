@@ -176,7 +176,13 @@ SELECT l.id::text AS lead_id, o.display_name AS practice, o.phone_e164 AS phone,
    AND l.replied_at IS NULL
    AND NOT EXISTS (SELECT 1 FROM call_suppressions s
                     WHERE s.workspace_id = l.workspace_id
-                      AND s.phone_e164 = o.phone_e164)
+                      -- Matched on the significant digits, not the string. A
+                      -- suppression is written with whatever the dialler passed,
+                      -- and a dialler passes E.164; the organisation is stored
+                      -- in national form. `=` compares +441611234567 against
+                      -- 01611234567 and finds nothing, so the one instruction
+                      -- that must take effect before the next dial would not.
+                      AND right(regexp_replace(s.phone_e164, '[^0-9]', '', 'g'), 9) = right(regexp_replace(o.phone_e164, '[^0-9]', '', 'g'), 9))
    AND NOT EXISTS (SELECT 1 FROM call_outcomes co
                     WHERE co.lead_id = l.id AND co.stage = 1)
    {extra}
