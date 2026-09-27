@@ -67,10 +67,14 @@ class ErasureReport:
     #: everyone" are different policies, and the difference should be visible
     #: in the numbers rather than only in the code.
     kept_for_reply: int = 0
+    #: Inbound messages that matched no send of ours, emptied of their text.
+    #: Counted separately because it is not erasure of a business's data at
+    #: all -- it is declining to hoard somebody else's mail.
+    foreign_erased: int = 0
 
     @property
     def erased_anything(self) -> bool:
-        return bool(self.drafts_erased or self.pages_erased)
+        return bool(self.drafts_erased or self.pages_erased or self.foreign_erased)
 
 
 #: Leads whose last message is older than the window and who never replied.
@@ -156,6 +160,50 @@ _STAMP = text(
     """
 )
 
+#: How long the text of somebody else's mail is kept.
+#:
+#: Shorter than :data:`RETENTION_DAYS` because the justification is weaker.
+#: Thirty days for a business we wrote to buys the follow-up sequence time to
+#: finish. Mail that matched no send of ours has no sequence and no
+#: relationship: it is backscatter from a forged envelope sender, and the only
+#: reasons to hold it at all are to recognise a redelivery and to count the
+#: trend. A week is long enough to look into something classified foreign by
+#: mistake, which is the one use a person has for the body.
+FOREIGN_RETENTION_DAYS = 7
+
+#: The text of mail that was never ours.
+#:
+#: The row survives, and that is not tidiness. ``provider_inbound_id`` is how
+#: ``ingest_inbound`` recognises a message it has already seen, so deleting the
+#: row would let the same backscatter be re-ingested on the next folder re-read,
+#: reclassified and recounted. The row is also the count: the weekly report now
+#: names foreign mail on its own line, and the trend -- 4 a week in August, 146
+#: by late September -- is the evidence that something is forging this domain
+#: harder. Deleting rows would erase the measurement along with the mail.
+#:
+#: So: content goes, identity and the fact of arrival stay. The same shape as
+#: the rest of this module.
+#:
+#: Bounded by a subquery because PostgreSQL has no ``UPDATE ... LIMIT``, and
+#: guarded on being non-empty so a second pass reports zero instead of redoing
+#: the work.
+_ERASE_FOREIGN = text(
+    """
+    UPDATE inbound_messages
+       SET body_text = NULL, raw_payload = '{}'::jsonb
+     WHERE id IN (
+           SELECT id
+             FROM inbound_messages
+            WHERE workspace_id = :ws
+              AND lead_id IS NULL
+              AND received_at < :foreign_cutoff
+              AND (body_text IS NOT NULL OR raw_payload <> '{}'::jsonb)
+            ORDER BY received_at
+            LIMIT :limit
+     )
+    """
+)
+
 
 async def erase_expired(
     session: AsyncSession,
@@ -164,6 +212,7 @@ async def erase_expired(
     now: dt.datetime,
     limit: int = DEFAULT_BATCH,
     retention_days: int = RETENTION_DAYS,
+    foreign_retention_days: int = FOREIGN_RETENTION_DAYS,
 ) -> ErasureReport:
     """Erase the content held about businesses that never replied.
 
@@ -174,19 +223,40 @@ async def erase_expired(
     cutoff = now - dt.timedelta(days=retention_days)
     params = {"ws": workspace_id, "cutoff": cutoff, "limit": limit}
 
+    # Runs whether or not any lead is due. Foreign mail arrives on its own
+    # schedule -- it has nothing to do with who we wrote to or when -- so
+    # hanging it off the lead pass would mean a quiet fortnight for outreach
+    # let a fortnight of backscatter accumulate untouched.
+    foreign = (
+        await session.execute(
+            _ERASE_FOREIGN,
+            {
+                "ws": workspace_id,
+                "foreign_cutoff": now - dt.timedelta(days=foreign_retention_days),
+                "limit": limit,
+            },
+        )
+    ).rowcount or 0
+
     leads = [row[0] for row in (await session.execute(_DUE, params)).all()]
     kept = int(
         await session.scalar(_COUNT_REPLIED, {"ws": workspace_id, "cutoff": cutoff}) or 0
     )
     if not leads:
-        return ErasureReport(0, 0, 0, kept)
+        return ErasureReport(0, 0, 0, kept, int(foreign))
 
     scoped = {"ws": workspace_id, "leads": leads}
     drafts = (await session.execute(_ERASE_DRAFTS, scoped)).rowcount or 0
     pages = (await session.execute(_ERASE_PAGES, scoped)).rowcount or 0
     await session.execute(_STAMP, {**scoped, "until": now})
 
-    return ErasureReport(len(leads), int(drafts), int(pages), kept)
+    return ErasureReport(len(leads), int(drafts), int(pages), kept, int(foreign))
 
 
-__all__ = ["DEFAULT_BATCH", "RETENTION_DAYS", "ErasureReport", "erase_expired"]
+__all__ = [
+    "DEFAULT_BATCH",
+    "FOREIGN_RETENTION_DAYS",
+    "RETENTION_DAYS",
+    "ErasureReport",
+    "erase_expired",
+]

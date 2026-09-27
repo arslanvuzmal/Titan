@@ -15,7 +15,12 @@ import datetime as dt
 
 import pytest
 from sqlalchemy import text
-from titan.delivery.retention import RETENTION_DAYS, erase_expired
+from titan.delivery.retention import (
+    FOREIGN_RETENTION_DAYS,
+    RETENTION_DAYS,
+    ErasureReport,
+    erase_expired,
+)
 
 from tests.delivery.conftest import build_sendable
 
@@ -178,3 +183,30 @@ async def test_the_claim_map_survives_the_erasure(db_session, workspace):
         )
     ).one()
     assert all(row), "the justification for the send was destroyed with its text"
+
+
+# ==========================================================================
+# Somebody else's mail
+# ==========================================================================
+
+
+def test_emptying_foreign_mail_counts_as_having_erased_something():
+    """Otherwise a pass that cleared 482 backscatter bodies logs nothing.
+
+    The housekeeping activity only logs when `erased_anything` is true, and a
+    week with no lead due but a fortnight of backscatter behind it is exactly
+    the pass worth seeing in the log.
+    """
+    assert ErasureReport(0, 0, 0, 0, foreign_erased=1).erased_anything
+
+
+def test_a_pass_that_did_nothing_at_all_still_says_so():
+    assert not ErasureReport(0, 0, 0, 0).erased_anything
+    # Leads looked at and leads spared are not erasures.
+    assert not ErasureReport(5, 0, 0, 2).erased_anything
+
+
+def test_foreign_mail_is_kept_for_less_time_than_a_business_we_wrote_to():
+    """A business gets thirty days because its follow-up sequence needs them.
+    Backscatter has no sequence and no relationship."""
+    assert FOREIGN_RETENTION_DAYS < RETENTION_DAYS

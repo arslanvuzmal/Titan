@@ -393,6 +393,10 @@ class EraseExpiredDataResult:
     leads_examined: int = 0
     drafts_erased: int = 0
     pages_erased: int = 0
+    #: Inbound messages that matched no send of ours, emptied of their text.
+    #: Reported separately because it is not erasure of a business's data --
+    #: it is declining to hoard somebody else's mail.
+    foreign_erased: int = 0
     #: Leads deliberately left alone because somebody there wrote back.
     #: Reported rather than silently skipped: "we erase everyone who ignored
     #: us" and "we erase everyone" are different policies, and the difference

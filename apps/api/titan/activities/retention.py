@@ -46,6 +46,7 @@ async def erase_expired_data(
                 "drafts": report.drafts_erased,
                 "pages": report.pages_erased,
                 "kept_for_reply": report.kept_for_reply,
+                "foreign_erased": report.foreign_erased,
             },
         )
     return EraseExpiredDataResult(
@@ -53,6 +54,7 @@ async def erase_expired_data(
         drafts_erased=report.drafts_erased,
         pages_erased=report.pages_erased,
         kept_for_reply=report.kept_for_reply,
+        foreign_erased=report.foreign_erased,
     )
 
 
