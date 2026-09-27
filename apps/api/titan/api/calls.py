@@ -288,7 +288,15 @@ async def next_calls(
     """The ranked list, gate already applied."""
     extra, params = "", {}
     if country:
-        extra = "AND upper(coalesce(o.country_code, '')) = :cc"
+        # The campaign's country, not the organisation's -- organisations have
+        # no country column, so this filter raised UndefinedColumn and returned
+        # a 500 for every request that used it. Nothing had called it yet.
+        #
+        # The campaign is the right answer regardless of the bug: a lead is
+        # discovered *by* a campaign that searched a named country, which is a
+        # fact about the search rather than an inference from an address nobody
+        # parsed.
+        extra = "AND upper(coalesce(c.target_country_code, '')) = :cc"
         params["cc"] = country.upper()
     rows = await _candidates(extra, params)
     return [
