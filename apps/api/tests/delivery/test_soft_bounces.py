@@ -21,6 +21,7 @@ from titan.db.enums import LeadStatus, SuppressionReason
 from titan.db.models import Lead, Message
 from titan.db.session import get_sessionmaker
 from titan.delivery.bounces import (
+    _ATTRIBUTION_WINDOW,
     SOFT_BOUNCE_BACKOFF,
     SOFT_BOUNCES_TO_SUPPRESS,
     BounceKind,
@@ -367,7 +368,32 @@ async def test_a_hard_bounce_still_suppresses_without_attribution(
     db_session, sendable
 ) -> None:
     """Not counting is not the same as not acting. A permanent failure is
-    conclusive about the address whether or not we can name the message."""
+    conclusive about the address whether or not we can name the message.
+
+    This test used to prove that with ``stranger@nowhere.test`` -- an address
+    with no send behind it at all -- and so proved rather more than it meant
+    to. "We cannot say which message this bounce is about" and "we cannot say
+    this address was ever ours" are different claims, and only the first one
+    is an argument for acting anyway.
+
+    On the live workspace the difference turned out to be most of the data: 42
+    of 54 hard-bounce suppressions were addresses with no matching send, all
+    of them written by DSN-shaped mail arriving at an IMAP mailbox that anyone
+    can write to. The suppression list had an open write path.
+
+    So the case is kept and the address is made genuinely ours: a real send,
+    older than ``_ATTRIBUTION_WINDOW``, which is exactly the situation the
+    original sentence was about.
+    """
+    old_send = NOW - _ATTRIBUTION_WINDOW - dt.timedelta(days=1)
+    await _sent_message(
+        db_session,
+        sendable.workspace_id,
+        suffix="unattrib",
+        sent_at=old_send,
+        to_email="stranger@nowhere.test",
+    )
+
     outcome = await _bounce(
         sendable.workspace_id,
         to_email="stranger@nowhere.test",
@@ -376,7 +402,8 @@ async def test_a_hard_bounce_still_suppresses_without_attribution(
         message_id=None,
     )
 
-    assert outcome.attributed is False
+    assert outcome.attributed is False, "the send is outside the attribution window"
+    assert outcome.disowned is False, "but it is still a send we made"
     assert outcome.suppressed is True
     async with get_sessionmaker()() as s:
         assert (
@@ -385,6 +412,39 @@ async def test_a_hard_bounce_still_suppresses_without_attribution(
             )
             is not None
         )
+
+
+@pytest.mark.asyncio
+async def test_a_hard_bounce_for_an_address_we_never_mailed_is_ignored(
+    db_session, sendable
+) -> None:
+    """The other half of the distinction above, and the one that was missing.
+
+    ``jordan-wup@fluxhqcrest.co`` is a real value from the live suppression
+    list, put there by a bounce for a message Titan never sent. Nothing about
+    it is dangerous on its own; what is dangerous is that anything able to
+    reach the mailbox could add to the list of people the system refuses to
+    contact.
+    """
+    outcome = await _bounce(
+        sendable.workspace_id,
+        to_email="jordan-wup@fluxhqcrest.co",
+        kind=BounceKind.HARD,
+        lead_id=None,
+        message_id=None,
+    )
+
+    assert outcome.disowned is True
+    assert outcome.suppressed is False
+    async with get_sessionmaker()() as s:
+        assert (
+            await is_suppressed(
+                s,
+                workspace_id=sendable.workspace_id,
+                email="jordan-wup@fluxhqcrest.co",
+            )
+            is None
+        ), "a stranger's bounce wrote to the suppression list"
 
 
 # ==========================================================================

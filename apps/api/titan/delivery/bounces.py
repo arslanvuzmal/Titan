@@ -130,6 +130,9 @@ class BounceOutcome:
     retry_after: dt.datetime | None = None
     #: False when no sent message could be attributed, so nothing was counted.
     attributed: bool = True
+    #: True when the bounce was about an address this workspace has never
+    #: mailed, and was therefore ignored rather than acted on.
+    disowned: bool = False
 
 
 async def record_bounce(
@@ -159,6 +162,32 @@ async def record_bounce(
     attributed_id = message_id or await _most_recent_message_to(
         session, workspace_id=workspace_id, to_email=target, now=now
     )
+
+    # A bounce about an address we have never mailed is not evidence about our
+    # list, and acting on one lets whoever can send us email write to the
+    # suppression list. The IMAP path reads an ordinary mailbox: a forged or
+    # merely mistaken DSN arrives there looking exactly like a real one, and
+    # the only thing that distinguishes them is whether we sent the message it
+    # claims to be about.
+    #
+    # This is deliberately "ever", not the 14-day attribution window. A hard
+    # bounce for a send older than the window is still ours and still worth
+    # suppressing -- that is why the hard path acts without an attributed
+    # message at all. What is being excluded is the address that was never
+    # ours, not the send that was merely old.
+    #
+    # Observed on the live workspace: 42 of 54 hard-bounce suppressions were
+    # addresses with no matching send -- jordan-wup@fluxhqcrest.co and
+    # nineteen more of the same shape -- all written by inbound mail nobody
+    # authenticated.
+    if attributed_id is None and not await _ever_sent_to(
+        session, workspace_id=workspace_id, to_email=target
+    ):
+        logger.info(
+            "bounce ignored: no send to this address has ever been recorded",
+            extra={"workspace_id": str(workspace_id), "source": source},
+        )
+        return BounceOutcome(kind=kind, attributed=False, disowned=True)
 
     if attributed_id is not None:
         # bounced_at is set here too, with COALESCE so an existing timestamp is
@@ -256,6 +285,39 @@ async def record_bounce(
             )
         )
     return BounceOutcome(kind=kind, soft_bounce_count=count, retry_after=retry_after)
+
+
+async def _ever_sent_to(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    to_email: str,
+) -> bool:
+    """Has this workspace ever sent mail to this address?
+
+    Unbounded in time on purpose. ``_most_recent_message_to`` is bounded
+    because it is choosing *which* message a bounce is about, and the wrong
+    one is worse than none; this is only asking whether the address was ever
+    ours, and retention empties message bodies rather than deleting rows, so
+    the answer stays available for as long as the workspace does.
+    """
+    if not to_email:
+        return False
+    found = (
+        await session.execute(
+            text(
+                """
+                SELECT 1 FROM messages
+                 WHERE workspace_id = :workspace
+                   AND to_email_normalized = :email
+                   AND sent_at IS NOT NULL
+                 LIMIT 1
+                """
+            ),
+            {"workspace": workspace_id, "email": to_email},
+        )
+    ).scalar_one_or_none()
+    return found is not None
 
 
 async def _most_recent_message_to(
