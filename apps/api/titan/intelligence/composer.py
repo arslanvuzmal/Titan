@@ -1231,11 +1231,23 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     problem = _PROBLEM_DETAIL.get(finding.issue_type, "")
     # 5b. What the repair actually is. Named work, not an offer of help.
     solution = _SOLUTION_DETAIL.get(finding.issue_type, "")
-    # 5c. What they get once it is done. The other half of the consequence
-    #     sentence: without it the message hands the reader a problem and a
-    #     stranger, and asks them to feel bad enough to reply. This is a
-    #     conditional about their own site, so it is a claim and it is mapped.
-    upside = _UPSIDE_DETAIL.get(finding.issue_type, "")
+    # 5c, dropped on 26 September. Kept as a variable so the copy and its
+    #     claim mapping survive for whenever the length budget allows it back.
+    #
+    # It said what they get once it is done -- the consequence with the sign
+    # flipped -- and it was the only paragraph offering the reader a gain
+    # rather than a loss. That is a real argument and it is why this survived
+    # the 10 September trim, over a test that recorded the decision and asked
+    # a later trim to argue with it: "there is no evidence in 417 sends and one
+    # reply that would justify overturning that on taste."
+    #
+    # There is now. 1,038 sends and not one positive reply, against 11
+    # unsubscribes -- and the one reply the old note counted was a decline. The
+    # median upside is 37 words of a 201-word pitch, an 18% saving on the one
+    # paragraph that carries no observation, no mechanism, no repair and no
+    # ask. Trimming it is no longer a preference about tone; it is the cheapest
+    # 37 words in the message, and the message needed to be shorter.
+    upside = ""
 
     # 4b, dropped on 10 September. Worth saying why rather than deleting it
     # quietly, because the register text is still here and still good.
@@ -1288,6 +1300,7 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
         (consequence, _esc(consequence)),
         (context, _esc(context)),
         (solution, _esc(solution)),
+        # Empty since 26 September, so `present` filters it out. See above.
         (upside, _esc(upside)),
         # One "who I am" paragraph rather than two: the credential and the
         # link belong to the same thought, and split across paragraphs they

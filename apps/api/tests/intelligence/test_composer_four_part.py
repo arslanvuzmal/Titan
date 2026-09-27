@@ -112,9 +112,7 @@ class TestTheWholeShapeStillValidates:
     def test_every_issue_type_passes_the_real_validator(
         self, issue_type: str, seed: str, case_study: CaseStudy | None
     ) -> None:
-        report = _validate(
-            _compose(issue_type, seed=seed, case_study=case_study)
-        )
+        report = _validate(_compose(issue_type, seed=seed, case_study=case_study))
         assert report.passed, [str(v) for v in report.violations]
 
     @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
@@ -138,31 +136,48 @@ class TestTheWholeShapeStillValidates:
 
 
 class TestWhatChangesIfTheyFixIt:
-    """The half of the argument that was missing: the upside, not just the cost."""
+    """The upside paragraph, shelved on 26 September and kept intact.
+
+    It said what the reader gets once the repair is done -- the consequence
+    with the sign flipped -- and it was the only paragraph offering a gain
+    rather than a loss. That is why it survived the 10 September trim.
+
+    What overturned it was length, on evidence rather than taste: 1,038 sends
+    and not one positive reply, against 11 unsubscribes, and a median 37 words
+    of a 201-word pitch spent on the one paragraph carrying no observation, no
+    mechanism, no repair and no ask.
+
+    The copy is not deleted and these tests are not deleted with it. They now
+    guard the shelf: the entries stay complete and well-formed, so bringing the
+    paragraph back is re-rendering it rather than rewriting it.
+    """
 
     @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
-    def test_every_issue_type_says_what_gets_better(self, issue_type: str) -> None:
-        composed = _compose(issue_type)
-        assert any(
-            entry["claim"].endswith(":upside") for entry in composed.claim_map
-        ), f"{issue_type} has no upside paragraph"
-
-    @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
-    def test_the_upside_is_traced_to_the_finding_that_entails_it(
+    def test_every_issue_type_still_has_upside_copy_written(
         self, issue_type: str
     ) -> None:
-        """A conditional about their site is still a claim about their site."""
-        composed = _compose(issue_type)
-        upside = [e for e in composed.claim_map if e["claim"].endswith(":upside")]
-        assert upside
-        for entry in upside:
-            assert entry["finding_id"] == "f-1"
-            assert entry["evidence_ids"] == ["ev-1"]
-            assert entry["sentence"] in composed.body
+        """Written and kept, against the day the length budget allows it back."""
+        from titan.intelligence.composer import _UPSIDE_DETAIL
 
-    def test_it_reads_as_a_consequence_of_the_repair(self) -> None:
-        composed = _compose("broken_primary_cta")
-        assert "Once the button points somewhere that exists" in composed.body
+        assert _UPSIDE_DETAIL.get(issue_type, "").strip(), (
+            f"{issue_type} lost its upside copy while the paragraph was shelved"
+        )
+
+    def test_the_shelved_copy_still_reads_as_a_consequence_of_the_repair(self) -> None:
+        from titan.intelligence.composer import _UPSIDE_DETAIL
+
+        assert (
+            "Once the button points somewhere that exists"
+            in _UPSIDE_DETAIL["broken_primary_cta"]
+        )
+
+    @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
+    def test_the_message_no_longer_carries_one(self, issue_type: str) -> None:
+        """The saving, stated as a test so it cannot come back by accident."""
+        composed = _compose(issue_type)
+        assert not [e for e in composed.claim_map if e["claim"].endswith(":upside")], (
+            f"{issue_type} is still rendering the shelved paragraph"
+        )
 
     @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
     def test_no_invented_numbers(self, issue_type: str) -> None:
@@ -170,9 +185,7 @@ class TestWhatChangesIfTheyFixIt:
         composed = _compose(issue_type)
         report = _validate(composed)
         assert not [
-            v
-            for v in report.violations
-            if v.code is mv.ViolationCode.FABRICATED_METRIC
+            v for v in report.violations if v.code is mv.ViolationCode.FABRICATED_METRIC
         ]
 
 
@@ -188,9 +201,7 @@ class TestTheReferencesSection:
         assert composed.reference_urls[0] == "https://example.com/book"
 
     @pytest.mark.parametrize("issue_type", ISSUE_TYPES)
-    def test_the_curated_sources_for_the_issue_are_cited(
-        self, issue_type: str
-    ) -> None:
+    def test_the_curated_sources_for_the_issue_are_cited(self, issue_type: str) -> None:
         composed = _compose(issue_type)
         for reference in references_for(issue_type):
             assert reference.url in composed.reference_urls
@@ -268,7 +279,7 @@ class TestNothingThatWorkedBeforeStopped:
         assert "your appointment page" in composed.body
 
     def test_an_unknown_slug_does_not_name_the_page_twice(self) -> None:
-        """"the main button on the page on example.com" -- the link text and the
+        """ "the main button on the page on example.com" -- the link text and the
         sentence saying the same thing three words apart."""
         composed = _compose(page_url="https://example.com/some-odd-slug")
         assert "on the page on example.com" not in composed.body
@@ -379,9 +390,7 @@ class TestTheProjectLink:
         assert "https://arslanvuzmallone.com" in composed.body
         report = _validate(composed)
         assert not [
-            v
-            for v in report.violations
-            if v.code is mv.ViolationCode.WRONG_PORTFOLIO_URL
+            v for v in report.violations if v.code is mv.ViolationCode.WRONG_PORTFOLIO_URL
         ]
 
     def test_a_project_hosted_elsewhere_keeps_the_portfolio_sentence(self) -> None:
@@ -434,9 +443,7 @@ class TestTheOnePager:
 
     def test_it_does_not_push_the_body_over_its_band(self) -> None:
         for issue_type in ISSUE_TYPES:
-            composed = _compose(
-                issue_type, case_study=STUDY, one_pager_url=self.URL
-            )
+            composed = _compose(issue_type, case_study=STUDY, one_pager_url=self.URL)
             assert len(composed.body.split()) <= mv.MAX_BODY_WORDS, issue_type
 
     def test_the_message_never_claims_an_attachment(self) -> None:
@@ -492,11 +499,15 @@ class TestItStoppedClearingItsThroat:
     def test_the_parts_that_earn_their_space_are_all_still_there(self) -> None:
         """What was kept, stated as a test so a later trim has to argue with it.
 
-        The upside was considered for the same cut and kept: it restates the
-        consequence with the sign flipped, which is the argument against it, but
-        it is the only paragraph telling the reader what they get rather than
-        what they have lost. There is no evidence in 417 sends and one reply
-        that would justify overturning that on taste.
+        The upside is no longer among them. This note asked a later trim for
+        evidence rather than taste -- "there is no evidence in 417 sends and
+        one reply that would justify overturning that" -- and on 26 September
+        there was some: 1,038 sends, zero positive replies, 11 unsubscribes,
+        and the single reply the old count cited was itself a decline.
+
+        The four below are the argument. Drop any one and the message either
+        stops proving it looked, stops saying what the problem costs, stops
+        naming a repair, or stops asking for anything.
         """
         composed = _compose("broken_primary_cta")
         kinds = {entry["claim"].rsplit(":", 1)[-1] for entry in composed.claim_map}
@@ -504,7 +515,7 @@ class TestItStoppedClearingItsThroat:
         assert "mechanism" in kinds, "the paragraph that proves we looked"
         assert "business_impact" in kinds, "what it costs them"
         assert "remediation" in kinds, "what the repair actually is"
-        assert "upside" in kinds, "what they get once it is done"
+        assert "upside" not in kinds, "shelved on 26 September for length"
 
     def test_the_band_has_exactly_one_definition(self) -> None:
         """Two constants that must agree are one constant.
