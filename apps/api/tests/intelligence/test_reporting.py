@@ -259,3 +259,38 @@ def test_no_opportunities_means_no_pipeline_line():
     body = render(report(opportunities_identified=0, pipeline_value_usd=0.0))
 
     assert "Opportunities" not in body
+
+
+# ==========================================================================
+# Foreign mail
+# ==========================================================================
+
+
+def test_foreign_mail_is_named_and_kept_out_of_the_reply_count():
+    """The week that read 155 replies actually held 8.
+
+    The other 147 were delivery reports for mail this estate never sent. They
+    are reported, because a rising count means the domain is being forged
+    harder, but never as replies -- a reply rate built on them says the
+    outreach is working while every placement probe says spam.
+    """
+    text = render(report(messages_sent=100, replies_received=8, foreign_mail=147))
+
+    assert "Replies: 8" in text
+    assert "8.0% of sent" in text
+    assert "Foreign mail: 147 arrived for sends that were not ours" in text
+
+
+def test_a_week_with_no_foreign_mail_says_nothing_about_it():
+    """A line that is always there is a line nobody reads."""
+    text = render(report(messages_sent=100, replies_received=8))
+
+    assert "Foreign mail" not in text
+
+
+def test_foreign_mail_never_enters_the_reply_rate():
+    """The rate is the number the report exists to be honest about."""
+    flooded = report(messages_sent=100, replies_received=8, foreign_mail=147)
+    quiet = report(messages_sent=100, replies_received=8)
+
+    assert flooded.reply_rate == quiet.reply_rate == 0.08

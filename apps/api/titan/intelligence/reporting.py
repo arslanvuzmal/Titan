@@ -88,6 +88,15 @@ class WeeklyReport:
     replies_received: int = 0
     positive_replies: int = 0
     declined: int = 0
+    #: Mail that arrived in the polled mailbox matching no send of ours.
+    #:
+    #: Reported because it is climbing and because it is a fact about this
+    #: domain rather than about the week: 4 messages in the first week of
+    #: August, 146 in the third week of September, almost all of it delivery
+    #: reports for outbound somebody else sent with our domain on the envelope.
+    #: It was previously counted as replies, which is how the report claimed
+    #: 155 in a week that held 8.
+    foreign_mail: int = 0
     suppressions_added: int = 0
     #: Conversations that reached a request for a call. The closest thing in
     #: this report to an outcome.
@@ -313,6 +322,14 @@ def render(report: WeeklyReport) -> str:
         f"({report.reply_rate:.1%} of sent) -- {report.positive_replies} positive, "
         f"{report.declined} declined"
     )
+    if report.foreign_mail:
+        # Named rather than hidden. It is the difference between the reply count
+        # a reader expects and the one above it, and if it is rising the domain
+        # is being forged harder, which belongs in a deliverability report.
+        lines.append(
+            f"  Foreign mail: {report.foreign_mail} arrived for sends that were "
+            f"not ours (not counted above)"
+        )
     if report.meetings_proposed:
         lines.append(f"  Calls requested: {report.meetings_proposed}")
     if report.opportunities_identified:

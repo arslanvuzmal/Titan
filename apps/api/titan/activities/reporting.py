@@ -40,6 +40,7 @@ from titan.db.models.messaging import ReplyClassification as ReplyClassification
 from titan.db.models.ops import Meeting, Task
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery import sender_pool
+from titan.delivery.inbound import attributable, foreign
 from titan.intelligence import lead_sources, portfolio, timing
 from titan.intelligence.intent import NEGATIVE_CLASSES, POSITIVE_CLASSES
 from titan.intelligence.reporting import (
@@ -141,15 +142,19 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         # that number says the outreach is working when it is not, which is the
         # one thing a weekly report must never do.
         #
-        # ``lead_id`` is the test because the collector sets it only when the
-        # message matched an outbound send, by threading headers or by the
-        # address that failed.
-        ours = InboundMessageRow.lead_id.is_not(None)
+        # ``attributable()`` states the rule once; see its docstring for why
+        # three call sites used to answer this question three different ways.
+        ours = attributable()
 
         replies = await count(
             select(func.count())
             .select_from(InboundMessageRow)
             .where(InboundMessageRow.received_at >= since, ours)
+        )
+        foreign_mail = await count(
+            select(func.count())
+            .select_from(InboundMessageRow)
+            .where(InboundMessageRow.received_at >= since, foreign())
         )
         positive = await count(
             select(func.count())
@@ -291,6 +296,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         bounced=bounced,
         complained=complained,
         replies_received=replies,
+        foreign_mail=foreign_mail,
         positive_replies=positive,
         declined=declined,
         suppressions_added=suppressions,
@@ -353,6 +359,7 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
         body=body,
         messages_sent=sent,
         replies_received=replies,
+        foreign_mail=foreign_mail,
         health=health.status.value,
         needs_attention=report.needs_attention,
     )

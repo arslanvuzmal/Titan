@@ -36,7 +36,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -607,6 +607,35 @@ async def _suggest_reply(
     return row.id
 
 
+def attributable() -> ColumnElement[bool]:
+    """Inbound mail that matched a send of ours. Everything else is foreign.
+
+    One named expression rather than ``lead_id IS NULL`` written out at each
+    call site, because the sites disagreed. The weekly report counted every row
+    and claimed 155 replies in a week that contained 8; the rollups joined on
+    the lead and were right; retention only ever reached inbound mail through a
+    lead, so the foreign rows have never been touched at all. Three readings of
+    one question.
+
+    ``lead_id`` is the test because the collector sets it only when the match
+    succeeded -- by threading headers, or by the address a delivery report says
+    failed. It is deliberately a query expression and not a stored column: the
+    fact is already recorded, and a second copy of it is a second thing to keep
+    true.
+    """
+    return InboundMessageRow.lead_id.is_not(None)
+
+
+def foreign() -> ColumnElement[bool]:
+    """The complement of :func:`attributable`.
+
+    Backscatter, mostly. Something forges this domain as an envelope sender and
+    the delivery reports come here: 629 of the first 676 messages, growing week
+    on week -- 4, 23, 38, 84, 89, 121, 124, 146.
+    """
+    return InboundMessageRow.lead_id.is_(None)
+
+
 def alerts_the_operator(kind: ReplyKind, *, attributed: bool) -> bool:
     """Whether a message of this kind is worth waking somebody for.
 
@@ -794,6 +823,8 @@ __all__ = [
     "MAX_STORED_BODY_CHARS",
     "IngestResult",
     "alerts_the_operator",
+    "attributable",
+    "foreign",
     "ingest_inbound",
     "synthetic_inbound_id",
 ]
