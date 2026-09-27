@@ -131,25 +131,50 @@ async def generate_weekly_report(request: WeeklyReportInput) -> WeeklyReportResu
             .where(Lead.latest_score.is_not(None), Lead.updated_at >= since)
         )
 
+        # Attributable mail only, on all three counts.
+        #
+        # A polled mailbox receives whatever the internet sends it. On 27
+        # September 629 of the 676 messages this estate had taken in matched no
+        # send of ours -- delivery reports about subjects we have never used,
+        # auto-replies from 455 addresses nobody here has written to -- and the
+        # weekly figure was reporting the lot as replies. A reply rate built on
+        # that number says the outreach is working when it is not, which is the
+        # one thing a weekly report must never do.
+        #
+        # ``lead_id`` is the test because the collector sets it only when the
+        # message matched an outbound send, by threading headers or by the
+        # address that failed.
+        ours = InboundMessageRow.lead_id.is_not(None)
+
         replies = await count(
             select(func.count())
             .select_from(InboundMessageRow)
-            .where(InboundMessageRow.received_at >= since)
+            .where(InboundMessageRow.received_at >= since, ours)
         )
         positive = await count(
             select(func.count())
             .select_from(ReplyClassificationRow)
+            .join(
+                InboundMessageRow,
+                InboundMessageRow.id == ReplyClassificationRow.inbound_message_id,
+            )
             .where(
                 ReplyClassificationRow.created_at >= since,
                 ReplyClassificationRow.reply_class.in_(tuple(POSITIVE_CLASSES)),
+                ours,
             )
         )
         declined = await count(
             select(func.count())
             .select_from(ReplyClassificationRow)
+            .join(
+                InboundMessageRow,
+                InboundMessageRow.id == ReplyClassificationRow.inbound_message_id,
+            )
             .where(
                 ReplyClassificationRow.created_at >= since,
                 ReplyClassificationRow.reply_class.in_(tuple(NEGATIVE_CLASSES)),
+                ours,
             )
         )
         suppressions = await count(
