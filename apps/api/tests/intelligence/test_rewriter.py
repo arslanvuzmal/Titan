@@ -115,8 +115,47 @@ def test_punctuation_only_changes_count_as_unchanged() -> None:
 # ==========================================================================
 # Which specifics are required
 # ==========================================================================
-def test_the_domain_is_always_required() -> None:
+def test_the_domain_is_required_when_the_sentence_already_names_it() -> None:
+    assert "harborline.co.uk" in required_specifics(
+        {}, "harborline.co.uk", "the booking page on harborline.co.uk returns an error"
+    )
+
+
+def test_the_domain_is_required_when_no_original_is_supplied() -> None:
+    """The old signature, and the old answer. Callers that do not say which
+    sentence they are talking about get the strict rule."""
     assert "harborline.co.uk" in required_specifics({}, "harborline.co.uk")
+
+
+def test_a_sentence_that_never_named_the_domain_is_not_made_to() -> None:
+    """The repetition bug, as a test.
+
+    Every paragraph after the observation explains, costs or repairs the fact
+    the observation stated; none of them names it again, and requiring them to
+    is what produced a live draft saying "kingswaydentalchoice.ca" six times
+    and "11 visible fields" six times. A rewrite may not drop the evidence. It
+    may not acquire evidence the sentence never had either.
+    """
+    consequence = "Visitors who reach that point are trying to book, not browse."
+
+    required = required_specifics(
+        {"observed_value": "11 visible fields"},
+        "kingswaydentalchoice.ca",
+        consequence,
+    )
+
+    assert required == ()
+
+
+def test_a_sentence_keeps_only_the_specifics_it_had() -> None:
+    """Half and half: the domain stays required, the figure does not."""
+    sentence = "Shortening the form on kingswaydentalchoice.ca is a morning of work."
+
+    required = required_specifics(
+        {"observed_value": "11 visible fields"}, "kingswaydentalchoice.ca", sentence
+    )
+
+    assert required == ("kingswaydentalchoice.ca",)
 
 
 def test_a_short_observed_value_is_required() -> None:

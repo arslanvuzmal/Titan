@@ -105,20 +105,48 @@ class RewriteOutcome:
     detail: str | None = None
 
 
-def required_specifics(claim: dict[str, Any], domain: str) -> tuple[str, ...]:
+def required_specifics(
+    claim: dict[str, Any], domain: str, original: str = ""
+) -> tuple[str, ...]:
     """What a rewrite of this sentence must still say.
 
     Deliberately small. Requiring every noun would reject any real rephrasing;
     requiring nothing would accept "your website has an issue", which is true
     of every website and evidence for nothing. The domain and the observed
     value are the two things that make the sentence about *this* business.
+
+    **Only the ones the sentence already had.** "A rewrite may not drop the
+    evidence" and "every sentence must carry the evidence" are different rules,
+    and applying the second one produced this, on a real draft sent from the
+    live queue:
+
+        I noticed that the enquiry form on kingswaydentalchoice.ca contains
+        11 visible fields. Your contact form on kingswaydentalchoice.ca
+        includes 11 visible fields. Your contact form on
+        kingswaydentalchoice.ca contains 11 visible fields. Fixing the contact
+        form on kingswaydentalchoice.ca, which currently has 11 visible
+        fields...
+
+    The composer spreads one fact across paragraphs that each do a different
+    job -- state it, explain it, cost it, repair it -- and only the first of
+    them names it. Requiring the domain and the observed value from *every*
+    rewritten sentence made the model insert both into all of them, because
+    that was the only way to get a candidate accepted. The guard did not fail;
+    it was obeyed, five times, in one message.
+
+    Measured before the fix: every one of the 33 model-rewritten drafts in the
+    fortnight restated its fact three or more times, against zero of the 94
+    deterministic ones. A clean split like that is the guard, not the model.
     """
-    specifics: list[str] = [domain] if domain else []
     observed = str(claim.get("observed_value") or "").strip()
+    present = (original or "").lower()
+    specifics: list[str] = []
+    if domain and (not original or domain.lower() in present):
+        specifics.append(domain)
     # Only when it is short enough to be a phrase rather than a paragraph: a
     # multi-line console error cannot survive a rewrite verbatim and should not
     # be required to.
-    if observed and len(observed) <= 60:
+    if observed and len(observed) <= 60 and (not original or observed.lower() in present):
         specifics.append(observed)
     return tuple(dict.fromkeys(s for s in specifics if s))
 
@@ -295,7 +323,10 @@ async def rewrite_message(
         if not original:
             continue
         claim = {**entry, "observed_value": observed_value}
-        required = required_specifics(claim, domain)
+        # The original sentence, so the guard requires only the specifics
+        # it already carried. See required_specifics for what requiring
+        # them from every sentence produced.
+        required = required_specifics(claim, domain, original)
 
         bundle = PromptBundle(
             system=_SYSTEM,
