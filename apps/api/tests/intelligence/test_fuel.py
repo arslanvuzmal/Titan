@@ -350,3 +350,56 @@ def test_headroom_is_what_the_queue_ceiling_has_left() -> None:
 def test_a_jammed_crawler_leaves_no_headroom_rather_than_a_negative_one() -> None:
     """A caller multiplying by a negative headroom would order backwards."""
     assert state(in_flight=500, crawl_rate_per_hour=120).headroom == 0
+
+
+# ==========================================================================
+# What counts as reserve
+# ==========================================================================
+
+
+def _reserve_sql() -> str:
+    import uuid
+
+    from sqlalchemy.dialects import postgresql
+    from titan.intelligence.fuel import _reachable_untouched_query
+
+    q = _reachable_untouched_query(uuid.UUID("00000000-0000-0000-0000-000000000001"))
+    return str(q.compile(dialect=postgresql.dialect()))
+
+
+def test_a_lead_scored_below_its_campaign_floor_is_not_reserve() -> None:
+    """The measurement that stopped discovery.
+
+    On 27 September the reserve reported 1,724 leads against a true 114. Every
+    one of the difference had an address and had never been written to, and
+    every one had already been scored below the floor its campaign would send
+    at -- ballast counted as fuel. The estate concluded it was well supplied
+    and ordered nothing: 247 Places searches on 27 August, none at all in the
+    six days to 27 September.
+    """
+    sql = _reserve_sql()
+    assert "campaign_policies" in sql, "the floor must come from the lead's own campaign"
+    assert "min_lead_score" in sql, "a lead below its floor is not reserve"
+
+
+def test_an_unscored_lead_is_still_reserve() -> None:
+    """Unopened, not rejected.
+
+    Scoring happens inside the research pipeline, so excluding unscored leads
+    would report an empty reserve for a campaign full of freshly discovered
+    work and order discovery that was not needed -- the opposite mistake, and
+    the reason the original query ignored score at all.
+    """
+    sql = _reserve_sql()
+    assert "latest_score IS NULL" in sql
+
+
+def test_the_floor_is_per_campaign_not_per_workspace() -> None:
+    """One campaign's ballast is another's prospect.
+
+    The floor is a column on campaign_policies, so the comparison joins each
+    lead to its own campaign rather than taking one number for the estate.
+    """
+    sql = _reserve_sql()
+    assert "campaign_policies.min_lead_score" in sql
+    assert "JOIN campaign_policies" in sql

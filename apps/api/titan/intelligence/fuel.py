@@ -44,11 +44,12 @@ import math
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from titan.db.enums import LeadStatus
 from titan.db.models import (
+    CampaignPolicy,
     Contact,
     ContactChannel,
     CrawlRun,
@@ -309,10 +310,38 @@ def _reachable_untouched_query(workspace_id: uuid.UUID) -> Select[tuple[int]]:
         .exists()
     )
     already_written = select(Message.id).where(Message.lead_id == Lead.id).exists()
+
+    # A lead already scored below its own campaign's floor is not reserve. It
+    # is ballast: it has an address, it has never been written to, and it never
+    # will be.
+    #
+    # This is what stopped discovery. On 27 September the reserve reported
+    # 1,724 against a true 114, so the estate concluded it was well supplied and
+    # ordered nothing -- 247 Places searches on 27 August, none at all in the
+    # six days to 27 September. Raising the floor from 55 to 70 the same day
+    # turned another 1,116 leads into ballast, which would have widened the gap
+    # rather than closing it.
+    #
+    # Compared against each lead's *own* campaign floor rather than one number
+    # for the workspace, because the floor is a per-campaign policy and one
+    # campaign's ballast is not another's.
+    #
+    # Unscored still counts, for the reason `_pool_size` gives: scoring happens
+    # inside research, so an unscored lead is unopened rather than rejected.
+    usable_score = or_(
+        Lead.latest_score.is_(None),
+        Lead.latest_score >= CampaignPolicy.min_lead_score,
+    )
     return (
         select(func.count())
         .select_from(Lead)
-        .where(Lead.workspace_id == workspace_id, has_email, ~already_written)
+        .join(CampaignPolicy, CampaignPolicy.campaign_id == Lead.campaign_id)
+        .where(
+            Lead.workspace_id == workspace_id,
+            has_email,
+            ~already_written,
+            usable_score,
+        )
     )
 
 

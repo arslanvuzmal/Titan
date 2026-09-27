@@ -38,7 +38,7 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
@@ -209,7 +209,9 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             )
         ).scalar_one()
         outcomes = await _campaign_outcomes(session, campaign_id, now)
-        leads_available = await _pool_size(session, campaign_id=campaign_id)
+        leads_available = await _pool_size(
+            session, campaign_id=campaign_id, min_score=configured_score
+        )
 
     # The manager runs before the budget is read, so a decision made now governs
     # this cycle rather than the next one. It is deliberately *after* the
@@ -424,13 +426,27 @@ def _authorization_blockers(
     return blockers
 
 
-async def _pool_size(session: AsyncSession, *, campaign_id: uuid.UUID) -> int:
-    """How many leads are still available to research for this campaign.
+async def _pool_size(
+    session: AsyncSession, *, campaign_id: uuid.UUID, min_score: int
+) -> int:
+    """How many leads this campaign could still usefully work.
 
-    Deliberately ignores the score threshold. An unscored lead has never been
-    measured, and scoring happens *inside* the research pipeline -- so counting
-    only leads above the minimum would report a pool of zero for a campaign full
-    of freshly discovered work, and trigger discovery that was not needed.
+    **An unscored lead counts.** It has never been measured, and scoring happens
+    *inside* the research pipeline, so excluding it would report an empty pool
+    for a campaign full of freshly discovered work and trigger discovery that
+    was not needed. That was the original reasoning here and it is still right.
+
+    **A lead already scored below the floor does not count**, and that was the
+    blind spot. It will never be mailed by this campaign, but it went on
+    counting toward the reserve, so the estate reported thousands of leads in
+    hand while holding a few hundred it could actually use. Discovery is
+    triggered off this number, which is why it stopped: on 27 August it ran 247
+    searches, and by late September it was running none at all with 4,938 leads
+    on the books and 222 of them usable.
+
+    Raising the floor to 70 on 27 September turned another 1,116 leads from
+    usable into permanent ballast, so counting them would have wedged discovery
+    shut exactly when the pool needed refilling.
     """
     return int(
         (
@@ -442,6 +458,10 @@ async def _pool_size(session: AsyncSession, *, campaign_id: uuid.UUID) -> int:
                     Lead.status.in_(RESEARCHABLE_STATUSES),
                     Lead.replied_at.is_(None),
                     Lead.last_contacted_at.is_(None),
+                    or_(
+                        Lead.latest_score.is_(None),
+                        Lead.latest_score >= min_score,
+                    ),
                 )
             )
         ).scalar_one()
