@@ -50,6 +50,7 @@ from titan.db.models import (
 )
 from titan.db.models.compliance import SuppressionEntry
 from titan.db.session import workspace_session, workspace_unit_of_work
+from titan.delivery.phone import strip_formatting
 from titan.intelligence import territories, verticals
 from titan.intelligence.discovery import admit_all, build_query, targeting_blockers
 from titan.notify.operator import NotificationKind, record_notification
@@ -749,35 +750,10 @@ async def _create_lead(
     )
 
 
-#: The widest value ``organizations.phone_e164`` can hold.
-PHONE_COLUMN_LIMIT = 20
-
-
-def _to_e164(raw: str | None) -> str | None:
-    """Strip a Places phone number down to what the column is named for.
-
-    Places returns ``nationalPhoneNumber`` *formatted for display* -- Titan has
-    ``(786) 812-8622`` and ``+974 4444 5555`` stored right now -- and it was
-    being written verbatim into a column called ``phone_e164`` that holds
-    twenty characters. Most locales fit. The ones that do not raised
-    ``StringDataRightTruncation`` inside ``_create_lead``, and because the
-    insert happens inside the discovery unit of work, **one over-long phone
-    number failed the whole batch**: ``discover_leads`` died through all three
-    retries and every business in that search was lost, not just the one with
-    the long number.
-
-    Stripping the formatting is what makes the column's name true, and it is
-    also the only fix that is safe. Truncating a phone number does not produce
-    a shorter phone number, it produces a different one -- a wrong number in a
-    CRM is worse than an empty field, because somebody eventually rings it. So
-    anything still too long after normalising is dropped rather than trimmed.
-    """
-    if not raw:
-        return None
-    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
-    if not cleaned or cleaned == "+":
-        return None
-    return cleaned if len(cleaned) <= PHONE_COLUMN_LIMIT else None
+#: Kept as a name local to this module; the implementation moved to
+#: ``titan.delivery.phone`` when ``titan/seed.py`` turned out to be writing
+#: the Places string verbatim down a second path. One rule, two callers.
+_to_e164 = strip_formatting
 
 
 def _timezone_for(

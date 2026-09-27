@@ -8,7 +8,7 @@ not compare equal, somebody who asked not to be rung again gets rung again.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.phone import dial_key, same_line
+from titan.delivery.phone import dial_key, same_line, strip_formatting
 
 
 @pytest.mark.parametrize(
@@ -52,3 +52,12 @@ def test_two_missing_numbers_are_not_the_same_number():
     assert not same_line(None, None)
     assert not same_line("", "")
     assert not same_line(None, "01611234567")
+
+
+# Stripping itself is covered by tests/activities/test_phone_normalisation.py,
+# which predates this module and moved with the implementation. What belongs
+# here is the join between the two ideas:
+def test_stripping_does_not_change_which_line_a_number_is():
+    """The point of doing it on the way in: the key is unaffected."""
+    raw = "0161 912 6200"
+    assert dial_key(raw) == dial_key(strip_formatting(raw))

@@ -20,7 +20,11 @@ somebody rings it.
 from __future__ import annotations
 
 import pytest
-from titan.activities.discovery import PHONE_COLUMN_LIMIT, _to_e164
+
+# The implementation moved to titan.delivery.phone when titan/seed.py turned
+# out to be writing the Places string down a second, unnormalised path.
+from titan.delivery.phone import COLUMN_LIMIT as PHONE_COLUMN_LIMIT
+from titan.delivery.phone import strip_formatting as _to_e164
 
 
 class TestNormalisation:

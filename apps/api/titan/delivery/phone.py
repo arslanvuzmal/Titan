@@ -58,6 +58,35 @@ def dial_key(raw: str | None) -> str | None:
     return digits[-SIGNIFICANT_DIGITS:]
 
 
+#: The widest value ``organizations.phone_e164`` can hold.
+COLUMN_LIMIT = 20
+
+
+def strip_formatting(raw: str | None) -> str | None:
+    """Digits and a leading ``+``, or nothing.
+
+    What both write paths should have been doing and only one was.
+    ``discover_leads`` normalised; ``python -m titan.seed`` wrote the Places
+    string verbatim, which is why the estate holds ``0161 912 6200`` with the
+    spaces still in it.
+
+    Anything still over the column width after stripping is dropped rather than
+    trimmed. A truncated telephone number is not a shorter telephone number, it
+    is a different one, and somebody eventually rings it. An over-long value
+    also used to raise ``StringDataRightTruncation`` inside the discovery unit
+    of work and fail the whole batch, losing every business in that search.
+
+    This does **not** produce E.164; see the module docstring. It produces a
+    stable written form, which is what :func:`dial_key` and the CRM need.
+    """
+    if not raw:
+        return None
+    cleaned = "".join(ch for ch in raw if ch.isdigit() or ch == "+")
+    if not cleaned or cleaned == "+":
+        return None
+    return cleaned if len(cleaned) <= COLUMN_LIMIT else None
+
+
 def same_line(left: str | None, right: str | None) -> bool:
     """Whether two written numbers are the same line.
 

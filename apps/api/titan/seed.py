@@ -37,6 +37,7 @@ from titan.db.models import (
     WorkspaceMember,
 )
 from titan.db.session import dispose_engine, get_sessionmaker
+from titan.delivery.phone import strip_formatting
 from titan.outreach.provisioning import ensure_sequence
 from titan.providers.places import DiscoveryQuery, GooglePlacesProvider
 from titan.runtime import configure_event_loop
@@ -249,7 +250,7 @@ async def discover(
                 canonical_domain=business.canonical_domain,
                 google_place_id=business.place_id,
                 website_url=business.website_uri,
-                phone_e164=business.phone,
+                phone_e164=strip_formatting(business.phone),
                 rating=business.rating,
                 review_count=business.review_count,
                 business_status=business.business_status,
