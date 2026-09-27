@@ -607,6 +607,29 @@ async def _suggest_reply(
     return row.id
 
 
+def alerts_the_operator(kind: ReplyKind, *, attributed: bool) -> bool:
+    """Whether a message of this kind is worth waking somebody for.
+
+    ``attributed`` means the ingest matched this message to a send of ours,
+    either by threading headers or by the address that failed.
+
+    **An unattributed human message is not a reply.** It is mail that arrived.
+    Alerting on it is silent for the same reason a bounce is, and the reason is
+    far stronger here: of 676 messages this estate has taken in, 629 matched no
+    send of ours -- backscatter from a forged envelope sender, and whatever else
+    reaches an address that has been scraped. Eighteen of the twenty-four open
+    "needs a read" alerts were about those, and that is how the six real ones sat
+    unread for three weeks.
+
+    A complaint is raised either way: it is rare, it names a sending domain as
+    the leading indicator of losing it, and being wrong about whose mail it was
+    costs very little next to missing one.
+    """
+    if kind is ReplyKind.COMPLAINT:
+        return True
+    return kind is ReplyKind.HUMAN and attributed
+
+
 async def _notify(
     session: AsyncSession,
     *,
@@ -648,6 +671,20 @@ async def _notify(
         )
 
     if classification.kind is not ReplyKind.HUMAN or intent is None:
+        return None
+
+    if not alerts_the_operator(classification.kind, attributed=lead_id is not None):
+        # Recorded and logged rather than dropped quietly. "We are ignoring
+        # this" is exactly the kind of true statement that has to be readable
+        # later, when somebody asks why the reply count looks low.
+        logger.info(
+            "human message matched no send of ours; stored without an alert",
+            extra={
+                "inbound_id": str(inbound_id),
+                "from": message.from_email,
+                "subject": (message.subject or "")[:120],
+            },
+        )
         return None
 
     kind = _NOTIFICATION_FOR.get(intent.reply_class, NotificationKind.REPLY_NEEDS_READING)
@@ -756,6 +793,7 @@ async def _record_message(
 __all__ = [
     "MAX_STORED_BODY_CHARS",
     "IngestResult",
+    "alerts_the_operator",
     "ingest_inbound",
     "synthetic_inbound_id",
 ]
