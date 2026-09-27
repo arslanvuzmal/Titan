@@ -27,6 +27,7 @@ and least likely to reimplement the rules correctly.
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import uuid
 from collections import defaultdict
 from typing import Annotated, Any
@@ -61,7 +62,13 @@ async def agent_auth(
             "calling API is not configured; set TITAN_CALL_AGENT_TOKEN",
         )
     presented = (authorization or "").removeprefix("Bearer ").strip()
-    if not presented or presented != expected.get_secret_value():
+    # Constant-time. A plain != returns on the first differing byte, which
+    # leaks the token a character at a time to anybody willing to time the
+    # responses -- and this token is the whole authentication for an endpoint
+    # that hands out lead names and phone numbers.
+    if not presented or not hmac.compare_digest(
+        presented, expected.get_secret_value()
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad agent token")
 
 
