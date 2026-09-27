@@ -275,6 +275,11 @@ class SweepStaleEvidenceResult:
     reopened: int = 0
     #: Of those, the ones already past the send gate's own limit when found.
     already_unsendable: int = 0
+    #: Callable leads returned for a crawl before the phone's stricter gate
+    #: would have refused them. Counted apart from `reopened`: the two sweeps
+    #: answer to different gates and blending them would hide one going quiet.
+    call_pool_reopened: int = 0
+    call_pool_oldest_days: int = 0
     oldest_days: int = 0
 
 

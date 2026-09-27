@@ -349,12 +349,23 @@ async def sweep_stale_evidence_activity(
     draft from what is true today. The old draft is superseded rather than
     deleted: its claim map is the record of what was asserted and why.
     """
-    from titan.intelligence.staleness import sweep_stale_evidence
+    from titan.intelligence.staleness import (
+        sweep_ageing_call_evidence,
+        sweep_stale_evidence,
+    )
 
     workspace_id = uuid.UUID(request.workspace_id)
     async with workspace_unit_of_work(workspace_id) as session:
+        moment = dt.datetime.now(dt.UTC)
         report = await sweep_stale_evidence(
-            session, workspace_id=workspace_id, now=dt.datetime.now(dt.UTC)
+            session, workspace_id=workspace_id, now=moment
+        )
+        # The phone gate is fourteen days against the send gate's thirty, and
+        # nothing was watching it. Run in the same pass and the same
+        # transaction: both return leads to QUALIFIED, and two passes would
+        # race each other for the same rows.
+        calls = await sweep_ageing_call_evidence(
+            session, workspace_id=workspace_id, now=moment
         )
 
     return SweepStaleEvidenceResult(
@@ -362,6 +373,8 @@ async def sweep_stale_evidence_activity(
         reopened=report.reopened,
         already_unsendable=report.already_unsendable,
         oldest_days=report.oldest_days or 0,
+        call_pool_reopened=calls.reopened,
+        call_pool_oldest_days=calls.oldest_days or 0,
     )
 
 

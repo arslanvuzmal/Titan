@@ -19,6 +19,8 @@ from titan.db.enums import DraftStatus, LeadStatus
 from titan.intelligence.staleness import (
     _LIVE_DRAFTS,
     _REOPENABLE,
+    CALL_MAX_PER_PASS,
+    CALL_STALE_AFTER,
     MAX_PER_PASS,
     STALE_AFTER,
     StalenessReport,
@@ -118,3 +120,57 @@ def test_the_report_separates_the_backlog_from_the_flow() -> None:
 def test_nothing_to_do_is_reported_as_nothing() -> None:
     """It runs hourly. Once the backlog drains, the normal result is zero."""
     assert StalenessReport().is_noop
+
+
+# ==========================================================================
+# The callable pool, which answers to a stricter clock
+# ==========================================================================
+
+
+def test_the_call_sweep_acts_well_before_the_phone_gate() -> None:
+    """Fourteen days is where the call list stops serving a lead.
+
+    The sweep has to act inside that or it is not a sweep, it is an autopsy.
+    """
+    from titan.intelligence.call_list import MAX_EVIDENCE_AGE_DAYS
+
+    assert CALL_STALE_AFTER.days < MAX_EVIDENCE_AGE_DAYS
+    # And not so early that healthy evidence is churned for nothing.
+    assert CALL_STALE_AFTER.days >= MAX_EVIDENCE_AGE_DAYS - 5
+
+
+def test_the_phone_is_swept_sooner_than_the_inbox() -> None:
+    """The gap that left a seven-day hole.
+
+    The draft sweep guards a thirty-day send gate and fires at twenty-one. The
+    phone refuses at fourteen, so a lead went uncallable on day fourteen and
+    nothing looked at it until day twenty-one. Measured on 27 September: 549
+    leads callable that day, 303 on 6 October, none at all on the 20th.
+    """
+    assert CALL_STALE_AFTER < STALE_AFTER
+
+
+def test_the_call_sweep_spends_its_crawls_only_where_a_call_could_happen() -> None:
+    """A crawl is the scarce thing here, shared with discovery and the draft
+    sweep. Refreshing a lead the phone can never reach buys nothing."""
+    from titan.intelligence.staleness import _CALL_STALE
+
+    sql = str(_CALL_STALE)
+    assert "phone_e164 IS NOT NULL" in sql, "no number, no call"
+    assert "c.status = 'active'" in sql, "a paused campaign is not being worked"
+    assert "replied_at IS NULL" in sql, "a conversation is not a cold call"
+    assert "call_suppressions" in sql, "never re-crawl somebody who said do not ring"
+    assert "call_outcomes" in sql, "already dialled is not a candidate"
+
+
+def test_a_suppressed_number_is_matched_however_it_was_written() -> None:
+    """Same rule as the call list itself: the stored number has spaces and no
+    country code, and a suppression arrives from a dialler in E.164."""
+    from titan.intelligence.staleness import _CALL_STALE
+
+    assert "regexp_replace" in str(_CALL_STALE)
+
+
+def test_the_call_sweep_takes_smaller_bites_than_the_draft_sweep() -> None:
+    """One bounded crawler serves discovery, the draft sweep and this one."""
+    assert CALL_MAX_PER_PASS < MAX_PER_PASS
