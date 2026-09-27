@@ -26,9 +26,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from titan import __version__
-from titan.api.crm import router as crm_router
-from titan.api.routes import router as v1_router
 from titan.api.calls import router as calls_router
+from titan.api.crm import router as crm_router
+from titan.api.placement import open_pixel_router
+from titan.api.placement import router as placement_router
+from titan.api.routes import router as v1_router
 from titan.api.webhooks import router as webhooks_router
 from titan.config import get_settings
 from titan.db.session import dispose_engine, get_engine
@@ -184,6 +186,15 @@ app.include_router(crm_router)
 # rather than the session auth above: the caller is a runtime, not a person,
 # with nobody to log in and no prompt to answer mid-call.
 app.include_router(calls_router)
+# Whether our own mail is reaching inboxes. Behind the session auth, because
+# the answer names sending addresses and their standing at each provider --
+# operational detail about the estate, not something to serve unauthenticated.
+app.include_router(placement_router)
+# The open pixel, deliberately unauthenticated: the caller is a mail client
+# fetching an image, with no session to present. The HMAC on the token is what
+# stands in for auth, and the route serves the same 43 bytes whatever happens
+# so it cannot be used as an oracle for guessing message ids.
+app.include_router(open_pixel_router)
 # Provider delivery events. Deliberately *not* behind the session auth the two
 # routers above use: a provider cannot hold a token, so an HMAC over the raw
 # body is the credential. See titan.api.webhooks for why that puts the whole

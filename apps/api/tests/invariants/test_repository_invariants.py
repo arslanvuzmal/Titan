@@ -77,6 +77,18 @@ PROVIDER_IMPORT_ALLOWLIST = {
     # cannot go through the outbox -- routing it there would make the alarm
     # depend on the thing it is alarming about.
     "titan/notify/operator_mail.py",
+    # Placement probes, and the exemption is the same shape as the one above:
+    # send_round takes no recipient argument. Every address it writes to comes
+    # from the seed registry, which is a separate file that refuses any entry
+    # carrying SMTP credentials, so there is nothing anybody could pass to
+    # point it at a prospect.
+    #
+    # Probes deliberately do not go through the outbox. The outbox writes a
+    # messages row per send, and five probes a day in that table would be five
+    # sends a day in every count the estate reports -- the daily report saying
+    # sixty-five where sixty reached a prospect, and every deliverability ratio
+    # computed over a denominator padded with our own mail to ourselves.
+    "titan/delivery/placement_probe.py",
     "titan/delivery/webhooks.py",  # verification + normalization only
     "titan/workers/outbox.py",  # the outbox worker process entrypoint
     "titan/cli.py",  # health checks and preflight
@@ -306,6 +318,15 @@ def test_all_domain_tables_are_workspace_scoped() -> None:
 #: workspace explicitly and the entry is gone.
 RAW_SQL_SCOPE_ALLOWLIST = {
     ("titan/delivery/outbox_worker.py", "outbox_messages"),
+    # The open pixel. Its caller is a mail client fetching an image: there is
+    # no session, no principal and no workspace to scope to, by design.
+    #
+    # What stands in for the predicate is the primary key -- reachable only
+    # through an HMAC this estate signed, so the id cannot be guessed or walked
+    # -- and the write is `coalesce(first_opened_at, now())`, so the worst a
+    # cross-workspace id could achieve is setting a timestamp that was already
+    # set. Both properties are tested in tests/delivery/test_open_tracking.py.
+    ("titan/delivery/open_tracking.py", "messages"),
 }
 
 
@@ -384,6 +405,15 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         # the value is unwrapped -- the same concentration the provider clients
         # above rely on.
         "titan/outreach/unsubscribe.py",
+        # Compares the voice agent's bearer token, in constant time. The same
+        # job api/security.py above does for session tokens, and the same
+        # reason it is allowed: verifying a credential is the one thing that
+        # cannot be done without the credential.
+        "titan/api/calls.py",
+        # Signs and verifies the token in the open-pixel URL. Every caller
+        # passes the SecretStr itself, so `_raw` is the only place the value is
+        # unwrapped -- the same concentration unsubscribe.py relies on.
+        "titan/delivery/open_tracking.py",
     }
     for path in python_sources():
         rel = path.relative_to(API).as_posix()

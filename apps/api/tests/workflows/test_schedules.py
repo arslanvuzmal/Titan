@@ -123,6 +123,13 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # fixed hour, because the send windows span Sydney to Vancouver and no
         # fixed hour is reliably after the last message.
         "DailyReportWorkflow",
+        # Asks where our own mail lands, because no provider will say. A
+        # "delivered" webhook is equally true of a message dropped into junk,
+        # and for two months that gap hid the whole problem: 944 messages sent,
+        # none replied to, and no way to tell an offer nobody wanted from an
+        # offer nobody saw. Sends a probe from each mailbox, waits an hour for
+        # the filter to decide, then logs into the seed and looks.
+        "PlacementRoundWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

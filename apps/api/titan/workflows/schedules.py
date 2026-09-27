@@ -69,6 +69,8 @@ from titan.workflows.mailbox_ramp import mailbox_ramp_workflow_id
 from titan.workflows.optouts import DEFAULT_CRON as OPTOUT_CRON
 from titan.workflows.optouts import pull_opt_outs_workflow_id
 from titan.workflows.orchestrator import orchestrator_workflow_id
+from titan.workflows.placement import DEFAULT_CRON as PLACEMENT_CRON
+from titan.workflows.placement import placement_round_workflow_id
 from titan.workflows.reporting import DEFAULT_CRON as REPORT_CRON
 from titan.workflows.reporting import weekly_report_workflow_id
 from titan.workflows.sender_health import DEFAULT_CRON as HEALTH_CRON
@@ -78,6 +80,7 @@ from titan.workflows.types import (
     CaptureSenderHealthInput,
     DailyReportInput,
     HealSchedulesInput,
+    PlacementRoundInput,
     PollDeliveryEventsInput,
     PullOptOutsInput,
     RampMailboxesInput,
@@ -225,6 +228,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=RampMailboxesInput(workspace_id=ws),
             task_queue=task_queue,
             note="grows each mailbox's daily volume as it earns it",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-placement::{ws}",
+            workflow="PlacementRoundWorkflow",
+            workflow_id=placement_round_workflow_id(ws),
+            cron=PLACEMENT_CRON,
+            arg=PlacementRoundInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="asks whether our mail is reaching inboxes, rather than assuming",
         ),
         ScheduledJob(
             schedule_id=f"titan-housekeeping::{ws}",

@@ -706,6 +706,32 @@ class VerifySendersInput:
 
 
 @dataclasses.dataclass(frozen=True)
+class PlacementRoundInput:
+    workspace_id: str
+    #: Minutes between sending the probes and going to look for them.
+    #:
+    #: Not zero, and the reason is the whole point of the pause: a filter has
+    #: not decided the moment a message is accepted. Checking immediately
+    #: measures the race rather than the filter, and reports almost everything
+    #: as inbox because that is where mail sits before it is moved.
+    settle_minutes: int = 60
+
+
+@dataclasses.dataclass(frozen=True)
+class PlacementRoundResult:
+    sent: int = 0
+    recorded: int = 0
+    #: Probes found, by folder. The keys are ``placement.FOLDERS``.
+    folders: tuple[tuple[str, int], ...] = ()
+    #: Set when the round could not run at all -- no seeds, no mailboxes. The
+    #: distinction matters: zero probes because nothing is configured is not
+    #: the same as zero probes because everything failed, and a result that
+    #: reported both as "sent 0" would make an unconfigured deployment look
+    #: like a broken one and a broken one look unconfigured.
+    skipped: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class RampMailboxesInput:
     workspace_id: str
     #: When false the ramp computes and reports but writes nothing to the

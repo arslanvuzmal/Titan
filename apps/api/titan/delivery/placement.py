@@ -183,6 +183,48 @@ async def latest_round(
     return [dict(r) for r in rows]
 
 
+async def by_mailbox(
+    session: AsyncSession, *, workspace_id: uuid.UUID, days: int = 14
+) -> list[dict[str, object]]:
+    """Placement per sending mailbox, which is not the same as per domain.
+
+    Receivers score a sending address as well as the domain behind it, and on
+    27 September the difference was the whole story: five mailboxes on one
+    domain, and the one that reached an inbox was ``arslan@`` -- 92 sends
+    against ``outreach@``'s 332. A domain-level average would have reported
+    that domain as partly working and left the question of which mailbox to
+    stop using unanswerable.
+
+    Grouped with the provider because a mailbox is not simply good or bad: the
+    same address can sit in the inbox at a small host and in spam at Gmail,
+    and those call for different decisions.
+    """
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT from_email,
+                       provider,
+                       count(*)                                    AS probes,
+                       count(*) FILTER (WHERE folder = 'inbox')    AS inbox,
+                       count(*) FILTER (WHERE folder = 'promotions') AS promotions,
+                       count(*) FILTER (WHERE folder = 'spam')     AS spam,
+                       count(*) FILTER (WHERE folder = 'missing')  AS missing,
+                       count(*) FILTER (WHERE folder IS NULL)      AS unchecked,
+                       max(sent_at)                                AS last_probe
+                  FROM placement_checks
+                 WHERE workspace_id = :ws
+                   AND sent_at > now() - make_interval(days => :days)
+                 GROUP BY 1, 2
+                 ORDER BY 1, 2
+                """
+            ),
+            {"ws": workspace_id, "days": days},
+        )
+    ).mappings()
+    return [dict(r) for r in rows]
+
+
 async def history(
     session: AsyncSession, *, workspace_id: uuid.UUID, days: int = 30
 ) -> list[dict[str, object]]:
@@ -219,6 +261,7 @@ __all__ = [
     "FOLDERS",
     "REACHED",
     "ProbeRow",
+    "by_mailbox",
     "history",
     "latest_round",
     "new_probe_token",

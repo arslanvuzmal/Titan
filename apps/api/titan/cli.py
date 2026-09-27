@@ -33,6 +33,7 @@ from typing import Any
 from pydantic_core import PydanticUndefined
 
 from titan import __version__
+from titan.cli_placement import add_placement_parser
 from titan.config import Settings, get_settings
 from titan.intelligence import sender_auth
 from titan.runtime import configure_event_loop
@@ -2420,6 +2421,10 @@ def main() -> int:
     )
 
     mailbox_parser.set_defaults(func=cmd_mailbox)
+
+    # Placement lives in its own module: this file is past 2,600 lines and
+    # every command in it has to be read to find any one of them.
+    add_placement_parser(sub)
 
     verify_parser = sub.add_parser(
         "verify-contacts",

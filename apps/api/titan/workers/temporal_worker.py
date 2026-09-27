@@ -29,6 +29,7 @@ from titan.activities import mailbox_ramp as mailbox_ramp_activities
 from titan.activities import optouts as optout_activities
 from titan.activities import orchestration as orchestration_activities
 from titan.activities import pipeline as pipeline_activities
+from titan.activities import placement as placement_activities
 from titan.activities import profile as profile_activities
 from titan.activities import readmission as readmission_activities
 from titan.activities import reporting as reporting_activities
@@ -53,6 +54,7 @@ from titan.workflows.housekeeping import HousekeepingWorkflow
 from titan.workflows.mailbox_ramp import MailboxRampWorkflow
 from titan.workflows.optouts import PullOptOutsWorkflow
 from titan.workflows.orchestrator import CampaignOrchestratorWorkflow
+from titan.workflows.placement import PlacementRoundWorkflow
 from titan.workflows.reporting import WeeklyReportWorkflow
 from titan.workflows.research import LeadResearchWorkflow
 from titan.workflows.sender_health import SenderHealthSnapshotWorkflow
@@ -103,6 +105,7 @@ async def main() -> None:
             PullOptOutsWorkflow,
             HousekeepingWorkflow,
             MailboxRampWorkflow,
+            PlacementRoundWorkflow,
             SupervisorWorkflow,
             DailyReportWorkflow,
         ],
@@ -130,6 +133,8 @@ async def main() -> None:
             *optout_activities.ALL_OPTOUT_ACTIVITIES,
             delivery_event_activities.poll_delivery_events,
             mailbox_ramp_activities.ramp_mailboxes,
+            placement_activities.send_placement_probes,
+            placement_activities.read_placement_probes,
             sender_health_activities.capture_sender_health,
         ],
         # Bounded concurrency. An unbounded worker will happily start more

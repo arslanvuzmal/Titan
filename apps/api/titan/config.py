@@ -325,6 +325,39 @@ class Settings(BaseSettings):
     #: a password in `docker compose config`, in shell history and in every
     #: screenshot of a terminal. See titan.delivery.mailboxes.
     mailbox_file: str | None = None
+    #: Where the seed mailboxes live -- the addresses Titan sends itself, then
+    #: reads, to find out which folder its mail lands in. A separate file from
+    #: the sending mailboxes on purpose: a seed that reached the sender pool
+    #: would be cold outreach going out from a personal Gmail, and two files
+    #: cannot make that mistake. See titan.delivery.seeds.
+    #:
+    #: Unset means placement is not measured, which is a supported state and a
+    #: worse one than it looks -- it is the state the estate was in while 944
+    #: messages went unseen.
+    seed_file: str | None = None
+    #: Put a one-pixel image in every message, so an open can be recorded.
+    #:
+    #: **Off, and the default is the decision rather than a placeholder.** A
+    #: tracking pixel is itself a spam signal -- filters score remote images in
+    #: first-contact mail and several strip or warn on them -- and this domain
+    #: has no margin to spend: on 27 September it reached one inbox after six
+    #: straight readings of spam.
+    #:
+    #: The condition for turning it on, written here so it is not left to
+    #: whoever is next in this file: placement holding at inbox for a week
+    #: across the seeds, measured by the placement round rather than assumed.
+    #:
+    #: Note what an open is worth even then. Apple Mail Privacy Protection
+    #: pre-fetches images for every message it receives, so an open from an
+    #: Apple client means delivered, not read. See titan.delivery.open_tracking.
+    open_tracking_enabled: bool = False
+    #: Where the pixel points. The public base URL of the API, without a path.
+    open_tracking_base_url: str | None = None
+    #: Signs the token in the pixel URL. Without it the endpoint serves the
+    #: image and records nothing, which is the right failure: a deployment that
+    #: forgot the secret should lose the measurement, not accept unsigned
+    #: tokens and let anybody mark messages as opened.
+    open_tracking_secret: SecretStr | None = None
     resend_api_key: SecretStr | None = None
     resend_webhook_secret: SecretStr | None = None
 
