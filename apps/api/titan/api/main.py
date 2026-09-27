@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from titan import __version__
+from titan.api.call_sheet import router as call_sheet_router
 from titan.api.calls import router as calls_router
 from titan.api.crm import router as crm_router
 from titan.api.placement import open_pixel_router
@@ -186,6 +187,7 @@ app.include_router(crm_router)
 # rather than the session auth above: the caller is a runtime, not a person,
 # with nobody to log in and no prompt to answer mid-call.
 app.include_router(calls_router)
+app.include_router(call_sheet_router)
 # Whether our own mail is reaching inboxes. Behind the session auth, because
 # the answer names sending addresses and their standing at each provider --
 # operational detail about the estate, not something to serve unauthenticated.
