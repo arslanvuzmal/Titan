@@ -33,6 +33,7 @@ from titan.delivery.mailboxes import load_mailboxes
 from titan.delivery.placement import record_result
 from titan.delivery.placement_probe import plan_round, record_round, send_round
 from titan.delivery.seeds import load_seeds
+from titan.notify.operator import NotificationKind, record_notification
 from titan.workflows.types import PlacementRoundInput, PlacementRoundResult
 
 logger = logging.getLogger(__name__)
@@ -152,10 +153,100 @@ async def read_placement_probes(request: PlacementRoundInput) -> PlacementRoundR
             )
         found[verdict.folder] += 1
 
+    if settings.placement_gate_enabled:
+        await _alert_on_failing_mailboxes(workspace_id, list(registry_addresses()))
+
     return PlacementRoundResult(
         recorded=sum(found.values()),
         folders=tuple(sorted(found.items())),
     )
+
+
+def registry_addresses() -> list[str]:
+    """Every sending mailbox in the pool file, or none when it is unset."""
+    settings = get_settings()
+    if not settings.mailbox_file:
+        return []
+    return list(load_mailboxes(settings.mailbox_file).addresses())
+
+
+async def _alert_on_failing_mailboxes(
+    workspace_id: uuid.UUID, mailboxes: list[str]
+) -> list[str]:
+    """Tell the operator, once a day per mailbox, that one has stopped sending.
+
+    Run straight after the readings are written, because that is the moment a
+    mailbox's verdict changes. The gate itself needs nobody to act -- it stops
+    the mailbox and lets it resume on its own -- but a mailbox going quiet is
+    capacity disappearing, and the operator should hear it from the system
+    rather than notice it in the send count three days later.
+
+    Returns the addresses an email went out for. A mail failure is logged and
+    swallowed: the readings are already committed and are the thing that
+    matters; the alert is a courtesy on top of them.
+    """
+    from titan.delivery import placement_gate
+    from titan.notify.operator_mail import mail_the_operator
+
+    now = dt.datetime.now(dt.UTC)
+    mailed: list[str] = []
+    async with workspace_unit_of_work(workspace_id) as session:
+        # Only mailboxes that are meant to carry outreach. A resting mailbox
+        # is still probed every morning -- that is how it earns its way back --
+        # but its failing a reading is expected, not news.
+        active = {
+            str(a).strip().lower()
+            for a in (
+                await session.execute(
+                    text(
+                        "SELECT from_email FROM sender_identities "
+                        "WHERE workspace_id = :ws AND is_active"
+                    ),
+                    {"ws": workspace_id},
+                )
+            ).scalars()
+        }
+        watched = [m for m in mailboxes if m.strip().lower() in active]
+        verdicts = await placement_gate.verdicts_for(
+            session, workspace_id=workspace_id, mailboxes=watched, now=now
+        )
+        fresh = []
+        for address, verdict in sorted(verdicts.items()):
+            if verdict.may_send:
+                continue
+            note = await record_notification(
+                session,
+                workspace_id=workspace_id,
+                kind=NotificationKind.DELIVERABILITY_ALERT,
+                title=f"{address} paused: {verdict.code}",
+                description=verdict.detail,
+                # One per mailbox, per reason, per day. A mailbox that stays
+                # under the floor for a week is one email a day, not one per
+                # round, and a change of reason is news worth a second one.
+                dedupe_key=f"placement:{address}:{verdict.code}:{now:%Y-%m-%d}",
+                now=now,
+            )
+            if note is not None:
+                fresh.append(verdict)
+
+    for verdict in fresh:
+        try:
+            await mail_the_operator(
+                subject=f"[Titan] {verdict.from_email} paused for placement",
+                body=(
+                    f"{verdict.detail}.\n\n"
+                    "No cold mail leaves this mailbox until its own probes read "
+                    "inbox again. Nothing needs doing to resume it: the morning "
+                    "probe round keeps measuring it, and it starts sending on its "
+                    "own once it is back at or above the floor.\n"
+                ),
+            )
+            mailed.append(verdict.from_email)
+        except Exception:
+            logger.exception(
+                "placement alert mail failed", extra={"mailbox": verdict.from_email}
+            )
+    return mailed
 
 
 __all__ = [

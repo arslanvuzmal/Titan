@@ -41,6 +41,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from titan.config import get_settings
 from titan.db.enums import OutboxStatus
 from titan.delivery.bounces import COUNTS_AGAINST_REPUTATION
 
@@ -285,10 +286,26 @@ async def load_slots(
         )
     ).all()
 
+    # Placement is asked once for the whole pool rather than per row: one
+    # query, and every mailbox judged against the same readings.
+    placement: dict[str, Any] = {}
+    if get_settings().placement_gate_enabled and rows:
+        from titan.delivery import placement_gate
+
+        placement = await placement_gate.verdicts_for(
+            session,
+            workspace_id=workspace_id,
+            mailboxes=[r.from_email for r in rows],
+            now=now,
+        )
+
     resolve = limit_for or _default_limit
     slots: list[MailboxSlot] = []
     for row in rows:
         excluded = unavailable_reason(row)
+        verdict = placement.get(str(row.from_email).strip().lower())
+        if excluded is None and verdict is not None and not verdict.may_send:
+            excluded = verdict.detail
         daily_limit = 0 if excluded else resolve(row, now)
         slots.append(
             MailboxSlot(

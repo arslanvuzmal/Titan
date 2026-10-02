@@ -59,6 +59,9 @@ def sending_settings(**overrides) -> Settings:
         "quiet_hours_enabled": False,
         "quota_min_spacing_seconds": 0,
         "outbox_batch_size": 25,
+        # The one-host sending claim refuses a worker with no host id, so
+        # without this every worker test claims nothing and sends nothing.
+        "sender_host_id": "test-host",
     }
     base.update(overrides)
     return Settings(**base)

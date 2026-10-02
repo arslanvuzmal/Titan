@@ -143,6 +143,11 @@ x-titan-env: &titan-env
   # signal, corporate gateways strip them, and a hosted page produces a click
   # -- which is the engagement signal this system otherwise does not have.
   TITAN_ONE_PAGER_URL: ${TITAN_ONE_PAGER_URL:-}
+  # No cold mail from a mailbox without a recent inbox reading. See
+  # titan.delivery.placement_gate.
+  TITAN_PLACEMENT_GATE_ENABLED: ${TITAN_PLACEMENT_GATE_ENABLED:-false}
+  # "brief" for the cold domains: 60-120 words, one link. See Settings.message_form.
+  TITAN_MESSAGE_FORM: ${TITAN_MESSAGE_FORM:-full}
   # The one-page brief, attached to every message. Unset attaches nothing.
   # The file is read at send time from the docs mount below, so regenerating it
   # takes effect without a rebuild.

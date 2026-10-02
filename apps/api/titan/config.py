@@ -335,6 +335,22 @@ class Settings(BaseSettings):
     #: worse one than it looks -- it is the state the estate was in while 944
     #: messages went unseen.
     seed_file: str | None = None
+    #: Refuse cold mail from any mailbox without a recent inbox reading.
+    #:
+    #: Off by default because switching it on with no seeds configured stops
+    #: every send -- which is correct, and is not something a fresh checkout
+    #: should do by surprise. In production it is the rule: a mailbox sends only
+    #: while its own probes have reached the inbox at 70%+ in the last 48 hours,
+    #: and a domain read under that on two consecutive days rests for 14. See
+    #: titan.delivery.placement_gate.
+    placement_gate_enabled: bool = False
+    #: Which message the composer writes. ``"full"`` is the 140-320 word form
+    #: with the mechanism, the repair and a references block. ``"brief"`` is
+    #: 60-120 words with exactly one link, for the cold-sending domains: a
+    #: stranger's first message with four URLs in it reads as phishing to a
+    #: filter. Drafts already queued are sent whichever is set; only new drafts
+    #: follow it.
+    message_form: Literal["full", "brief"] = "full"
     #: Put a one-pixel image in every message, so an open can be recorded.
     #:
     #: **Off, and the default is the decision rather than a placeholder.** A

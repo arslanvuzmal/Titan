@@ -222,9 +222,7 @@ def build_headers(
 #: for pretending the feature does not exist -- so these are the bounds.
 MAX_ATTACHMENTS = 1
 MAX_ATTACHMENT_BYTES = 400 * 1024
-ALLOWED_ATTACHMENT_TYPES: frozenset[tuple[str, str]] = frozenset(
-    {("application", "pdf")}
-)
+ALLOWED_ATTACHMENT_TYPES: frozenset[tuple[str, str]] = frozenset({("application", "pdf")})
 
 #: File signatures that are executable or archive content whatever the name
 #: says. Checked on the bytes because the filename is the one part of an
@@ -804,11 +802,34 @@ class DeliverabilityContext:
     #: attachments existed, and checked here rather than at assembly so an
     #: attachment passes the same send boundary as every other property.
     attachments: tuple[Any, ...] = field(default=())
+    #: The placement gate's verdict for the sending mailbox. None when the gate
+    #: is switched off, which adds no signal at all -- not a pass.
+    placement: Any | None = None
+
+
+def check_placement(verdict: Any | None) -> list[Signal]:
+    """BLOCK when the sending mailbox has not earned an inbox reading.
+
+    Typed loosely so this module does not import the gate, which imports the
+    database layer; the verdict is ``titan.delivery.placement_gate.Verdict``.
+    """
+    if verdict is None or verdict.may_send:
+        return []
+    return [
+        Signal(
+            verdict.code,
+            Severity.BLOCK,
+            verdict.detail,
+            "Placement probes run every morning; this mailbox resumes on its own "
+            "once its readings are back at or above the floor.",
+        )
+    ]
 
 
 def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
     """Every deliverability check, in one report."""
     signals: list[Signal] = []
+    signals.extend(check_placement(ctx.placement))
 
     for problem in ctx.auth_errors:
         signals.append(

@@ -75,6 +75,7 @@ from titan.db.session import get_sessionmaker
 from titan.delivery import (
     adaptive_limits,
     deliverability,
+    placement_gate,
     quotas,
     sender_health,
     sender_pool,
@@ -92,8 +93,7 @@ from titan.intelligence import domain_health
 from titan.intelligence.domain_health import DomainHealth, DomainWindow
 from titan.intelligence.greeting import retimed_pair
 from titan.intelligence.message_validator import (
-    PITCH_MAX_WORDS,
-    PITCH_MIN_WORDS,
+    ANY_FORM_BAND,
     pitch_of,
     prohibited_content,
 )
@@ -187,9 +187,7 @@ def with_compliant_footer(
     return dataclasses.replace(email, text_body=text_body, html_body=html_body)
 
 
-def with_local_greeting(
-    email: OutboundEmail, local: dt.datetime | None
-) -> OutboundEmail:
+def with_local_greeting(email: OutboundEmail, local: dt.datetime | None) -> OutboundEmail:
     """Set the salutation to the recipient's time of day, at the wire.
 
     The third instance of the same drift the two functions around this one
@@ -228,8 +226,7 @@ def with_local_greeting(
 #: attachments knows what to look for. Added by the same function that attaches
 #: the document, so the message cannot claim one that is not there.
 ONE_PAGER_NOTE = (
-    "I have attached a one-page summary of how the assessment works, "
-    "with references."
+    "I have attached a one-page summary of how the assessment works, with references."
 )
 
 
@@ -286,14 +283,10 @@ def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
     # Above the signature, at the end of the pitch: the reader has finished the
     # argument and this is the offer of more, which is where a supporting
     # document belongs. Below the signature it reads as a footer artefact.
-    text_body = _insert_before_signature(
-        email.text_body, ONE_PAGER_NOTE, email.from_name
-    )
+    text_body = _insert_before_signature(email.text_body, ONE_PAGER_NOTE, email.from_name)
     html_body = email.html_body
     if html_body:
-        block = (
-            f'\n    <p style="margin:0 0 16px;">{_html_escape(ONE_PAGER_NOTE)}</p>\n'
-        )
+        block = f'\n    <p style="margin:0 0 16px;">{_html_escape(ONE_PAGER_NOTE)}</p>\n'
         marker = '<p style="margin:24px 0 0;color:#444;">'
         html_body = (
             html_body.replace(marker, block + "    " + marker, 1)
@@ -450,7 +443,7 @@ def _still_passes_todays_rules(draft: MessageDraft) -> bool:
             )
             return False
         words = len(pitch_of(body, get_settings().owner_name).split())
-        if not PITCH_MIN_WORDS <= words <= PITCH_MAX_WORDS:
+        if not ANY_FORM_BAND[0] <= words <= ANY_FORM_BAND[1]:
             logger.info(
                 "draft is outside the message length band; not sending",
                 extra={"draft_id": str(draft.id), "pitch_words": words},
@@ -492,10 +485,9 @@ class OutboxWorker:
         Somebody has to be able to tell the two apart.
         """
         now = self._now()
-        stale = (
-            self._claim_refusal_last is None
-            or (now - self._claim_refusal_last) > dt.timedelta(hours=1)
-        )
+        stale = self._claim_refusal_last is None or (
+            now - self._claim_refusal_last
+        ) > dt.timedelta(hours=1)
         if self._claim_refusal_logged and not stale:
             return
         self._claim_refusal_logged = True
@@ -828,11 +820,12 @@ class OutboxWorker:
                     "warmup_limit_reached",
                     "complaint_rate_exceeded",
                     "bounce_rate_exceeded",
+                    *placement_gate.CODES,
                 }
                 for s in placement.blocking
             ):
-                # Temporary: volume or reputation. Defer rather than discard --
-                # and all three of these are facts about *this mailbox*, not
+                # Temporary: volume, reputation or placement. Defer rather than
+                # discard -- and every one of these is a fact about *this mailbox*, not
                 # about the recipient or the hour, so another mailbox in the
                 # pool may be able to carry it today.
                 recorded = await self._defer_or_repin(
@@ -1410,6 +1403,21 @@ class OutboxWorker:
             or 0
         )
 
+        # Where this mailbox's own probes have been landing. Checked here, at
+        # the send boundary, as well as at selection: the pool stops new work
+        # reaching a mailbox that fails it, and this stops work that was already
+        # assigned before its readings turned.
+        placement = None
+        if self._settings.placement_gate_enabled and sender is not None:
+            placement = (
+                await placement_gate.verdicts_for(
+                    session,
+                    workspace_id=row.workspace_id,
+                    mailboxes=[sender.from_email],
+                    now=now,
+                )
+            ).get(sender.from_email.strip().lower())
+
         headers = dict(email.headers)
         if email.list_unsubscribe:
             headers["List-Unsubscribe"] = email.list_unsubscribe
@@ -1437,6 +1445,7 @@ class OutboxWorker:
                 now=now,
                 warmup_target=sender.daily_send_limit if sender else 0,
                 attachments=tuple(email.attachments),
+                placement=placement,
             )
         )
 
