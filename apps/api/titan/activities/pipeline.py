@@ -79,8 +79,8 @@ from titan.intelligence.contacts import (
 from titan.intelligence.domain_health import WINDOW_DAYS, DomainWindow
 from titan.intelligence.findings import DetectedFinding, detect_findings
 from titan.intelligence.message_validator import (
-    PITCH_MAX_WORDS,
     MessageContext,
+    pitch_band,
     pitch_of,
     validate_message,
 )
@@ -1494,7 +1494,7 @@ async def _rephrase(
     # correct.
     grew_past_the_band = (
         len(pitch_of(outcome.message.body, get_settings().owner_name).split())
-        > PITCH_MAX_WORDS
+        > pitch_band(get_settings().message_form)[1]
     )
     if outcome.rewritten and grew_past_the_band:
         logger.info(
@@ -1816,6 +1816,10 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             # opening cold, and stamps the step into the variant so the A/B
             # decision can tell step 2's wording from step 1's.
             step_number=request.step_number,
+            # The short form for cold domains. A setting rather than a
+            # per-campaign choice: it follows the sending infrastructure, and
+            # the infrastructure is the estate's, not a campaign's.
+            brief=settings.message_form == "brief",
             # None unless the manager has promoted a register on measured
             # evidence, in which case every lead gets it instead of the one
             # their id happened to select.
@@ -1853,6 +1857,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             portfolio_url=str(settings.owner_portfolio_url).rstrip("/"),
             mailing_address=mailing_address,
             unsubscribe_present=True,
+            form=settings.message_form,
         )
     )
 

@@ -39,8 +39,7 @@ from titan.db.enums import DraftStatus, OutboxStatus
 from titan.db.models import AuditFinding, Message, MessageDraft, OutboxMessage
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.intelligence.message_validator import (
-    PITCH_MAX_WORDS,
-    PITCH_MIN_WORDS,
+    ANY_FORM_BAND,
     pitch_of,
     prohibited_content,
 )
@@ -87,7 +86,7 @@ def why_stale(body: str, owner_name: str) -> str:
     if violation is not None:
         return violation.code.value
     words = len(pitch_of(body or "", owner_name).split())
-    if not PITCH_MIN_WORDS <= words <= PITCH_MAX_WORDS:
+    if not ANY_FORM_BAND[0] <= words <= ANY_FORM_BAND[1]:
         return f"outside_the_word_band ({words} words)"
     return ""
 

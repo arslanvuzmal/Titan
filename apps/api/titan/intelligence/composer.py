@@ -154,6 +154,16 @@ class ComposerContext:
     #: see ``titan.intelligence.case_studies`` for why the fallback is a
     #: weaker true sentence rather than a stronger invented one.
     case_study: CaseStudy | None = None
+    #: The short form for cold domains: observation, cost, repair, who I am,
+    #: ask -- with the one link in the "who I am" sentence and nothing else.
+    #:
+    #: Drops the mechanism paragraph, the link woven into the observation and
+    #: the references block. Each is good copy and each costs placement on a
+    #: domain with no reputation: four URLs in a first message from a stranger
+    #: is the shape of a phishing mail, and 238 words is twice what anybody
+    #: reads from someone they do not know. The citations are not lost; they
+    #: move to the evidence page, which the message will link instead.
+    brief: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -758,7 +768,7 @@ _CONTEXT_REGISTERS: tuple[str, ...] = (
 _RELEVANCE_REGISTERS: tuple[str, ...] = (
     "You can see how I approach this kind of work on {link}.",
     "There is a write-up of how I go about it on {link}.",
-    "{link} has examples of the same work, if it helps to see it first.",
+    "There are examples of the same work on {link}, if it helps to see it first.",
     "I keep examples of this on {link} if you want a look before replying.",
 )
 
@@ -1196,7 +1206,12 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
         )
         # Lowercased join: "In case it got buried: I was looking at..." reads as
         # two sentences colliding.
-        observation = opener + observation[0].lower() + observation[1:]
+        #
+        # Except the pronoun: "In case it got buried: i was reviewing..." is
+        # what lowercasing "I was reviewing" produced, on every follow-up.
+        if not observation.startswith("I "):
+            observation = observation[0].lower() + observation[1:]
+        observation = opener + observation
 
     # 2. What it means to this business, in this business's words -- unless the
     #    industry sentence would understate it, which is true of load time and
@@ -1288,7 +1303,20 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     # page Titan did not actually open would make the observation a lie, so an
     # absent page_url produces no link rather than a guessed one.
     evidence = _evidence_anchor(finding, ctx.org_domain)
-    observation_text, observation_html = _link_observation(observation, evidence)
+    if ctx.brief:
+        # No link in the observation: the brief form carries exactly one, and
+        # it belongs to the sentence about the sender, where a click means
+        # interest rather than suspicion.
+        observation_text, observation_html = observation, _esc(observation)
+        # The mechanism and the repair go too. They are the two paragraphs a
+        # reader needs only once they are interested, and the ask already
+        # offers them: twenty minutes to go through it is where the "how" is
+        # worth its words. Kept, they put the message at 117-153 words; the
+        # band for a stranger is 60-120.
+        problem = ""
+        solution = ""
+    else:
+        observation_text, observation_html = _link_observation(observation, evidence)
 
     # Order: what I found, what is going on, what it costs, why that bites
     # now, how it gets fixed, who I am, and the ask. A detail paragraph is
@@ -1323,8 +1351,12 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     # where a reader looks for it and where it does not interrupt the argument.
     # ``evidence`` is reused rather than re-derived so the page named here is
     # provably the page the observation was made on.
-    references = _reference_block(
-        finding.issue_type, evidence, one_pager_url=ctx.one_pager_url
+    references = (
+        ()
+        if ctx.brief
+        else _reference_block(
+            finding.issue_type, evidence, one_pager_url=ctx.one_pager_url
+        )
     )
     references_text, references_html = _render_references(references)
     # The signature carries no portfolio link: it was already given above, in
@@ -1375,12 +1407,20 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
             # recording the version before the anchor was woven in leaves every
             # observation looking unsupported -- the claim map drifting from
             # the body is exactly what building them together is meant to stop.
-            "sentence": observation_text,
+            #
+            # Per sentence, for the same reason as the mechanism below. A
+            # follow-up prefixes "I wrote last week about example.com." and the
+            # validator's splitter makes that two sentences, so one entry for
+            # the whole observation matched neither and every follow-up failed
+            # as an unsupported claim.
+            "sentence": sentence,
             "claim": finding.issue_type,
             "finding_id": _finding_id(finding),
             "evidence_ids": list(ctx.evidence_ids),
             "source_url": finding.page_url,
-        },
+        }
+        for sentence in (sentences(observation_text) or [observation_text])
+    ] + [
         {
             "sentence": consequence,
             "claim": f"{finding.issue_type}:business_impact",
@@ -1421,7 +1461,9 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
         body=body,
         body_html=body_html,
         claim_map=claim_map,
-        variant=f"v{index}" + (f":step{ctx.step_number}" if ctx.step_number else ""),
+        variant=f"v{index}"
+        + (f":step{ctx.step_number}" if ctx.step_number else "")
+        + (":brief" if ctx.brief else ""),
         engine=engine,
         template_key=f"{engine.value}:{ctx.offer_key}"[:60],
         pitch_words=len(pitch.split()),
@@ -1697,15 +1739,11 @@ def _reference_block(
     if evidence is not None:
         # "Page examined" pointing at maps.google.com invites exactly the
         # question the citation exists to close.
-        label = (
-            LISTING_EVIDENCE_LABEL if _is_listing(evidence.href) else EVIDENCE_LABEL
-        )
+        label = LISTING_EVIDENCE_LABEL if _is_listing(evidence.href) else EVIDENCE_LABEL
         block.append(Reference(publisher="", title=label, url=evidence.href))
     block.extend(references_for(issue_type))
     if one_pager_url:
-        block.append(
-            Reference(publisher="", title=ONE_PAGER_LABEL, url=one_pager_url)
-        )
+        block.append(Reference(publisher="", title=ONE_PAGER_LABEL, url=one_pager_url))
     return tuple(block)
 
 

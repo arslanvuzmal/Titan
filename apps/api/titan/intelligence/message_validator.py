@@ -59,6 +59,30 @@ MIN_BODY_WORDS = 40
 PITCH_MIN_WORDS = 140
 PITCH_MAX_WORDS = 320
 
+#: The band for the brief form (``Settings.message_form = "brief"``), which is
+#: what goes out from the cold domains: observation, cost, who I am, ask -- the
+#: mechanism, the repair and the references moved to the evidence page. Across
+#: every issue type and register it composes to 74-112 words. Under 60, a part
+#: is missing; over 120, it is the full form wearing the wrong label.
+BRIEF_PITCH_MIN_WORDS = 60
+BRIEF_PITCH_MAX_WORDS = 120
+
+
+def pitch_band(form: str = "full") -> tuple[int, int]:
+    """The word band a message of this form has to land in, at compose time."""
+    if form == "brief":
+        return BRIEF_PITCH_MIN_WORDS, BRIEF_PITCH_MAX_WORDS
+    return PITCH_MIN_WORDS, PITCH_MAX_WORDS
+
+
+#: What the send gate and the redraft check accept: either form.
+#:
+#: They run on drafts already written, and a switch of form must not refuse
+#: everything queued under the previous one -- the compose-time check above is
+#: the strict one, and it ran when each draft was written. This bound exists to
+#: catch a body mangled after the fact, which lands outside both forms.
+ANY_FORM_BAND = (BRIEF_PITCH_MIN_WORDS, PITCH_MAX_WORDS)
+
 
 class ViolationCode(StrEnum):
     UNSUPPORTED_CLAIM = "unsupported_claim"
@@ -144,6 +168,8 @@ class MessageContext:
     #: Text harvested from the prospect's site. Used to detect a model echoing
     #: injected instructions back into the message.
     untrusted_page_text: str = ""
+    #: ``"full"`` or ``"brief"``: which word band the pitch is held to.
+    form: str = "full"
 
 
 # --------------------------------------------------------------------------
@@ -428,18 +454,19 @@ def validate_message(ctx: MessageContext) -> ValidationReport:
         violations.append(Violation(ViolationCode.TOO_SHORT, f"only {words} words"))
 
     pitch_words = len(pitch_of(body, ctx.sender_name).split())
-    if pitch_words > PITCH_MAX_WORDS:
+    band_min, band_max = pitch_band(ctx.form)
+    if pitch_words > band_max:
         violations.append(
             Violation(
                 ViolationCode.PITCH_TOO_LONG,
-                f"{pitch_words} words before the signature > {PITCH_MAX_WORDS}",
+                f"{pitch_words} words before the signature > {band_max}",
             )
         )
-    elif pitch_words < PITCH_MIN_WORDS:
+    elif pitch_words < band_min:
         violations.append(
             Violation(
                 ViolationCode.PITCH_TOO_SHORT,
-                f"{pitch_words} words before the signature < {PITCH_MIN_WORDS}",
+                f"{pitch_words} words before the signature < {band_min}",
             )
         )
 
@@ -679,6 +706,9 @@ def _normalize(text: str) -> str:
 
 
 __all__ = [
+    "ANY_FORM_BAND",
+    "BRIEF_PITCH_MAX_WORDS",
+    "BRIEF_PITCH_MIN_WORDS",
     "MAX_BODY_WORDS",
     "PITCH_MAX_WORDS",
     "PITCH_MIN_WORDS",
@@ -686,6 +716,7 @@ __all__ = [
     "ValidationReport",
     "Violation",
     "ViolationCode",
+    "pitch_band",
     "pitch_of",
     # Public so content assembled before a message exists -- the case study
     # registry -- is held to the same rule at a point a human can fix it.
