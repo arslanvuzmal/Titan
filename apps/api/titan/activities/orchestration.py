@@ -324,7 +324,7 @@ async def plan_campaign_cycle(request: CampaignCycleInput) -> CampaignCyclePlan:
             now=now,
             due_steps=due_steps,
         )
-        pool = await _pool_size(session, campaign_id=campaign_id)
+        pool = await _pool_size(session, campaign_id=campaign_id, min_score=min_score)
 
     if not planned:
         detail = (
@@ -962,7 +962,13 @@ async def _reallocate_capacity(workspace_id: uuid.UUID, now: dt.datetime) -> Non
                 current = effective_daily_limit(
                     policy.daily_send_limit, policy.managed_daily_send_limit
                 )
-                leads = await _pool_size(session, campaign_id=campaign.id)
+                leads = await _pool_size(
+                    session,
+                    campaign_id=campaign.id,
+                    min_score=effective_min_lead_score(
+                        policy.min_lead_score, policy.managed_min_lead_score
+                    ),
+                )
                 health = classify_campaign(
                     CampaignWindow(
                         campaign_id=str(campaign.id),
