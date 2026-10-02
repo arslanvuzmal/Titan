@@ -1,0 +1,80 @@
+# One cold-sending domain's tracking host: go.<domain>. Installed into
+# deploy/nginx/tls/track-__HOST__.conf by deploy/tls/enable-tracking-hosts.sh,
+# which substitutes __HOST__ and __HOME__, and only once a certificate exists --
+# nginx refuses to start when `ssl_certificate` points at nothing, and that
+# would cost all ingress, the CRM included.
+#
+# Why a host per sending domain at all: every URL in a message should sit on
+# the sender's own domain. A pixel or a link on titan.arslanvuzmallone.com
+# inside mail from vuzmalstudio.com is a second, unrelated domain in a
+# stranger's first message, which filters score and people distrust.
+#
+# Deliberately narrow. This host serves the open pixel and (from Phase 1) the
+# evidence pages, and nothing else: not the CRM, not the API. Anything else
+# is redirected to the operator's own site, which is also what a curious
+# recipient typing the bare domain should land on.
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __HOST__;
+
+    ssl_certificate     /etc/letsencrypt/live/__HOST__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__HOST__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:TitanTLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    resolver_timeout 5s;
+    set $api_upstream http://api:8000;
+
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "no-referrer";
+
+    # The open pixel. Never cached by anything between us and the client: a
+    # cached pixel is an open that happened once and is then served for free.
+    location ^~ /o/ {
+        proxy_pass $api_upstream$request_uri;
+        proxy_set_header Host $host;
+        # The classifier reads these. Apple's proxy, Gmail's proxy and a
+        # corporate scanner are told apart by address and user agent, so
+        # both must reach the API exactly as nginx saw them.
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    # Evidence pages, served by the API from Phase 1.
+    location ^~ /e/ {
+        proxy_pass $api_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header User-Agent $http_user_agent;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        return 302 https://__HOME__/;
+    }
+}
+
+server {
+    listen 80;
+    server_name __HOST__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+        access_log off;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
