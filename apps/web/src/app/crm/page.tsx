@@ -20,7 +20,7 @@ import Link from 'next/link';
 import React from 'react';
 import { TodaySection } from '@/components/crm/Today';
 import { Badge, Card, ErrorNote, Spinner, Stat } from '@/components/crm/ui';
-import { useApi } from '@/lib/session';
+import { useLiveApi } from '@/lib/session';
 import { api, type Health } from '@/lib/titan';
 
 function Distribution({
@@ -83,9 +83,14 @@ function ColdMailBanner({ health }: { health: Health | null }) {
   );
 }
 
+const REFRESH_MS = 60_000;
+
 export default function OverviewPage() {
-  const { data, error, loading, reload } = useApi((t) => api.stats(t), []);
-  const health = useApi((t) => api.health(t), []);
+  // Both refresh themselves once a minute, so a page left open in the morning
+  // still tells the truth at four: a reply that arrived at noon shows up, and a
+  // mailbox that paused shows up, without anybody pressing reload.
+  const { data, error, loading, reload } = useLiveApi((t) => api.stats(t), REFRESH_MS);
+  const health = useLiveApi((t) => api.health(t), REFRESH_MS);
 
   if (loading && !data) return <Spinner label="Loading workspace" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;

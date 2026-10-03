@@ -29,7 +29,7 @@ import {
   Spinner,
   Time,
 } from '@/components/crm/ui';
-import { useApi, useSession } from '@/lib/session';
+import { useLiveApi, useSession } from '@/lib/session';
 import { api, type DeskReply } from '@/lib/titan';
 
 /** How each reading of a reply is labelled, in words an owner would use. */
@@ -210,7 +210,8 @@ function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) 
 }
 
 export default function RepliesPage() {
-  const { data, error, loading, reload } = useApi((t) => api.replies(t), []);
+  // A minute, so a reply that arrives while the page is open appears on it.
+  const { data, error, loading, reload } = useLiveApi((t) => api.replies(t), 60_000);
 
   return (
     <div className="space-y-5">

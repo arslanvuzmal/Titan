@@ -21,7 +21,7 @@
 import Link from 'next/link';
 import React from 'react';
 import { Badge, Card, Empty, ErrorNote, Spinner, Table, Time } from '@/components/crm/ui';
-import { useApi } from '@/lib/session';
+import { useApi, useLiveApi } from '@/lib/session';
 import { api, type MailboxStatus } from '@/lib/titan';
 
 const WHY: Record<string, string> = {
@@ -77,7 +77,9 @@ function Check({ done, children }: { done: boolean; children: React.ReactNode })
 }
 
 export default function InboxHealthPage() {
-  const health = useApi((t) => api.health(t), []);
+  // The verdicts refresh each minute; the placement table changes once a
+  // morning, so it is read once.
+  const health = useLiveApi((t) => api.health(t), 60_000);
   const placement = useApi((t) => api.placement(t, 14), []);
 
   if (health.loading && !health.data) return <Spinner label="Checking the mailboxes" />;
