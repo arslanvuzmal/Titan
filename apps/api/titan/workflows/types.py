@@ -741,6 +741,24 @@ class PlacementRoundResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class WarmupRoundInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WarmupRoundResult:
+    planned: int = 0
+    sent: int = 0
+    failed: int = 0
+    rescued_from_spam: int = 0
+    marked_read: int = 0
+    replied: int = 0
+    errors: tuple[str, ...] = ()
+    #: Why the round did not run at all, when it did not.
+    skipped: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class RampMailboxesInput:
     workspace_id: str
     #: When false the ramp computes and reports but writes nothing to the

@@ -86,10 +86,13 @@ from titan.workflows.types import (
     RampMailboxesInput,
     SweepStrandedInput,
     VerifySendersInput,
+    WarmupRoundInput,
     WeeklyReportInput,
 )
 from titan.workflows.verification import DEFAULT_CRON as VERIFY_CRON
 from titan.workflows.verification import sender_verification_workflow_id
+from titan.workflows.warmup import DEFAULT_CRON as WARMUP_CRON
+from titan.workflows.warmup import warmup_round_workflow_id
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +240,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=PlacementRoundInput(workspace_id=ws),
             task_queue=task_queue,
             note="asks whether our mail is reaching inboxes, rather than assuming",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-warmup::{ws}",
+            workflow="WarmupRoundWorkflow",
+            workflow_id=warmup_round_workflow_id(ws),
+            cron=WARMUP_CRON,
+            arg=WarmupRoundInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="sends and rescues warm-up mail with partners on Gmail and Outlook",
         ),
         ScheduledJob(
             schedule_id=f"titan-housekeeping::{ws}",

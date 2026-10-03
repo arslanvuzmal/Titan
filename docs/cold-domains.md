@@ -1,69 +1,97 @@
-# Cold-sending domains: setup
+# Sending domains: repair arslanvuzmallone.com first, add domains later
 
-Phase 0 of the two-channel plan. Cold mail moves off `arslanvuzmallone.com`,
-which keeps the website, replies and warm conversations. Everything below is
-done once per domain. Only the operator does steps 1, 2 and 6 (purchases,
-accounts, passwords).
+Decided 3 October 2026: cold mail keeps going out from `arslanvuzmallone.com`
+and its existing Spacemail mailboxes. That domain is repaired first. New
+domains are bought only once it holds (Part B), never as a substitute for
+fixing it.
 
-## 1. Buy three domains
+Where it stands: every placement probe ever read (6 of 6) landed in spam.
+Authentication is clean (SPF, DKIM `spacemail`, DMARC `p=quarantine`); the
+damage is reputation — 492 cold sends in one week on a seven-week-old domain,
+a PDF on many of them, and no warm-up traffic at all after Smartlead was
+dropped on 24 August.
 
-Brand-shaped, `.com` or `.co`, no hyphens, no digits, no "free/get/now/deal".
-Candidates (availability not checked): `vuzmalstudio.com`, `arslanvuzmal.co`,
-`workwitharslan.com`, `vuzmalworks.com`, `arslanbuilds.com`.
+## Part A — repair (now)
 
-At the registrar, forward the bare domain (301) to `https://arslanvuzmallone.com`.
-
-## 2. Two mailboxes per domain
-
-One on Google Workspace, one on Microsoft 365, across the three domains — six
-in all. Real first-name addresses (`arslan@`, `hello@`), your photo, a plain
-signature. No aliases, no shared inboxes.
-
-## 3. DNS records (per domain)
-
-| Type | Name | Value | Notes |
-|---|---|---|---|
-| MX | @ | provider's MX | Google or Microsoft, as instructed by the admin console |
-| TXT | @ | `v=spf1 include:_spf.google.com ~all` | or `include:spf.protection.outlook.com`; one SPF record only |
-| TXT/CNAME | provider selector | DKIM key from the admin console | 2048-bit; turn signing on after the record resolves |
-| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:dmarc@arslanvuzmallone.com; adkim=r; aspf=r` | move to `p=quarantine` after 30 clean days |
-| A | `go` | `168.119.161.220` | the tracking host (pixel, evidence pages) |
-
-## 4. Register for reputation data
-
-- Google Postmaster Tools: add the domain, verify with the TXT record it gives.
-- Microsoft SNDS: register the sending IPs it reports for the M365 mailboxes.
-
-## 5. Tracking hosts and TLS (on the server)
-
-Add to `/opt/titan/.env`:
+### A1. Switch on the protections (server `.env`, then restart)
 
 ```
-TITAN_TRACKING_HOSTS=go.vuzmalstudio.com,go.arslanvuzmal.co,go.workwitharslan.com
-TITAN_TRACKING_HOME=arslanvuzmallone.com
+TITAN_PLACEMENT_GATE_ENABLED=true
+TITAN_MESSAGE_FORM=brief
+TITAN_ONE_PAGER_SAMPLE_PERCENT=0
 ```
 
-Then run `deploy/tls/enable-tracking-hosts.sh`. It waits for each `go` record
-to resolve, proves the challenge path, gets a certificate, and checks the pixel
-answers over https. Safe to re-run; a host that is not ready is skipped.
+- **Placement gate:** a mailbox sends cold mail only while its own probes
+  read ≥70% inbox over the last 48 hours. While the domain reads spam, cold
+  sending pauses by design: more cold mail into spam folders deepens the hole.
+  Drafts keep being written and wait.
+- **Brief form:** 60–120 words, one link, no references block, no attachment.
+- Only `arslan@` carries cold mail. `outreach@`, `sales@` and `projects@`
+  take part in warm-up and placement probes only.
 
-## 6. Mailbox credentials
+### A2. Seed inboxes on the server
 
-Add each mailbox to `secrets/mailboxes.json` (the operator fills the
-passwords; Titan never sees them typed). Use app passwords; SMTP on 587
-STARTTLS (Hetzner blocks 25 and 465). Then:
+The gate is blind without readings, and 13 probes went unread in September
+because the seed credentials were not on the server.
+
+- At least 2 Gmail, 2 Outlook/Hotmail, 1 Yahoo — fresh accounts used for
+  nothing else.
+- Listed in `secrets/seeds.json`, `TITAN_SEED_FILE=/run/secrets/seeds.json`.
+
+### A3. Warm-up partners
+
+Mail between our own five mailboxes never leaves Spacemail, so it teaches
+Gmail and Microsoft nothing. Partners are mailboxes on those providers that
+receive our warm-up mail, rescue it from spam, read it and reply.
+
+- 3–5 more fresh Gmail / Outlook accounts — **not** the seeds. A seed that
+  rescues and replies to our mail would file our next probe in the inbox
+  because of its own history, and the gate would reopen on a reading it
+  manufactured. Titan refuses the overlap.
+- Listed in `secrets/warmup_partners.json` (same shape as `mailboxes.json`),
+  then:
 
 ```
-docker compose exec api python -m titan.cli mailbox check
+TITAN_WARMUP_PARTNER_FILE=/run/secrets/warmup_partners.json
+TITAN_WARMUP_ENABLED=true
 ```
 
-## 7. Warm-up, then the switch
+The round runs daily at 09:10 UTC, after the placement round is read.
 
-- 21 days of warm-up before any cold send.
-- Seed mailboxes for the placement round must be on the server
-  (`TITAN_SEED_FILE`) with working credentials — 13 probes went unread in
-  September because they were not.
-- Set `TITAN_PLACEMENT_GATE_ENABLED=true`. From then on a mailbox sends only
-  while its own probes read ≥70% inbox in the last 48 hours.
-- When the first new mailbox reads inbox for 7 days: set
-  `TITAN_MESSAGE_FORM=brief` and `TITAN_ONE_PAGER_SAMPLE_PERCENT=0`.
+Five partners is a small network. A paid warm-up network (hundreds of real
+inboxes, roughly $15–30 per mailbox a month) moves reputation faster; it can
+run alongside this, connected to `arslan@` by SMTP/IMAP.
+
+### A4. Reputation data
+
+- **Google Postmaster Tools:** add `arslanvuzmallone.com`, verify with the TXT
+  record it gives. It shows Gmail's own domain reputation once volume allows.
+- **DMARC reports:** add `rua=mailto:<an address you read>` to the existing
+  `_dmarc` record, keeping `p=quarantine`.
+
+### A5. What "repaired" means
+
+All of these, held for 14 consecutive days:
+
+- `arslan@` reads ≥80% inbox at Gmail **and** at Outlook;
+- cold sending running at ≥15 a day through the gate;
+- hard bounces under 2%, no spam complaints.
+
+Then, and only then, Part B.
+
+## Part B — more domains (after A5)
+
+Three brand-shaped domains, `.com` or `.co`, no hyphens or digits. Two
+mailboxes each (Workspace + M365). Per domain:
+
+| Type | Name | Value |
+|---|---|---|
+| MX | @ | provider's MX |
+| TXT | @ | `v=spf1 include:_spf.google.com ~all` (or the Microsoft include) |
+| TXT/CNAME | DKIM selector | key from the admin console, 2048-bit |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:…` → `quarantine` after 30 clean days |
+| A | `go` | `168.119.161.220` |
+
+Then `TITAN_TRACKING_HOSTS=go.<domain>,…` and
+`deploy/tls/enable-tracking-hosts.sh`, credentials into `mailboxes.json`,
+21 days of warm-up, and the same placement gate before any cold send.

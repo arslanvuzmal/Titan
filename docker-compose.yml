@@ -70,6 +70,10 @@ x-titan-env: &titan-env
   # mounted read-only into the three services that genuinely need it and
   # into nothing else. See titan.delivery.mailboxes.
   TITAN_MAILBOX_FILE: ${TITAN_MAILBOX_FILE:-}
+  # Daily warm-up traffic with partner mailboxes on Gmail/Outlook. See
+  # titan.delivery.warmup.round_pool; partners must not be placement seeds.
+  TITAN_WARMUP_ENABLED: ${TITAN_WARMUP_ENABLED:-false}
+  TITAN_WARMUP_PARTNER_FILE: ${TITAN_WARMUP_PARTNER_FILE:-}
   # --- mailbox verification ---
   # Titan's own probe. Same class of gap as the SMTP block above: the
   # settings existed and nothing passed them in, so a container read the

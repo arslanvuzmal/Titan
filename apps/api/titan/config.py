@@ -351,6 +351,18 @@ class Settings(BaseSettings):
     #: filter. Drafts already queued are sent whichever is set; only new drafts
     #: follow it.
     message_form: Literal["full", "brief"] = "full"
+    #: Run warm-up traffic every day, from the schedule rather than by hand.
+    #:
+    #: Off by default: warm-up sends real mail between real mailboxes, and a
+    #: fresh checkout should not start doing that on its own. In production it
+    #: is how a burnt domain earns its way back -- the receiving half rescues
+    #: our mail from spam folders, which is the signal filters learn from.
+    warmup_enabled: bool = False
+    #: Mailboxes outside our domain that take part in warm-up -- Gmail and
+    #: Outlook accounts the operator holds. Same JSON shape as the mailbox
+    #: file, and a separate file so a partner can never carry outreach. Must
+    #: not overlap the seed file: see titan.delivery.warmup.round_pool.
+    warmup_partner_file: str | None = None
     #: Put a one-pixel image in every message, so an open can be recorded.
     #:
     #: **Off, and the default is the decision rather than a placeholder.** A

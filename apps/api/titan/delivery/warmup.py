@@ -651,6 +651,71 @@ def describe_pool(participants: list[Participant]) -> str:
     )
 
 
+class PoolConflict(ValueError):
+    """Refused: a partner mailbox is also a seed or a sending mailbox."""
+
+
+def round_pool(
+    sending: list[Participant],
+    partners: list[Participant],
+    *,
+    seed_addresses: set[str],
+) -> list[Participant]:
+    """The pool for a scheduled round: our mailboxes plus outside partners.
+
+    Partners are the point. Every sending mailbox is on one domain and one
+    host, so warming them against each other teaches Gmail and Microsoft
+    nothing; a partner is a mailbox on one of those providers that receives,
+    rescues, reads and answers. They live in their own file so they can never
+    be chosen to carry outreach.
+
+    Two refusals, both about keeping measurements honest:
+
+    * **A partner may not be a seed.** Seeds are what the placement gate reads.
+      A seed that has been rescuing and replying to a sender's mail files that
+      sender's next probe in the inbox because of its own history, not because
+      the domain recovered -- and the gate would reopen the mailbox on a
+      reading it had manufactured.
+    * **A partner may not be a sending mailbox**, which would double-count it.
+    """
+    seeds = {a.strip().lower() for a in seed_addresses}
+    ours = {p.address.lower() for p in sending}
+    clash_seed = sorted(p.address for p in partners if p.address.lower() in seeds)
+    if clash_seed:
+        raise PoolConflict(
+            f"warm-up partners must not be placement seeds: {', '.join(clash_seed)}"
+        )
+    clash_ours = sorted(p.address for p in partners if p.address.lower() in ours)
+    if clash_ours:
+        raise PoolConflict(
+            f"warm-up partners must not be sending mailboxes: {', '.join(clash_ours)}"
+        )
+    # Partners are established mailboxes: they write at full volume from day
+    # one, bounded by MAX_PER_PARTNER like everyone else.
+    mature = len(DAILY_VOLUME) - 1
+    return [
+        *sending,
+        *(Participant(p.address, p.smtp, p.imap, day=mature) for p in partners),
+    ]
+
+
+def involving_ours(
+    sends: list[PlannedSend], sending: list[Participant]
+) -> list[PlannedSend]:
+    """Only the messages a sending mailbox writes or receives.
+
+    A partner writing to another partner is Gmail talking to Gmail about
+    nothing of ours: traffic with no signal, and quota spent on accounts that
+    are not ours to spend.
+    """
+    ours = {p.address.lower() for p in sending}
+    return [
+        s
+        for s in sends
+        if s.sender.address.lower() in ours or s.recipient.address.lower() in ours
+    ]
+
+
 __all__ = [
     "DAILY_VOLUME",
     "JUNK_FOLDERS",
@@ -662,12 +727,15 @@ __all__ = [
     "NotAParticipant",
     "Participant",
     "PlannedSend",
+    "PoolConflict",
     "WarmupReport",
     "already_delivered",
     "check_recipients_are_participants",
     "describe_pool",
+    "involving_ours",
     "participants_from",
     "plan",
+    "round_pool",
     "send_round",
     "tend",
 ]

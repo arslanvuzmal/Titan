@@ -44,6 +44,7 @@ from titan.activities import stranded as stranded_activities
 from titan.activities import trickle as trickle_activities
 from titan.activities import verification as verification_activities
 from titan.activities import vitals as vitals_activities
+from titan.activities import warmup as warmup_activities
 from titan.config import get_settings
 from titan.db.session import dispose_engine
 from titan.observability.logging import configure_logging
@@ -60,6 +61,7 @@ from titan.workflows.research import LeadResearchWorkflow
 from titan.workflows.sender_health import SenderHealthSnapshotWorkflow
 from titan.workflows.supervisor import SupervisorWorkflow
 from titan.workflows.verification import SenderVerificationWorkflow
+from titan.workflows.warmup import WarmupRoundWorkflow
 
 logger = logging.getLogger("titan.workers.temporal")
 
@@ -106,6 +108,7 @@ async def main() -> None:
             HousekeepingWorkflow,
             MailboxRampWorkflow,
             PlacementRoundWorkflow,
+            WarmupRoundWorkflow,
             SupervisorWorkflow,
             DailyReportWorkflow,
         ],
@@ -135,6 +138,7 @@ async def main() -> None:
             mailbox_ramp_activities.ramp_mailboxes,
             placement_activities.send_placement_probes,
             placement_activities.read_placement_probes,
+            *warmup_activities.ALL_WARMUP_ACTIVITIES,
             sender_health_activities.capture_sender_health,
         ],
         # Bounded concurrency. An unbounded worker will happily start more

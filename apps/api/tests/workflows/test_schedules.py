@@ -130,6 +130,10 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # offer nobody saw. Sends a probe from each mailbox, waits an hour for
         # the filter to decide, then logs into the seed and looks.
         "PlacementRoundWorkflow",
+        # Warm-up traffic. Reachable only from the CLI until October, so after
+        # the rented carrier's warm-up stopped on 24 August the domain had
+        # none -- through the week it sent 492 cold messages.
+        "WarmupRoundWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 
