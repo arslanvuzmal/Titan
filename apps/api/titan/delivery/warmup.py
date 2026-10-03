@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from email.message import EmailMessage
 
 from titan.delivery.mailboxes import Endpoint, MailboxRegistry
+from titan.delivery.microsoft_oauth import imap_login
 
 logger = logging.getLogger(__name__)
 
@@ -382,7 +383,13 @@ def _connect(endpoint: Endpoint, *, timeout: float) -> imaplib.IMAP4:
     else:
         client = imaplib.IMAP4(endpoint.host, endpoint.port, timeout=int(timeout))
         client.starttls(ssl.create_default_context())
-    client.login(endpoint.username, endpoint.password)
+    imap_login(
+        client,
+        username=endpoint.username,
+        password=endpoint.password,
+        auth=endpoint.auth,
+        client_id=endpoint.client_id,
+    )
     return client
 
 

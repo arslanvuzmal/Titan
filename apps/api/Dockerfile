@@ -31,6 +31,11 @@ WORKDIR /app
 COPY apps/api/titan ./titan
 COPY apps/api/alembic.ini ./alembic.ini
 
+# Where rotated Microsoft refresh tokens are kept (TITAN_OAUTH_TOKEN_DIR). Made
+# here, owned by the runtime user, because Docker initialises a new named
+# volume from the image's directory -- ownership included.
+RUN mkdir -p /data/oauth && chown 10001:10001 /data/oauth
+
 USER 10001:10001
 EXPOSE 8000
 

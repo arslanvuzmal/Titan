@@ -176,7 +176,7 @@ async def read_placement(
 #: went unwatched.
 MEASURABLE = {
     "gmail": "app password",
-    "outlook": "OAuth via Microsoft Graph -- not built",
+    "outlook": "Microsoft sign-in (titan oauth-microsoft)",
     "other": "app password",
 }
 

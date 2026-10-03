@@ -78,8 +78,11 @@ services:
       - ../secrets:/run/secrets:ro
       # Read-only: the API serves screenshots on evidence pages, never writes them.
       - artifacts:/data/artifacts:ro
+      # Writable: `titan oauth-microsoft` runs here and keeps the token.
+      - oauth_tokens:/data/oauth
     environment:
       TITAN_ARTIFACT_DIR: /data/artifacts
+      TITAN_OAUTH_TOKEN_DIR: /data/oauth
     # Not published to the host: nginx terminates TLS and is the only ingress.
     expose: ["8000"]
     depends_on:
@@ -198,6 +201,11 @@ services:
     # instead: a stack that looks fine while the operator hears nothing.
     volumes:
       - ../secrets:/run/secrets:ro
+      # Rotated Microsoft refresh tokens: the placement round and warm-up read
+      # Outlook inboxes from here, and keep each renewed token for next time.
+      - oauth_tokens:/data/oauth
+    environment:
+      TITAN_OAUTH_TOKEN_DIR: /data/oauth
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -389,6 +397,7 @@ networks:
 
 volumes:
   artifacts:
+  oauth_tokens:
   postgres_data:
   temporal_postgres_data:
   redis_data:

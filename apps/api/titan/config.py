@@ -381,6 +381,10 @@ class Settings(BaseSettings):
     #: Where the browser worker keeps screenshots (a volume mounted read-only
     #: here). Unset, evidence pages render without pictures.
     artifact_dir: str | None = None
+    #: Writable directory where rotated Microsoft refresh tokens are kept, so an
+    #: Outlook inbox read daily never needs signing in again. Unset, the token
+    #: from the credentials file is used each time and lasts about 90 days.
+    oauth_token_dir: str | None = None
     #: Put a one-pixel image in every message, so an open can be recorded.
     #:
     #: **Off, and the default is the decision rather than a placeholder.** A

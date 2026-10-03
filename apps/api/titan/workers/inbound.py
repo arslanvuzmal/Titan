@@ -76,6 +76,8 @@ def build_mailboxes() -> list[tuple[ImapMailbox, str]]:
                             password=imap.password,
                             security=imap.security,
                             folder=settings.imap_folder,
+                            auth=imap.auth,
+                            client_id=imap.client_id,
                         )
                     ),
                     account.from_email,

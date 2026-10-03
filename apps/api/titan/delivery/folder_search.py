@@ -32,6 +32,7 @@ import logging
 from dataclasses import dataclass
 
 from titan.delivery.mailbox import ImapConfig, _close_quietly
+from titan.delivery.microsoft_oauth import imap_login
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,13 @@ class _ImapConnection:
                 config.host, config.port, timeout=config.timeout_seconds
             )
             client.starttls()
-        client.login(config.username, config.password)
+        imap_login(
+            client,
+            username=config.username,
+            password=config.password,
+            auth=config.auth,
+            client_id=config.client_id,
+        )
         return client
 
 

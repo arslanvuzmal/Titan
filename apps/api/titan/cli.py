@@ -1210,6 +1210,8 @@ def cmd_mailbox(args: argparse.Namespace) -> int:
                         password=imap.password,
                         security=imap.security,
                         folder=settings.imap_folder,
+                        auth=imap.auth,
+                        client_id=imap.client_id,
                     )
                 )
                 imap_ok, imap_detail = await mailbox.health_check()
@@ -1567,9 +1569,7 @@ def cmd_recover_contacts(args: argparse.Namespace) -> int:
                 crawls = (
                     (
                         await session.execute(
-                            select(CrawlRun.id).where(
-                                CrawlRun.research_run_id == run_id
-                            )
+                            select(CrawlRun.id).where(CrawlRun.research_run_id == run_id)
                         )
                     )
                     .scalars()
@@ -1606,9 +1606,7 @@ def cmd_recover_contacts(args: argparse.Namespace) -> int:
                 else:
                     nothing_published.append(domain or str(org_id))
 
-        print(
-            f"examined       {len(candidates)} leads whose crawl found an address"
-        )
+        print(f"examined       {len(candidates)} leads whose crawl found an address")
         print(f"address found  {len(planned)}")
         print(f"nothing to use {len(nothing_published)}")
         for domain, address in planned[:20]:
@@ -1753,9 +1751,7 @@ def cmd_repoint_contacts(args: argparse.Namespace) -> int:
             print(f"leads not on a front-desk address: {len(candidates)}")
 
             planned: list[tuple[uuid.UUID, uuid.UUID, str, str, str]] = []
-            for lead_id, org_id, domain, channel_id, current in candidates[
-                : args.limit
-            ]:
+            for lead_id, org_id, domain, channel_id, current in candidates[: args.limit]:
                 runs = (
                     (
                         await session.execute(
@@ -1798,9 +1794,7 @@ def cmd_repoint_contacts(args: argparse.Namespace) -> int:
                     continue
                 ranked = [
                     c
-                    for c in rank_contacts(
-                        extract_contacts_from_pages(pages, domain)
-                    )
+                    for c in rank_contacts(extract_contacts_from_pages(pages, domain))
                     if c.is_usable
                 ]
                 if not ranked:
@@ -2251,6 +2245,63 @@ def cmd_warmup(args: argparse.Namespace) -> int:
     return asyncio.run(run())
 
 
+def cmd_oauth_microsoft(args: argparse.Namespace) -> int:
+    """Sign one personal Outlook/Hotmail inbox in, once, by device code.
+
+    Prints a short code and a Microsoft web address. Open the address in any
+    browser, type the code, sign in to the inbox being added, and agree. Titan
+    never sees that account's password. What comes back is a refresh token,
+    printed once to paste into the seed or partner file as the "password",
+    with "auth": "microsoft_oauth" and the client_id. When a token directory
+    is configured it is also kept there, so the inbox never needs signing in
+    again.
+    """
+    from titan.delivery.microsoft_oauth import (
+        OAuthError,
+        TokenStore,
+        start_device_flow,
+        wait_for_sign_in,
+    )
+
+    try:
+        code = start_device_flow(args.client_id)
+    except OAuthError as exc:
+        print(exc)
+        return 1
+    print()
+    print(f"  1. Open {code.verification_uri} in any browser.")
+    print(f"  2. Enter the code: {code.user_code}")
+    print(f"  3. Sign in as {args.address} and accept.")
+    print(f"  (The code works for {code.expires_in // 60} minutes. Waiting...)")
+    print()
+    try:
+        reply = wait_for_sign_in(args.client_id, code)
+    except OAuthError as exc:
+        print(exc)
+        return 1
+    refresh = str(reply.get("refresh_token") or "")
+    if not refresh:
+        print("Microsoft returned no refresh token; check the app allows offline_access.")
+        return 1
+    kept = TokenStore(get_settings().oauth_token_dir).save(args.address, refresh)
+    print("Signed in.")
+    print()
+    print("Put this in the seed (or partner) entry for", args.address + ":")
+    print('  "auth": "microsoft_oauth",')
+    print(f'  "client_id": "{args.client_id}",')
+    print('  "host": "outlook.office365.com", "port": 993, "security": "ssl",')
+    print('  "password": "<the refresh token below>"')
+    print()
+    print(refresh)
+    print()
+    print(
+        "Kept in the token directory too; it will renew itself."
+        if kept
+        else "No token directory is configured: sign in again within ~90 days."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="titan", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -2518,6 +2569,18 @@ def main() -> int:
         ),
     )
     repoint_parser.set_defaults(func=cmd_repoint_contacts)
+
+    oauth_parser = sub.add_parser(
+        "oauth-microsoft",
+        help="sign a personal Outlook/Hotmail inbox in for IMAP, once, by device code",
+    )
+    oauth_parser.add_argument(
+        "--client-id", required=True, help="the Azure app's client id"
+    )
+    oauth_parser.add_argument(
+        "--address", required=True, help="the Outlook address to sign in"
+    )
+    oauth_parser.set_defaults(func=cmd_oauth_microsoft)
 
     warmup_parser = sub.add_parser(
         "warmup",

@@ -37,14 +37,55 @@ because the seed credentials were not on the server.
 - 2 Gmail and 1 Yahoo — fresh accounts used for nothing else. Each needs
   2-Step Verification switched on and an **app password** (16 characters,
   pasted without spaces); Titan reads them over IMAP with it.
-- **Not Outlook/Hotmail.** *Corrected 3 October; the first version of this
-  page said 2 Outlook.* Microsoft stopped accepting password logins over IMAP
-  for personal Outlook, Hotmail, Live and MSN accounts on 16 September 2024,
-  so Titan cannot read one. Reading a Microsoft inbox needs OAuth 2.0 (a free
-  Azure app registration plus a refresh token), which is not built yet. Until
-  it is, Microsoft placement is checked by hand.
+- **1 Outlook, through Microsoft sign-in — not a password.** Microsoft stopped
+  accepting password logins over IMAP for personal Outlook, Hotmail, Live and
+  MSN accounts on 16 September 2024. Since 3 October Titan signs in the way
+  Microsoft still allows (OAuth). See **A2b** below. *(The first version of
+  this page asked for 2 Outlook inboxes with passwords; that could never have
+  worked.)*
 - Listed in `secrets/seeds.json` (start from `secrets/seeds.json.example`),
   with `TITAN_SEED_FILE=/run/secrets/seeds.json` in `.env`.
+
+### A2b. Outlook: one-time setup (free)
+
+1. Go to **portal.azure.com** and sign in with any personal Microsoft account
+   (the Outlook test inbox itself is fine). No paid subscription is needed for
+   this step.
+2. Search **App registrations** → **New registration**.
+   - Name: `Titan inbox reader`
+   - Supported account types: **Personal Microsoft accounts only**
+   - Redirect URI: leave empty → **Register**.
+3. On the app's page, copy the **Application (client) ID**. It is not a secret.
+4. **Authentication** (left menu) → *Advanced settings* → **Allow public client
+   flows: Yes** → **Save**.
+5. On the server, for each Outlook inbox:
+
+   ```
+   ssh -i ~/.ssh/titan_hetzner root@168.119.161.220
+   docker exec -it deploy-api-1 python -m titan.cli oauth-microsoft        --client-id <the client ID> --address <the outlook address>
+   ```
+
+   It prints a code and **microsoft.com/devicelogin**. Open that page on any
+   device, enter the code, sign in **as the Outlook test inbox**, and accept.
+   Titan never sees the password. The command then prints a long token and
+   the lines to put in `secrets/seeds.json`. The entry looks like:
+
+   ```json
+   {
+     "address": "<the outlook address>",
+     "label": "Outlook seed -- measures Microsoft's filter",
+     "imap": {
+       "host": "outlook.office365.com",
+       "port": 993,
+       "security": "ssl",
+       "auth": "microsoft_oauth",
+       "client_id": "<the client ID>",
+       "password": "<the long token it printed>"
+     }
+   }
+   ```
+
+   Titan keeps renewing the token itself.
 
 ### A3. Warm-up partners
 
@@ -52,9 +93,8 @@ Mail between our own five mailboxes never leaves Spacemail, so it teaches
 Gmail and Microsoft nothing. Partners are mailboxes on those providers that
 receive our warm-up mail, rescue it from spam, read it and reply.
 
-- 3–5 more fresh **Gmail and Yahoo** accounts, each with an app password —
-  **not** Outlook, for the same reason as above: rescuing mail from spam needs
-  an IMAP login, and Microsoft refuses passwords. And **not** the seeds. A seed that
+- 3–5 more fresh **Gmail, Yahoo or Outlook** accounts — Gmail and Yahoo with
+  an app password, Outlook through the A2b sign-in. **Not** the seeds. A seed that
   rescues and replies to our mail would file our next probe in the inbox
   because of its own history, and the gate would reopen on a reading it
   manufactured. Titan refuses the overlap.
@@ -83,8 +123,8 @@ run alongside this, connected to `arslan@` by SMTP/IMAP.
 
 All of these, held for 14 consecutive days:
 
-- `arslan@` reads ≥80% inbox at Gmail and Yahoo on the automatic probes, and
-  lands in the inbox when checked by hand at Outlook;
+- `arslan@` reads ≥80% inbox at Gmail, Outlook and Yahoo on the automatic
+  probes;
 - cold sending running at ≥15 a day through the gate;
 - hard bounces under 2%, no spam complaints.
 

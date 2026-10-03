@@ -84,6 +84,11 @@ class Endpoint:
     username: str
     password: str
     security: str = "ssl"
+    #: "password", or "microsoft_oauth" for a personal Outlook/Hotmail inbox --
+    #: then ``password`` holds the refresh token from ``titan oauth-microsoft``
+    #: and ``client_id`` names the Azure app. See titan.delivery.microsoft_oauth.
+    auth: str = "password"
+    client_id: str | None = None
 
     def redacted(self) -> dict[str, Any]:
         return {
@@ -91,6 +96,7 @@ class Endpoint:
             "port": self.port,
             "username": self.username,
             "security": self.security,
+            "auth": self.auth,
             "password": "set" if self.password else "missing",
         }
 
@@ -204,12 +210,24 @@ def _endpoint(
     if not username:
         raise MailboxConfigError(f"{where}: username is required")
     password = _check_password(_require(raw, "password", where), where)
+    auth = str(raw.get("auth") or "password").strip()
+    if auth not in ("password", "microsoft_oauth"):
+        raise MailboxConfigError(
+            f"{where}: auth must be 'password' or 'microsoft_oauth', got {auth!r}"
+        )
+    client_id = str(raw.get("client_id") or "").strip() or None
+    if auth == "microsoft_oauth" and not client_id:
+        raise MailboxConfigError(
+            f"{where}: microsoft_oauth needs the Azure app's client_id"
+        )
     return Endpoint(
         host=host,
         port=port,
         username=username,
         password=password,
         security=_check_security(raw.get("security", "ssl"), host, where),
+        auth=auth,
+        client_id=client_id,
     )
 
 

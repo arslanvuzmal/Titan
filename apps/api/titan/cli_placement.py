@@ -146,6 +146,8 @@ async def _check(workspace_id: uuid.UUID, seeds) -> int:
                 username=seed.imap.username,
                 password=seed.imap.password,
                 security=seed.imap.security,
+                auth=seed.imap.auth,
+                client_id=seed.imap.client_id,
             ),
             provider=seed.provider,
             probe_token=str(row["probe_token"]),

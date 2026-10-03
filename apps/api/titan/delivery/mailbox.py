@@ -33,6 +33,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from titan.delivery.microsoft_oauth import imap_login
+
 logger = logging.getLogger(__name__)
 
 #: Messages larger than this are parsed for headers and truncated body. A mail
@@ -317,6 +319,9 @@ class ImapConfig:
     security: str = "ssl"
     folder: str = "INBOX"
     timeout_seconds: float = 30.0
+    #: "password" or "microsoft_oauth". See titan.delivery.microsoft_oauth.
+    auth: str = "password"
+    client_id: str | None = None
 
 
 class ImapMailbox:
@@ -356,7 +361,13 @@ class ImapMailbox:
                 config.host, config.port, timeout=config.timeout_seconds
             )
             client.starttls()
-        client.login(config.username, config.password)
+        imap_login(
+            client,
+            username=config.username,
+            password=config.password,
+            auth=config.auth,
+            client_id=config.client_id,
+        )
         return client
 
     def _health_check_blocking(self) -> tuple[bool, str]:

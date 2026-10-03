@@ -123,13 +123,12 @@ export default function InboxHealthPage() {
       <Card title="What the gate needs" subtitle="Free accounts; steps in docs/cold-domains.md, Part A">
         <ul className="space-y-2">
           <Check done={h.seeds_configured >= 3}>
-            Test inboxes: 2 Gmail and 1 Yahoo, each with an app password ({h.seeds_configured}{' '}
-            set up). Not Outlook: Microsoft refuses password logins, so Outlook is checked by
-            hand.
+            Test inboxes: 2 Gmail and 1 Yahoo with app passwords, and 1 Outlook through
+            Microsoft sign-in ({h.seeds_configured} set up).
           </Check>
           <Check done={h.warmup_partners >= 3}>
-            Warm-up partners: 3 to 5 separate Gmail and Yahoo accounts ({h.warmup_partners} set
-            up). Without them the daily warm-up skips.
+            Warm-up partners: 3 to 5 separate Gmail, Yahoo or Outlook accounts (
+            {h.warmup_partners} set up). Without them the daily warm-up skips.
           </Check>
           <Check done={h.warmup_enabled}>Daily warm-up switched on.</Check>
           <Check done={h.message_form === 'brief'}>

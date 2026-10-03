@@ -16,16 +16,17 @@ reads this one looking for somewhere to send from.
 **No SMTP half.** A seed is never sent *from*. Anything here that carried SMTP
 credentials would be a sending mailbox nobody had decided to have.
 
-**Outlook.com cannot be seeded this way, and that is Microsoft's decision.**
-Personal Outlook, Hotmail, Live and MSN accounts stopped accepting basic
-authentication on 16 September 2024; an app password against
-``outlook.office365.com`` now returns NO LOGIN immediately. Reading a Microsoft
-seed needs OAuth 2.0 -- an Azure app registration and a refresh token -- which
-is a different shape from a password in a file and is not built here.
+**Outlook.com cannot be seeded with a password, and that is Microsoft's
+decision.** Personal Outlook, Hotmail, Live and MSN accounts stopped accepting
+basic authentication on 16 September 2024; an app password against
+``outlook.office365.com`` returns NO LOGIN immediately. Since 3 October 2026 a
+Microsoft seed is read with OAuth 2.0 instead: ``"auth": "microsoft_oauth"``,
+the Azure app's ``client_id``, and the refresh token from
+``titan oauth-microsoft`` in the password field. See
+:mod:`titan.delivery.microsoft_oauth`.
 
 That matters more than it sounds: Microsoft is the largest single bucket in the
-send list, 704 of 1,845 untouched addresses. Until OAuth exists, Microsoft
-placement is measured by a person looking, and a registry holding only Gmail is
+send list, 704 of 1,845 untouched addresses. A registry holding only Gmail is
 covering the *second* largest bucket while the largest goes unmeasured. The
 report calls an unmeasured pairing "not measured" and sorts it above even total
 failure for exactly this reason.
