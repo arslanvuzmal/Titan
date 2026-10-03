@@ -34,9 +34,17 @@ TITAN_ONE_PAGER_SAMPLE_PERCENT=0
 The gate is blind without readings, and 13 probes went unread in September
 because the seed credentials were not on the server.
 
-- At least 2 Gmail, 2 Outlook/Hotmail, 1 Yahoo — fresh accounts used for
-  nothing else.
-- Listed in `secrets/seeds.json`, `TITAN_SEED_FILE=/run/secrets/seeds.json`.
+- 2 Gmail and 1 Yahoo — fresh accounts used for nothing else. Each needs
+  2-Step Verification switched on and an **app password** (16 characters,
+  pasted without spaces); Titan reads them over IMAP with it.
+- **Not Outlook/Hotmail.** *Corrected 3 October; the first version of this
+  page said 2 Outlook.* Microsoft stopped accepting password logins over IMAP
+  for personal Outlook, Hotmail, Live and MSN accounts on 16 September 2024,
+  so Titan cannot read one. Reading a Microsoft inbox needs OAuth 2.0 (a free
+  Azure app registration plus a refresh token), which is not built yet. Until
+  it is, Microsoft placement is checked by hand.
+- Listed in `secrets/seeds.json` (start from `secrets/seeds.json.example`),
+  with `TITAN_SEED_FILE=/run/secrets/seeds.json` in `.env`.
 
 ### A3. Warm-up partners
 
@@ -44,7 +52,9 @@ Mail between our own five mailboxes never leaves Spacemail, so it teaches
 Gmail and Microsoft nothing. Partners are mailboxes on those providers that
 receive our warm-up mail, rescue it from spam, read it and reply.
 
-- 3–5 more fresh Gmail / Outlook accounts — **not** the seeds. A seed that
+- 3–5 more fresh **Gmail and Yahoo** accounts, each with an app password —
+  **not** Outlook, for the same reason as above: rescuing mail from spam needs
+  an IMAP login, and Microsoft refuses passwords. And **not** the seeds. A seed that
   rescues and replies to our mail would file our next probe in the inbox
   because of its own history, and the gate would reopen on a reading it
   manufactured. Titan refuses the overlap.
@@ -73,7 +83,8 @@ run alongside this, connected to `arslan@` by SMTP/IMAP.
 
 All of these, held for 14 consecutive days:
 
-- `arslan@` reads ≥80% inbox at Gmail **and** at Outlook;
+- `arslan@` reads ≥80% inbox at Gmail and Yahoo on the automatic probes, and
+  lands in the inbox when checked by hand at Outlook;
 - cold sending running at ≥15 a day through the gate;
 - hard bounces under 2%, no spam complaints.
 
