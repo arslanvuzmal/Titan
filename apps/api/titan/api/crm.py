@@ -41,6 +41,8 @@ from titan.api.schemas import (
     CrmStatsOut,
     DeferralOut,
     DraftOut,
+    GradePartOut,
+    LeadGradeOut,
     LeadOut,
     MailboxDayOut,
     MeetingOut,
@@ -96,6 +98,7 @@ from titan.delivery.suppression import is_suppressed
 from titan.intelligence import domain_health, insights, timing
 from titan.intelligence import portfolio as portfolio_mod
 from titan.intelligence.contacts import check_contact_eligibility
+from titan.intelligence.grading import choose_channel, grade_from_components, letter_for
 from titan.intelligence.rollups import (
     DEFAULT_WINDOW_DAYS,
     Dimension,
@@ -268,6 +271,7 @@ async def enrich_leads(session: AsyncSession, leads: Sequence[Lead]) -> list[Lea
                 message_count=messages.get(lead.id, 0),
                 evidence_count=evidence.get(lead.id, 0),
                 has_eligible_contact=lead.organization_id in eligible_orgs,
+                grade=letter_for(lead.latest_score),
             )
         )
     return out
@@ -511,6 +515,73 @@ async def lead_messages(
             .all()
         )
         return [MessageOut.model_validate(r) for r in rows]
+
+
+# ==========================================================================
+# Grade
+# ==========================================================================
+@router.get("/leads/{lead_id}/grade", response_model=LeadGradeOut)
+async def lead_grade(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> LeadGradeOut:
+    """The lead's letter, the four parts behind it, and the channel decision.
+
+    Read from the most recent stored score, never recomputed: what is shown is
+    what the system believed when it acted. Calls are off until a budget for
+    them is agreed, so the decision says so rather than pretending to dial.
+    """
+    async with workspace_session(principal.workspace_id) as session:
+        lead = await session.get(Lead, lead_id)
+        if lead is None:
+            raise await _not_found("lead")
+        score = (
+            await session.execute(
+                select(LeadScore)
+                .where(LeadScore.lead_id == lead_id)
+                .order_by(LeadScore.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        org = await session.get(Organization, lead.organization_id)
+        has_email = bool(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(ContactChannel)
+                    .join(Contact, Contact.id == ContactChannel.contact_id)
+                    .where(
+                        Contact.organization_id == lead.organization_id,
+                        ContactChannel.channel_type == "email",
+                        ContactChannel.is_active.is_(True),
+                    )
+                )
+            ).scalar_one()
+        )
+
+    total = score.total if score is not None else lead.latest_score
+    grade = grade_from_components(total, score.components if score is not None else None)
+    decision = choose_channel(
+        grade.letter,
+        has_phone=bool(org is not None and org.phone_e164),
+        has_email=has_email,
+        calls_enabled=False,
+        call_budget_left=0,
+    )
+    return LeadGradeOut(
+        lead_id=lead_id,
+        letter=grade.letter,
+        total=grade.total,
+        parts=[
+            GradePartOut(
+                key=p.key, points=p.points, out_of=p.out_of, reasons=list(p.reasons)
+            )
+            for p in grade.parts
+        ],
+        first_action=decision.first,
+        then=decision.then,
+        reason=decision.reason,
+    )
 
 
 # ==========================================================================

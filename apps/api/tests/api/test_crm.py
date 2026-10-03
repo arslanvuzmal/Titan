@@ -734,3 +734,26 @@ async def test_outcomes_are_workspace_scoped(client, crm, workspace, db_session)
 
     assert response.status_code == 200
     assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_a_lead_carries_its_grade_and_a_channel_decision(client, crm) -> None:
+    """The letter comes from the stored score, and with calls switched off an
+    A lead is written to, with the reason saying why it was not called."""
+    listed = await client.get("/api/v1/leads", headers=auth(crm["token"]))
+    row = next(r for r in listed.json()["items"] if r["id"] == str(crm["lead_id"]))
+    assert row["grade"] == "A"
+
+    response = await client.get(
+        f"/api/v1/leads/{crm['lead_id']}/grade", headers=auth(crm["token"])
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["letter"] == "A"
+    assert {p["key"] for p in body["parts"]} == {
+        "need",
+        "ability_to_pay",
+        "fit",
+        "reachability",
+    }
+    assert body["first_action"] == "email"

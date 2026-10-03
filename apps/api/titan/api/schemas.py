@@ -266,6 +266,27 @@ class LeadOut(BaseModel):
     #: True when at least one contact channel could lawfully be contacted.
     #: Distinct from "an address exists" -- see ContactChannelOut.
     has_eligible_contact: bool = False
+    #: A-D, read from ``latest_score``. None for a lead nobody has scored.
+    grade: str | None = None
+
+
+class GradePartOut(BaseModel):
+    key: str
+    points: float
+    out_of: float
+    reasons: list[str]
+
+
+class LeadGradeOut(BaseModel):
+    """Why a lead got its letter, and what the channel policy does with it."""
+
+    lead_id: uuid.UUID
+    letter: str | None
+    total: int | None
+    parts: list[GradePartOut]
+    first_action: str
+    then: str
+    reason: str
 
 
 class TimelineEventOut(BaseModel):
