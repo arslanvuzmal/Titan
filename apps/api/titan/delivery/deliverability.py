@@ -393,6 +393,7 @@ def check_message(
     html_body: str | None,
     from_name: str,
     mailing_address: str | None,
+    is_reply: bool = False,
 ) -> list[Signal]:
     """Construction checks that predict filtering."""
     signals: list[Signal] = []
@@ -423,7 +424,9 @@ def check_message(
         signals.append(
             Signal("excessive_punctuation", Severity.WARN, "multiple exclamation marks")
         )
-    if re.match(r"^\s*(?:re|fwd?)\s*:", subject, re.I):
+    # A real reply -- one carrying In-Reply-To for a message we received -- is
+    # exactly what "Re:" means. Only a cold message wearing it is a fake.
+    if not is_reply and re.match(r"^\s*(?:re|fwd?)\s*:", subject, re.I):
         signals.append(
             Signal(
                 "fake_reply_subject",
@@ -805,6 +808,9 @@ class DeliverabilityContext:
     #: The placement gate's verdict for the sending mailbox. None when the gate
     #: is switched off, which adds no signal at all -- not a pass.
     placement: Any | None = None
+    #: A genuine threaded reply (the outbox payload's ``kind`` is "reply" and it
+    #: carries In-Reply-To). Lets "Re:" through; changes nothing else.
+    is_reply: bool = False
 
 
 def check_placement(verdict: Any | None) -> list[Signal]:
@@ -851,6 +857,7 @@ def evaluate(ctx: DeliverabilityContext) -> DeliverabilityReport:
             html_body=ctx.html_body,
             from_name=ctx.from_name,
             mailing_address=ctx.mailing_address,
+            is_reply=ctx.is_reply,
         )
     )
     signals.extend(check_reputation(ctx.reputation))

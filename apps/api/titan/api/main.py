@@ -32,6 +32,7 @@ from titan.api.crm import router as crm_router
 from titan.api.evidence import evidence_router
 from titan.api.placement import open_pixel_router
 from titan.api.placement import router as placement_router
+from titan.api.reply_desk import router as reply_desk_router
 from titan.api.routes import router as v1_router
 from titan.api.webhooks import router as webhooks_router
 from titan.config import get_settings
@@ -202,6 +203,8 @@ app.include_router(open_pixel_router)
 # no session -- the reader has no account -- and the same neutral page for a
 # bad token as for a missing lead.
 app.include_router(evidence_router)
+# The reply desk: every human reply, its suggested answer, edit and send.
+app.include_router(reply_desk_router)
 # Provider delivery events. Deliberately *not* behind the session auth the two
 # routers above use: a provider cannot hold a token, so an HMAC over the raw
 # body is the credential. See titan.api.webhooks for why that puts the whole

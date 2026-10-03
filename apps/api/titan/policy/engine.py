@@ -246,6 +246,14 @@ class SendContext:
     #: loses a check rather than gaining a refusal. A message with no evidence
     #: at all is already refused by `NO_EVIDENCE` above.
     evidence_captured_at: dt.datetime | None = None
+    #: An answer to somebody who wrote to us, sent from the reply desk.
+    #:
+    #: The rules below are written for cold outreach -- who may be targeted, on
+    #: what evidence, how often -- and several refuse exactly the person a reply
+    #: is for: a lead that answered is REPLIED, which is terminal. For a reply,
+    #: :data:`REPLY_EXEMPT` is lifted and nothing else is: suppression, master
+    #: switches, sender authentication, approval and working hours all hold.
+    is_reply: bool = False
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -513,12 +521,46 @@ def evaluate_send(ctx: SendContext) -> Decision:
             )
         )
 
+    if ctx.is_reply:
+        denials = [d for d in denials if not _lifted_for_reply(d, ctx)]
+
     return Decision(
         allowed=not denials,
         denials=tuple(denials),
         effective_mode=mode,
         snapshot=_snapshot(ctx, mode, denials),
     )
+
+
+#: Cold-outreach rules that do not apply to answering somebody who wrote in.
+#: Each is about whom to approach and on what grounds; a reply's grounds are
+#: that they wrote to us.
+REPLY_EXEMPT = frozenset(
+    {
+        DenyCode.LEAD_REPLIED,
+        DenyCode.SCORE_BELOW_THRESHOLD,
+        DenyCode.FOLLOWUP_LIMIT,
+        DenyCode.NO_EVIDENCE,
+        DenyCode.EVIDENCE_STALE,
+        DenyCode.CONTACT_GUESSED,
+        DenyCode.CONTACT_SOURCE_NOT_ALLOWED,
+        DenyCode.CONTACT_NOT_VERIFIED,
+        DenyCode.CONTACT_NEVER_CHECKED,
+        DenyCode.CAMPAIGN_NOT_ACTIVE,
+        DenyCode.SPACING,
+    }
+)
+
+#: Terminal lead statuses a reply may still go to: the conversation is what
+#: made them terminal. Suppressed, disqualified, rejected and archived leads
+#: get nothing, reply or not.
+_REPLY_TERMINAL_OK = frozenset({LeadStatus.REPLIED, LeadStatus.MEETING_BOOKED})
+
+
+def _lifted_for_reply(denial: Denial, ctx: SendContext) -> bool:
+    if denial.code in REPLY_EXEMPT:
+        return True
+    return denial.code is DenyCode.LEAD_TERMINAL and ctx.lead_status in _REPLY_TERMINAL_OK
 
 
 def _process_mode(settings: Settings) -> OperatingMode:

@@ -443,7 +443,10 @@ def _still_passes_todays_rules(draft: MessageDraft) -> bool:
             )
             return False
         words = len(pitch_of(body, get_settings().owner_name).split())
-        if not ANY_FORM_BAND[0] <= words <= ANY_FORM_BAND[1]:
+        # The band describes a cold first message. A reply written at the desk
+        # answers a question and may be one line long.
+        is_reply = (draft.template_key or "").startswith("reply:")
+        if not is_reply and not ANY_FORM_BAND[0] <= words <= ANY_FORM_BAND[1]:
             logger.info(
                 "draft is outside the message length band; not sending",
                 extra={"draft_id": str(draft.id), "pitch_words": words},
@@ -745,6 +748,14 @@ class OutboxWorker:
             approval_expires_at=approval.expires_at if approval else None,
             is_suppressed=suppression is not None,
             suppression_reason=suppression.reason.value if suppression else None,
+            # Only a payload the reply desk wrote, for a reply draft, threaded
+            # under a message we received. All three, so a cold message cannot
+            # claim the exemptions by setting one field.
+            is_reply=(
+                (row.payload or {}).get("kind") == "reply"
+                and (draft.template_key or "").startswith("reply:")
+                and bool(((row.payload or {}).get("headers") or {}).get("In-Reply-To"))
+            ),
         )
         # Unused but fetched for the audit trail; keeps the read in one place.
         _ = contact
@@ -1408,7 +1419,11 @@ class OutboxWorker:
         # reaching a mailbox that fails it, and this stops work that was already
         # assigned before its readings turned.
         placement = None
-        if self._settings.placement_gate_enabled and sender is not None:
+        # A reply from the reply desk is an answer to somebody who wrote to us,
+        # not cold mail: it is not held behind the cold-mail placement gate.
+        # Every other check below still applies to it.
+        is_reply = (row.payload or {}).get("kind") == "reply"
+        if self._settings.placement_gate_enabled and sender is not None and not is_reply:
             placement = (
                 await placement_gate.verdicts_for(
                     session,
@@ -1446,6 +1461,7 @@ class OutboxWorker:
                 warmup_target=sender.daily_send_limit if sender else 0,
                 attachments=tuple(email.attachments),
                 placement=placement,
+                is_reply=is_reply and bool(headers.get("In-Reply-To")),
             )
         )
 
