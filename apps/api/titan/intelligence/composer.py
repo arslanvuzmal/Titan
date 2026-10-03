@@ -164,6 +164,10 @@ class ComposerContext:
     #: reads from someone they do not know. The citations are not lost; they
     #: move to the evidence page, which the message will link instead.
     brief: bool = False
+    #: The lead's evidence page (``titan.intelligence.evidence_page``). In the
+    #: brief form it becomes the message's one link, and the portfolio moves
+    #: onto the page. Ignored by the full form, which cites inline.
+    evidence_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1318,6 +1322,16 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
     else:
         observation_text, observation_html = _link_observation(observation, evidence)
 
+    # The brief form's one link, when the lead has an evidence page: a pointer
+    # to everything measured, in place of the portfolio link. The credential
+    # sentence stays, without its link -- the page carries the portfolio.
+    pointer_text = pointer_html = experience_plain = ""
+    if ctx.brief and ctx.evidence_url:
+        page_anchor = Anchor(text="everything I checked", href=ctx.evidence_url)
+        pointer_text = f"I have put {page_anchor.plain()} on one page, with the sources."
+        pointer_html = f"I have put {page_anchor.html()} on one page, with the sources."
+        experience_plain = experience
+
     # Order: what I found, what is going on, what it costs, why that bites
     # now, how it gets fixed, who I am, and the ask. A detail paragraph is
     # dropped rather than faked when the issue type has no entry -- an empty
@@ -1333,12 +1347,22 @@ def compose(ctx: ComposerContext) -> ComposedMessage:
         # One "who I am" paragraph rather than two: the credential and the
         # link belong to the same thought, and split across paragraphs they
         # read as two separate attempts to establish the same thing.
-        _credibility(
-            experience=experience,
-            study_anchor=study_anchor,
-            relevance=relevance,
-            relevance_anchor=relevance_anchor,
-            portfolio_url=ctx.portfolio_url,
+        *(
+            (
+                (pointer_text, pointer_html),
+                # The credential without a link: the one link is the page.
+                (experience_plain, _esc(experience_plain)),
+            )
+            if pointer_text
+            else (
+                _credibility(
+                    experience=experience,
+                    study_anchor=study_anchor,
+                    relevance=relevance,
+                    relevance_anchor=relevance_anchor,
+                    portfolio_url=ctx.portfolio_url,
+                ),
+            )
         ),
         (meeting, _esc(meeting)),
     )

@@ -64,7 +64,7 @@ from titan.db.models import (
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery import sender_pool
 from titan.delivery.suppression import is_suppressed
-from titan.intelligence import case_studies
+from titan.intelligence import case_studies, evidence_page
 from titan.intelligence.absence import ABSENCE_ISSUE_TYPES, findings_from_gap
 from titan.intelligence.address_history import AddressHistory, read_many
 from titan.intelligence.bounce_risk import BounceRisk, assess
@@ -1782,6 +1782,19 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
         family=family_for(headline.issue_type),
         issue_type=headline.issue_type,
     )
+    # The brief form links the lead's evidence page instead of the portfolio,
+    # once the page can be served: a base URL and a signing secret.
+    lead_evidence_url: str | None = None
+    if (
+        settings.message_form == "brief"
+        and settings.evidence_base_url
+        and settings.evidence_secret is not None
+    ):
+        lead_evidence_url = evidence_page.evidence_url(
+            settings.evidence_base_url,
+            uuid.UUID(request.lead_id),
+            settings.evidence_secret,
+        )
     composed = compose(
         ComposerContext(
             org_domain=org_domain,
@@ -1820,6 +1833,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             # per-campaign choice: it follows the sending infrastructure, and
             # the infrastructure is the estate's, not a campaign's.
             brief=settings.message_form == "brief",
+            evidence_url=lead_evidence_url,
             # None unless the manager has promoted a register on measured
             # evidence, in which case every lead gets it instead of the one
             # their id happened to select.
@@ -1858,6 +1872,7 @@ async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
             mailing_address=mailing_address,
             unsubscribe_present=True,
             form=settings.message_form,
+            evidence_url=lead_evidence_url,
         )
     )
 

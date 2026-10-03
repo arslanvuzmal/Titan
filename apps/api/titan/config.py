@@ -363,6 +363,13 @@ class Settings(BaseSettings):
     #: file, and a separate file so a partner can never carry outreach. Must
     #: not overlap the seed file: see titan.delivery.warmup.round_pool.
     warmup_partner_file: str | None = None
+    #: Where evidence pages are served from: the public origin of this API on
+    #: the sending domain, e.g. https://titan.arslanvuzmallone.com. Unset, no
+    #: message carries an evidence link.
+    evidence_base_url: str | None = None
+    #: Signs evidence-page tokens. Without it the route serves a neutral "not
+    #: available" page for every token rather than accepting unsigned ones.
+    evidence_secret: SecretStr | None = None
     #: Put a one-pixel image in every message, so an open can be recorded.
     #:
     #: **Off, and the default is the decision rather than a placeholder.** A

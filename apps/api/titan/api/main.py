@@ -29,6 +29,7 @@ from titan import __version__
 from titan.api.call_sheet import router as call_sheet_router
 from titan.api.calls import router as calls_router
 from titan.api.crm import router as crm_router
+from titan.api.evidence import evidence_router
 from titan.api.placement import open_pixel_router
 from titan.api.placement import router as placement_router
 from titan.api.routes import router as v1_router
@@ -197,6 +198,10 @@ app.include_router(placement_router)
 # stands in for auth, and the route serves the same 43 bytes whatever happens
 # so it cannot be used as an oracle for guessing message ids.
 app.include_router(open_pixel_router)
+# The evidence page a prospect opens from the link in a message. Signed token,
+# no session -- the reader has no account -- and the same neutral page for a
+# bad token as for a missing lead.
+app.include_router(evidence_router)
 # Provider delivery events. Deliberately *not* behind the session auth the two
 # routers above use: a provider cannot hold a token, so an HMAC over the raw
 # body is the credential. See titan.api.webhooks for why that puts the whole

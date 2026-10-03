@@ -22,7 +22,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
 
 from titan.api.security import Principal, require
@@ -205,7 +205,7 @@ open_pixel_router = APIRouter(tags=["placement"])
 
 
 @open_pixel_router.get("/o/{token}.gif", include_in_schema=False)
-async def open_pixel(token: str) -> Response:
+async def open_pixel(token: str, request: Request) -> Response:
     """Serve the pixel, and record the open if the token is ours.
 
     **Always 200, always the same 43 bytes.** A 404 on an unknown token tells
@@ -233,11 +233,50 @@ async def open_pixel(token: str) -> Response:
     if message_id is None:
         return body
 
+    from sqlalchemy import text
+
     from titan.db.session import get_sessionmaker
+    from titan.delivery import engagement
 
     try:
         async with get_sessionmaker()() as session, session.begin():
-            await record_open(session, message_id=message_id)
+            # Graded before anything is stamped. Apple's proxy loads every
+            # image on arrival and a gateway scanner fetches within seconds;
+            # stamping `first_opened_at` on either made the one number people
+            # quote mean "delivered" while reading as "read".
+            sent = (
+                await session.execute(
+                    text(
+                        "SELECT workspace_id, lead_id, sent_at FROM messages WHERE id = :id"
+                    ),
+                    {"id": message_id},
+                )
+            ).first()
+            if sent is not None:
+                now = dt.datetime.now(dt.UTC)
+                user_agent = request.headers.get("user-agent")
+                client_ip = engagement.client_ip_of(
+                    dict(request.headers), request.client.host if request.client else None
+                )
+                graded = engagement.grade(
+                    engagement.OPEN,
+                    user_agent=user_agent,
+                    client_ip=client_ip,
+                    since_send=(now - sent.sent_at) if sent.sent_at else None,
+                )
+                await engagement.record_event(
+                    session,
+                    workspace_id=sent.workspace_id,
+                    lead_id=sent.lead_id,
+                    message_id=message_id,
+                    kind=engagement.OPEN,
+                    graded=graded,
+                    client_ip=client_ip,
+                    user_agent=user_agent,
+                    occurred_at=now,
+                )
+                if graded.seen:
+                    await record_open(session, message_id=message_id)
     except Exception:
         # The pixel is served regardless. A database blip must not turn every
         # message in somebody's inbox into a broken image.

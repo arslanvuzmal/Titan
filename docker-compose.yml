@@ -74,6 +74,10 @@ x-titan-env: &titan-env
   # titan.delivery.warmup.round_pool; partners must not be placement seeds.
   TITAN_WARMUP_ENABLED: ${TITAN_WARMUP_ENABLED:-false}
   TITAN_WARMUP_PARTNER_FILE: ${TITAN_WARMUP_PARTNER_FILE:-}
+  # Evidence pages: the public origin they are served from, and the key that
+  # signs their links. Either unset and no message carries an evidence link.
+  TITAN_EVIDENCE_BASE_URL: ${TITAN_EVIDENCE_BASE_URL:-}
+  TITAN_EVIDENCE_SECRET: ${TITAN_EVIDENCE_SECRET:-}
   # --- mailbox verification ---
   # Titan's own probe. Same class of gap as the SMTP block above: the
   # settings existed and nothing passed them in, so a container read the

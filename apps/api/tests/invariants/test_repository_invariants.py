@@ -414,6 +414,9 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
         # passes the SecretStr itself, so `_raw` is the only place the value is
         # unwrapped -- the same concentration unsubscribe.py relies on.
         "titan/delivery/open_tracking.py",
+        # Signs and verifies the evidence-page token, on the same terms as the
+        # pixel above: callers pass the SecretStr, `_raw` unwraps it once.
+        "titan/intelligence/evidence_page.py",
     }
     for path in python_sources():
         rel = path.relative_to(API).as_posix()

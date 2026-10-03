@@ -170,6 +170,9 @@ class MessageContext:
     untrusted_page_text: str = ""
     #: ``"full"`` or ``"brief"``: which word band the pitch is held to.
     form: str = "full"
+    #: The lead's evidence page. In the brief form it is the one link, and the
+    #: page itself carries the portfolio -- so it satisfies the link rule.
+    evidence_url: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -478,7 +481,10 @@ def validate_message(ctx: MessageContext) -> ValidationReport:
                 f"'{ctx.sender_name}' does not appear",
             )
         )
-    if ctx.portfolio_url not in body:
+    evidence_link_carries_it = (
+        ctx.form == "brief" and bool(ctx.evidence_url) and str(ctx.evidence_url) in body
+    )
+    if ctx.portfolio_url not in body and not evidence_link_carries_it:
         violations.append(
             Violation(
                 ViolationCode.WRONG_PORTFOLIO_URL,
