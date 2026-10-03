@@ -282,12 +282,16 @@ async def test_a_spent_research_budget_refuses_before_searching(db_session, work
 # ==========================================================================
 async def test_a_business_already_known_is_not_added_twice(db_session, workspace):
     campaign_id = await seed_campaign(workspace, suffix="dupe")
+    # A second campaign rather than the same one asking twice: a query asked
+    # at full depth now rests for thirty days, so the same campaign would not
+    # ask it again. Deduplication is per workspace, which is what this holds.
+    other_campaign = await seed_campaign(workspace, suffix="dupe-2")
 
     first = await run_discovery(
         run_for(workspace, campaign_id, key="a"), places_result(found(1))
     )
     second = await run_discovery(
-        run_for(workspace, campaign_id, key="b"), places_result(found(1), found(2))
+        run_for(workspace, other_campaign, key="b"), places_result(found(1), found(2))
     )
 
     assert first.leads_created == 1

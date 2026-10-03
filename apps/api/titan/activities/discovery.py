@@ -52,7 +52,12 @@ from titan.db.models.compliance import SuppressionEntry
 from titan.db.session import workspace_session, workspace_unit_of_work
 from titan.delivery.phone import strip_formatting
 from titan.intelligence import territories, verticals
-from titan.intelligence.discovery import admit_all, build_query, targeting_blockers
+from titan.intelligence.discovery import (
+    MAX_RESULTS_PER_SEARCH,
+    admit_all,
+    build_query,
+    targeting_blockers,
+)
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.subregions import subregion_from_longitude, timezone_for
 from titan.providers.places import (
@@ -99,6 +104,17 @@ MIN_RETURNED_TO_JUDGE = 30
 #: nobody has looked at.
 MIN_ADMIT_RATE = 0.05
 
+#: How long a query asked at full depth rests before it may be asked again.
+#:
+#: Every search now asks for all three pages Places will give (60 results) the
+#: first time, instead of page one -- twenty businesses -- every cycle until the
+#: rate rule above retired it. Page one asked three times is three billed
+#: requests for roughly the same twenty businesses; pages one to three asked
+#: once is three billed requests for sixty different ones. After that the
+#: answer does not change for weeks: a city does not grow a new set of dentists
+#: between Tuesday and Thursday. Thirty days, then it may be asked again.
+FULL_DEPTH_REST = dt.timedelta(days=30)
+
 
 async def _exhausted_geographies(
     session: AsyncSession, *, campaign_id: uuid.UUID, business_type: str
@@ -135,6 +151,8 @@ async def _exhausted_geographies(
                 LeadSource.label,
                 LeadSource.records_returned,
                 LeadSource.records_deduplicated,
+                LeadSource.query_parameters,
+                LeadSource.created_at,
             )
             .where(
                 LeadSource.campaign_id == campaign_id,
@@ -156,7 +174,9 @@ async def _exhausted_geographies(
     # geography that yielded nothing in March and everything in August is not
     # exhausted, but one judged on a single run is judged on noise.
     recent: dict[str, list[tuple[int, int]]] = {}
-    for label, returned, deduped in rows:
+    resting: set[str] = set()
+    rest_since = _now() - FULL_DEPTH_REST
+    for label, returned, deduped, parameters, created_at in rows:
         key = (label or "").strip().casefold()
         # Belt and braces beside the SQL filter: a label that does not carry
         # this prefix is a different search and says nothing about this one.
@@ -164,11 +184,21 @@ async def _exhausted_geographies(
         # geographies above, so it is dropped rather than kept.
         if not key or not key.startswith(prefix):
             continue
+        # Rows arrive newest first, so the first row seen for a key is its most
+        # recent run. Asked at full depth inside the rest window: there is
+        # nothing more to get from it yet, whatever it returned.
+        if (
+            key not in recent
+            and (parameters or {}).get("full_depth")
+            and created_at is not None
+            and created_at >= rest_since
+        ):
+            resting.add(key)
         window = recent.setdefault(key, [])
         if len(window) < EXHAUSTION_WINDOW_RUNS:
             window.append((int(returned or 0), int(deduped or 0)))
 
-    spent: set[str] = set()
+    spent: set[str] = {key.removeprefix(prefix).strip() for key in resting}
     for key, window in recent.items():
         returned = sum(r for r, _ in window)
         admitted = sum(r - d for r, d in window)
@@ -431,7 +461,9 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         business_type=business_type,
         geography=geography,
         country_code=country_code,
-        max_results=request.max_results,
+        # All the pages Places will give, once, rather than page one every
+        # cycle. See FULL_DEPTH_REST.
+        max_results=MAX_RESULTS_PER_SEARCH,
         # Places drops businesses with no website before billing for them,
         # which is the right default and exactly wrong when those are the
         # businesses being looked for. The local `admit` check stays either
@@ -467,7 +499,10 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         timezone=territories.timezone_of(geography),
         result=result,
         idempotency_key=request.idempotency_key,
-        max_new_leads=request.max_results,
+        # Every admissible business from the search, not the first twenty: the
+        # query now rests for thirty days, so anything left out here would be
+        # paid for and then not seen again for a month.
+        max_new_leads=MAX_RESULTS_PER_SEARCH,
         now=now,
     )
 
@@ -553,6 +588,9 @@ async def _record(
                 # this is what a person reads when asking what the run did.
                 "idempotency_key": idempotency_key,
                 "refused": refused,
+                # Read by _exhausted_geographies: a full-depth query rests.
+                "full_depth": True,
+                "pages_fetched": result.pages_fetched,
             },
             records_returned=result.returned_before_filtering,
             records_deduplicated=result.returned_before_filtering - len(admitted),
