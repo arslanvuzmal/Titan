@@ -242,6 +242,25 @@ export interface Message {
 }
 
 /** What goes out attached to every message, if anything does. */
+/** A reply waiting for an answer, as the reply desk returns it. */
+export interface DeskReply {
+  draft_id: string;
+  draft_version: number;
+  lead_id: string;
+  business_name: string | null;
+  from_email: string;
+  received_at: string;
+  their_subject: string | null;
+  /** What they wrote, verbatim. */
+  their_words: string;
+  reply_class: string;
+  confidence: number;
+  subject: string;
+  body: string;
+  ready_to_send: boolean;
+  status: string;
+}
+
 export interface Attachment {
   enabled: boolean;
   filename: string | null;
@@ -654,6 +673,21 @@ export const api = {
       token: t,
       method: 'POST',
       body: { decision, draft_version: draftVersion, reason },
+    }),
+
+  // --- reply desk ----------------------------------------------------------
+  replies: (t: string) => call<DeskReply[]>('/api/v1/reply-desk', { token: t }),
+  editReply: (t: string, draftId: string, draftVersion: number, subject: string, body: string) =>
+    call<DeskReply>(`/api/v1/reply-desk/${draftId}`, {
+      token: t,
+      method: 'POST',
+      body: { draft_version: draftVersion, subject, body },
+    }),
+  sendReply: (t: string, draftId: string, draftVersion: number) =>
+    call<{ outbox_id: string; status: string }>(`/api/v1/reply-desk/${draftId}/send`, {
+      token: t,
+      method: 'POST',
+      body: { draft_version: draftVersion },
     }),
 
   // --- delivery and compliance --------------------------------------------
