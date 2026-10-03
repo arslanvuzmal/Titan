@@ -213,6 +213,7 @@ function LeadsView() {
           <Table
             head={[
               'Business',
+              'Grade',
               'Score',
               'Status',
               'Campaign',
@@ -238,6 +239,13 @@ function LeadsView() {
                     )}
                     {lead.organization?.locality && ` · ${lead.organization.locality}`}
                   </div>
+                </td>
+                <td className="px-3 py-2">
+                  {lead.grade ? (
+                    <Badge tone={GRADE_TONE[lead.grade] ?? 'neutral'}>{lead.grade}</Badge>
+                  ) : (
+                    <Value>{null}</Value>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <ScoreBadge score={lead.latest_score} />
@@ -295,6 +303,14 @@ function LeadsView() {
     </div>
   );
 }
+
+/** A is the call list once calling is on; D is never contacted. */
+const GRADE_TONE: Record<string, 'good' | 'info' | 'warn' | 'bad' | 'neutral'> = {
+  A: 'good',
+  B: 'info',
+  C: 'warn',
+  D: 'bad',
+};
 
 export default function LeadsPage() {
   return (

@@ -30,6 +30,7 @@ from titan.api.call_sheet import router as call_sheet_router
 from titan.api.calls import router as calls_router
 from titan.api.crm import router as crm_router
 from titan.api.evidence import evidence_router
+from titan.api.health import router as health_router
 from titan.api.placement import open_pixel_router
 from titan.api.placement import router as placement_router
 from titan.api.reply_desk import router as reply_desk_router
@@ -205,6 +206,9 @@ app.include_router(open_pixel_router)
 app.include_router(evidence_router)
 # The reply desk: every human reply, its suggested answer, edit and send.
 app.include_router(reply_desk_router)
+# Is cold mail moving, and if not, why: the gate's verdict per mailbox, what
+# it needs, what came back this week, and how the leads grade.
+app.include_router(health_router)
 # Provider delivery events. Deliberately *not* behind the session auth the two
 # routers above use: a provider cannot hold a token, so an HMAC over the raw
 # body is the credential. See titan.api.webhooks for why that puts the whole

@@ -21,7 +21,7 @@ import React from 'react';
 import { TodaySection } from '@/components/crm/Today';
 import { Badge, Card, ErrorNote, Spinner, Stat } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api } from '@/lib/titan';
+import { api, type Health } from '@/lib/titan';
 
 function Distribution({
   data,
@@ -70,8 +70,22 @@ function Distribution({
   );
 }
 
+/** The banner: is cold mail moving, and if not, why. Links to the detail. */
+function ColdMailBanner({ health }: { health: Health | null }) {
+  if (!health) return null;
+  return (
+    <Link
+      href="/crm/inbox"
+      className={`block rounded-xl border px-4 py-3 text-sm hover:opacity-90 ${health.cold_mail_moving ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}
+    >
+      {health.cold_mail} <span className="font-medium underline">Inbox health</span>
+    </Link>
+  );
+}
+
 export default function OverviewPage() {
   const { data, error, loading, reload } = useApi((t) => api.stats(t), []);
+  const health = useApi((t) => api.health(t), []);
 
   if (loading && !data) return <Spinner label="Loading workspace" />;
   if (error) return <ErrorNote error={error} onRetry={reload} />;
@@ -91,7 +105,34 @@ export default function OverviewPage() {
         </p>
       </div>
 
+      <ColdMailBanner health={health.data} />
+
       <TodaySection />
+
+      {health.data ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Link href="/crm/replies" className="block rounded-xl hover:opacity-90">
+            <Stat
+              label="Replies waiting"
+              value={health.data.replies_waiting}
+              hint="people who wrote back and need an answer"
+              tone={health.data.replies_waiting > 0 ? 'good' : 'neutral'}
+            />
+          </Link>
+          <Stat
+            label="Seen this week"
+            value={(health.data.seen_7d.confirmed ?? 0) + (health.data.seen_7d.likely ?? 0)}
+            hint={`${health.data.seen_7d.confirmed ?? 0} confirmed visits; Apple and scanners not counted`}
+          />
+          <Link href="/crm/leads?min_score=80" className="block rounded-xl hover:opacity-90">
+            <Stat
+              label="Grade A leads"
+              value={health.data.grades.A ?? 0}
+              hint="score 80+, the first to call once calling is on"
+            />
+          </Link>
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Leads" value={data.leads_total} hint={`${data.organizations_total} businesses`} />
@@ -123,9 +164,9 @@ export default function OverviewPage() {
           />
         </Card>
 
-        <Card title="Qualification" subtitle="Leads by score band">
+        <Card title="Qualification" subtitle="Leads by grade (A 80+, B 65+, C 50+, D below)">
           <Distribution
-            data={data.leads_by_band}
+            data={health.data?.grades ?? data.leads_by_band}
             emptyLabel="No lead has been scored yet."
           />
         </Card>

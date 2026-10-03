@@ -114,6 +114,8 @@ export interface Lead {
   message_count: number;
   evidence_count: number;
   has_eligible_contact: boolean;
+  /** A-D, read from latest_score. Null for a lead nobody has scored. */
+  grade?: string | null;
 }
 
 export interface ContactChannel {
@@ -242,6 +244,64 @@ export interface Message {
 }
 
 /** What goes out attached to every message, if anything does. */
+/** One mailbox, with the inbox gate's own verdict. */
+export interface MailboxStatus {
+  from_email: string;
+  sending: boolean;
+  /** placement_unmeasured | placement_below_floor | placement_domain_resting */
+  code: string | null;
+  detail: string;
+  reach: number | null;
+  measured: number;
+  rest_until: string | null;
+}
+
+export interface SeenSignal {
+  occurred_at: string;
+  kind: string;
+  grade: string;
+  reason: string;
+  business_name: string | null;
+  lead_id: string | null;
+}
+
+/** Is cold mail moving, and if not, why. */
+export interface Health {
+  gate_enabled: boolean;
+  cold_mail: string;
+  cold_mail_moving: boolean;
+  mailboxes: MailboxStatus[];
+  seeds_configured: number;
+  warmup_enabled: boolean;
+  warmup_partners: number;
+  message_form: string;
+  replies_waiting: number;
+  seen_7d: Record<string, number>;
+  recent_seen: SeenSignal[];
+  grades: Record<string, number>;
+}
+
+export interface MailboxPlacement {
+  from_email: string;
+  provider: string;
+  probes: number;
+  inbox: number;
+  promotions: number;
+  spam: number;
+  missing: number;
+  unchecked: number;
+  measured: number;
+  reach: number | null;
+  verdict: string;
+}
+
+export interface Placement {
+  days: number;
+  by_mailbox: MailboxPlacement[];
+  never_measured: boolean;
+  unmeasured_note: string | null;
+}
+
 /** A reply waiting for an answer, as the reply desk returns it. */
 export interface DeskReply {
   draft_id: string;
@@ -674,6 +734,11 @@ export const api = {
       method: 'POST',
       body: { decision, draft_version: draftVersion, reason },
     }),
+
+  // --- health --------------------------------------------------------------
+  health: (t: string) => call<Health>('/api/v1/health', { token: t }),
+  placement: (t: string, days = 14) =>
+    call<Placement>(`/api/v1/placement${query({ days })}`, { token: t }),
 
   // --- reply desk ----------------------------------------------------------
   replies: (t: string) => call<DeskReply[]>('/api/v1/reply-desk', { token: t }),
