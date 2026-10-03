@@ -33,7 +33,7 @@ import datetime as dt
 import logging
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporalio import activity
 
@@ -61,6 +61,7 @@ from titan.intelligence.discovery import (
 from titan.notify.operator import NotificationKind, record_notification
 from titan.policy.subregions import subregion_from_longitude, timezone_for
 from titan.providers.places import (
+    MAX_PAGES,
     DiscoveredBusiness,
     DiscoveryResult,
     GooglePlacesProvider,
@@ -210,6 +211,60 @@ async def _exhausted_geographies(
             continue
         spent.add(key.removeprefix(prefix).strip())
     return spent
+
+
+async def places_requests_used(
+    session: AsyncSession, *, workspace_id: uuid.UUID, now: dt.datetime
+) -> tuple[int, int]:
+    """Billed Places requests this calendar month and this UTC day.
+
+    Counted from ``lead_sources``, which records every search: its
+    ``pages_fetched`` where it was stamped, one request where it was not
+    (every search costs at least one). Per workspace, as every raw query here
+    must be; the estate runs one real workspace, so this is the whole bill.
+    """
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  coalesce(sum(coalesce((query_parameters->>'pages_fetched')::int, 1)), 0)
+                    AS month,
+                  coalesce(sum(coalesce((query_parameters->>'pages_fetched')::int, 1))
+                    FILTER (WHERE created_at >= :day_start), 0) AS today
+                  FROM lead_sources
+                 WHERE workspace_id = :ws
+                   AND kind = :kind
+                   AND created_at >= :month_start
+                """
+            ),
+            {
+                "ws": workspace_id,
+                "kind": SOURCE_KIND,
+                "month_start": month_start,
+                "day_start": day_start,
+            },
+        )
+    ).one()
+    return int(row.month or 0), int(row.today or 0)
+
+
+def places_cap_refusal(
+    *, used_month: int, used_today: int, monthly_cap: int, daily_cap: int
+) -> str | None:
+    """Why a search may not run, or None. Room is needed for a full-depth search."""
+    if used_month + MAX_PAGES > monthly_cap:
+        return (
+            f"Places monthly cap reached: {used_month} of {monthly_cap} requests used "
+            "this month (Google's free allowance is 1,000)"
+        )
+    if used_today + MAX_PAGES > daily_cap:
+        return (
+            f"Places daily cap reached: {used_today} of {daily_cap} requests used today"
+        )
+    return None
 
 
 async def _exhausted_verticals(
@@ -456,6 +511,21 @@ async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResu
         return DiscoverActivityResult(
             refused_reason="TITAN_GOOGLE_PLACES_API_KEY is not configured"
         )
+
+    # The spending cap, checked before anything is billed. A full-depth search
+    # can cost up to MAX_PAGES requests, so it needs that much room left.
+    async with workspace_session(workspace_id) as session:
+        used_month, used_today = await places_requests_used(
+            session, workspace_id=workspace_id, now=now
+        )
+    over = places_cap_refusal(
+        used_month=used_month,
+        used_today=used_today,
+        monthly_cap=settings.places_monthly_request_cap,
+        daily_cap=settings.places_daily_request_cap,
+    )
+    if over is not None:
+        return DiscoverActivityResult(refused_reason=over)
 
     query = build_query(
         business_type=business_type,

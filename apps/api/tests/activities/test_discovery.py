@@ -128,6 +128,8 @@ async def run_discovery(request: DiscoverActivityInput, result: DiscoveryResult)
     ):
         fake_activity.heartbeat = lambda *a, **k: None
         get_settings.return_value.google_places_api_key = "key"
+        get_settings.return_value.places_monthly_request_cap = 950
+        get_settings.return_value.places_daily_request_cap = 40
         instance = ProviderCls.from_settings.return_value
         instance.search = AsyncMock(return_value=result)
         instance.aclose = AsyncMock()

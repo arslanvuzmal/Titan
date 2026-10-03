@@ -33,6 +33,8 @@ async def _search(request, result):
         fake_activity.heartbeat = lambda *a, **k: None
         get_settings.return_value.google_places_api_key = "key"
         get_settings.return_value.discover_siteless = False
+        get_settings.return_value.places_monthly_request_cap = 950
+        get_settings.return_value.places_daily_request_cap = 40
         instance = ProviderCls.from_settings.return_value
         instance.search = AsyncMock(return_value=result)
         instance.aclose = AsyncMock()
@@ -139,3 +141,75 @@ async def test_page_one_searches_from_before_keep_the_old_rule(
 
 def test_the_rest_is_a_month() -> None:
     assert FULL_DEPTH_REST == dt.timedelta(days=30)
+
+
+# ------------------------------------------------------------------ the cap
+def test_the_cap_needs_room_for_a_full_depth_search() -> None:
+    assert (
+        discovery.places_cap_refusal(
+            used_month=948, used_today=0, monthly_cap=950, daily_cap=40
+        )
+        is not None
+    )
+    assert (
+        discovery.places_cap_refusal(
+            used_month=947, used_today=0, monthly_cap=950, daily_cap=40
+        )
+        is None
+    )
+    refusal = discovery.places_cap_refusal(
+        used_month=0, used_today=38, monthly_cap=950, daily_cap=40
+    )
+    assert refusal is not None and "daily" in refusal
+
+
+async def test_searches_are_counted_by_the_pages_they_cost(db_session, workspace) -> None:
+    campaign_id = await seed_campaign(workspace, suffix="cap")
+    async with workspace_unit_of_work(workspace) as session:
+        for pages in (3, 2):
+            session.add(
+                LeadSource(
+                    workspace_id=workspace,
+                    kind=discovery.SOURCE_KIND,
+                    label="dentists in Leeds UK",
+                    campaign_id=campaign_id,
+                    query_parameters={"full_depth": True, "pages_fetched": pages},
+                )
+            )
+        # An older row, written before pages were stamped: costs one.
+        session.add(
+            LeadSource(
+                workspace_id=workspace,
+                kind=discovery.SOURCE_KIND,
+                label="dentists in York UK",
+                campaign_id=campaign_id,
+                query_parameters={},
+            )
+        )
+
+    async with workspace_unit_of_work(workspace) as session:
+        month, today = await discovery.places_requests_used(
+            session, workspace_id=workspace, now=dt.datetime.now(dt.UTC)
+        )
+    assert (month, today) == (6, 6)
+
+
+async def test_a_search_over_the_cap_is_refused_before_it_is_billed(
+    db_session, workspace
+) -> None:
+    campaign_id = await seed_campaign(workspace, suffix="capped")
+    async with workspace_unit_of_work(workspace) as session:
+        session.add(
+            LeadSource(
+                workspace_id=workspace,
+                kind=discovery.SOURCE_KIND,
+                label="earlier",
+                campaign_id=campaign_id,
+                query_parameters={"pages_fetched": 40},
+            )
+        )
+    outcome, asked = await _search(
+        run_for(workspace, campaign_id), places_result(found(1))
+    )
+    assert asked is None, "Places was called past the cap"
+    assert outcome.refused_reason is not None and "cap" in outcome.refused_reason

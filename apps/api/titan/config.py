@@ -236,6 +236,14 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------- discovery
     google_places_api_key: SecretStr | None = None
+    #: Billed Places requests allowed per calendar month, across the estate.
+    #:
+    #: Google gives 1,000 Text Search (Enterprise) requests a month free and
+    #: charges about $35 per 1,000 after that. 950 keeps the estate inside the
+    #: free allowance with a margin; raise it deliberately, knowing what it costs.
+    places_monthly_request_cap: int = 950
+    #: The same, per UTC day, so the month is not spent in its first week.
+    places_daily_request_cap: int = 40
     google_places_base_url: AnyHttpUrl = AnyHttpUrl("https://places.googleapis.com/v1")
     agent_reach_api_key: SecretStr | None = None
     agent_reach_base_url: AnyHttpUrl | None = None
