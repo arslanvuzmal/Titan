@@ -45,6 +45,11 @@ RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY --from=builder /app/dist ./dist
 
+# Where screenshots are kept (ARTIFACT_DIR). Created here, owned by pwuser,
+# because Docker initialises a new named volume from the image's directory --
+# ownership included -- so the volume is writable by the user that writes it.
+RUN mkdir -p /data/artifacts && chown pwuser:pwuser /data/artifacts
+
 # The playwright base image ships a non-root `pwuser`.
 USER pwuser
 EXPOSE 8800

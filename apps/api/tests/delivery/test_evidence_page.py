@@ -288,3 +288,89 @@ async def test_apples_proxy_records_delivery_and_does_not_stamp_an_open(
         .all()
     )
     assert grades == ["delivered", "likely"]
+
+
+# ------------------------------------------------------------- screenshots
+def test_a_storage_key_cannot_leave_the_screenshot_directory() -> None:
+    good = "shots/ab/" + "ab" * 32 + ".jpg"
+    assert ep.shot_path("/data/artifacts", good) is not None
+    for bad in (
+        "../../etc/passwd",
+        "shots/ab/../../secrets.json",
+        "req-123/screenshot_desktop.png",
+        "shots/ab/" + "AB" * 32 + ".jpg",
+    ):
+        assert ep.shot_path("/data/artifacts", bad) is None, bad
+
+
+def test_screenshots_are_served_from_the_page_itself() -> None:
+    page = _page(
+        shots={"desktop": ("shots/ab/x.jpg", NOW), "mobile": ("shots/cd/y.jpg", NOW)}
+    )
+    html = ep.render(page, token="t.x", owner_name="A", portfolio_url="https://a.com")
+    assert 'src="/e/t.x/shot/desktop.jpg"' in html
+    assert 'src="/e/t.x/shot/mobile.jpg"' in html
+    assert 'src="http' not in html
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_the_latest_screenshot_is_served_behind_the_token(
+    db_session, workspace, monkeypatch
+) -> None:
+    import pathlib
+    import tempfile
+
+    from titan.db.models import BrowserArtifact, CrawlRun
+
+    # Not pytest's tmp_path: its base directory is refused on the dev laptop.
+    tmp_path = pathlib.Path(tempfile.mkdtemp(prefix="titan-shots-"))
+
+    lead_id = await _with_findings(db_session, workspace)
+    run_id = await db_session.scalar(
+        text("SELECT id FROM research_runs WHERE workspace_id = :ws AND lead_id = :lead"),
+        {"ws": workspace, "lead": lead_id},
+    )
+    crawl = CrawlRun(
+        workspace_id=workspace,
+        research_run_id=run_id,
+        seed_url="https://fixture.test/",
+        status="completed",
+    )
+    db_session.add(crawl)
+    await db_session.flush()
+    key = "shots/ab/" + "ab" * 32 + ".jpg"
+    db_session.add(
+        BrowserArtifact(
+            workspace_id=workspace,
+            crawl_run_id=crawl.id,
+            kind="screenshot_desktop",
+            media_type="image/jpeg",
+            storage_key=key,
+            byte_size=4,
+            content_fingerprint="ab" * 32,
+            captured_at=NOW,
+        )
+    )
+    await db_session.commit()
+    (tmp_path / "shots" / "ab").mkdir(parents=True)
+    (tmp_path / key).write_bytes(b"jpeg")
+
+    monkeypatch.setattr(
+        evidence_api,
+        "get_settings",
+        lambda: sending_settings(evidence_secret=SECRET, artifact_dir=str(tmp_path)),
+    )
+    from titan.api.main import app
+
+    client = TestClient(app)
+    token = ep.evidence_token(lead_id, SECRET)
+    r = client.get(f"/e/{token}/shot/desktop.jpg")
+    assert r.status_code == 200
+    assert r.content == b"jpeg"
+    assert r.headers["content-type"] == "image/jpeg"
+    assert client.get(f"/e/{token}/shot/mobile.jpg").status_code == 404
+    forged = ep.evidence_token(lead_id, "other")
+    assert client.get(f"/e/{forged}/shot/desktop.jpg").status_code == 404
+    page = client.get(f"/e/{token}")
+    assert "/shot/desktop.jpg" in page.text

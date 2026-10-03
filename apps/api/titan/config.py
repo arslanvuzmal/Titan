@@ -370,6 +370,9 @@ class Settings(BaseSettings):
     #: Signs evidence-page tokens. Without it the route serves a neutral "not
     #: available" page for every token rather than accepting unsigned ones.
     evidence_secret: SecretStr | None = None
+    #: Where the browser worker keeps screenshots (a volume mounted read-only
+    #: here). Unset, evidence pages render without pictures.
+    artifact_dir: str | None = None
     #: Put a one-pixel image in every message, so an open can be recorded.
     #:
     #: **Off, and the default is the decision rather than a placeholder.** A

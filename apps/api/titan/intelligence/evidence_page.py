@@ -25,6 +25,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import pathlib
+import re
 import uuid
 from dataclasses import dataclass, field
 from html import escape
@@ -108,6 +110,50 @@ class EvidencePage:
     business_name: str
     domain: str | None
     findings: tuple[PageFinding, ...] = field(default_factory=tuple)
+    #: Latest saved homepage screenshot per view: {"desktop"|"mobile": (key, when)}.
+    shots: dict[str, tuple[str, dt.datetime]] = field(default_factory=dict)
+
+
+#: Which stored artifact kind each view on the page reads.
+SHOT_KINDS = {"desktop": "screenshot_desktop", "mobile": "screenshot_mobile"}
+
+#: The only shape of storage key a screenshot may have. Checked before any path
+#: is built from one, so a key in the database can never point outside the
+#: screenshot directory. Mirrors storageKeyFor() in the browser worker.
+_SHOT_KEY = re.compile(r"^shots/[0-9a-f]{2}/[0-9a-f]{64}\.jpg$")
+
+
+def shot_path(artifact_dir: str, storage_key: str) -> pathlib.Path | None:
+    """The file for a storage key, or None if the key is not a screenshot key."""
+    if not _SHOT_KEY.match(storage_key):
+        return None
+    return pathlib.Path(artifact_dir) / storage_key
+
+
+async def latest_shots(
+    session: AsyncSession, *, workspace_id: uuid.UUID, lead_id: uuid.UUID
+) -> dict[str, tuple[str, dt.datetime]]:
+    """The most recent saved screenshot of each view for this lead."""
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (a.kind) a.kind, a.storage_key, a.captured_at
+                  FROM browser_artifacts a
+                  JOIN crawl_runs c ON c.id = a.crawl_run_id AND c.workspace_id = :ws
+                  JOIN research_runs r ON r.id = c.research_run_id AND r.workspace_id = :ws
+                 WHERE a.workspace_id = :ws
+                   AND r.lead_id = :lead
+                   AND a.kind = ANY(CAST(:kinds AS text[]))
+                   AND a.storage_key IS NOT NULL
+                 ORDER BY a.kind, a.captured_at DESC
+                """
+            ),
+            {"ws": workspace_id, "lead": lead_id, "kinds": list(SHOT_KINDS.values())},
+        )
+    ).all()
+    by_kind = {r.kind: (r.storage_key, r.captured_at) for r in rows}
+    return {view: by_kind[kind] for view, kind in SHOT_KINDS.items() if kind in by_kind}
 
 
 async def load_page(session: AsyncSession, *, lead_id: uuid.UUID) -> EvidencePage | None:
@@ -189,6 +235,7 @@ async def load_page(session: AsyncSession, *, lead_id: uuid.UUID) -> EvidencePag
         business_name=head.display_name,
         domain=head.canonical_domain,
         findings=tuple(unique[:MAX_FINDINGS]),
+        shots=await latest_shots(session, workspace_id=workspace_id, lead_id=lead_id),
     )
 
 
@@ -245,6 +292,20 @@ def render(
             "<p>Everything I found earlier has since been fixed or could not be "
             "confirmed again, so there is nothing to show here.</p>"
         )
+    shots = ""
+    if page.shots:
+        captured = max(when for _, when in page.shots.values())
+        images = "".join(
+            f'<img class="{view}" src="/e/{escape(token, quote=True)}/shot/{view}.jpg" '
+            f'alt="Your homepage on {"a phone" if view == "mobile" else "a computer"}" '
+            'loading="lazy">'
+            for view in ("desktop", "mobile")
+            if view in page.shots
+        )
+        shots = (
+            f'<figure class="shots">{images}<figcaption>Your homepage as I saw it on '
+            f"{captured:%d %B %Y}.</figcaption></figure>"
+        )
     beacon = f"""<script>
 setTimeout(function(){{try{{var d=document.documentElement;
 var s=Math.round(100*(window.scrollY+window.innerHeight)/Math.max(d.scrollHeight,1));
@@ -273,12 +334,16 @@ dl{{display:grid;grid-template-columns:90px 1fr;gap:4px 12px;margin:0;font-size:
 dt{{color:var(--mute)}}dd{{margin:0;overflow-wrap:anywhere}}
 blockquote{{margin:10px 0;padding:8px 12px;border-left:3px solid var(--rule);color:var(--mute);font-size:.92rem}}
 a{{color:var(--accent)}}ul{{padding-left:18px;margin:4px 0}}
+.shots{{margin:0 0 20px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}}
+.shots img{{border:1px solid var(--rule);border-radius:6px;max-width:100%;height:auto}}
+.shots img.desktop{{flex:1 1 380px;min-width:0}}.shots img.mobile{{width:150px}}
+.shots figcaption{{flex-basis:100%;color:var(--mute);font-size:.88rem}}
 footer{{margin-top:32px;padding-top:16px;border-top:1px solid var(--rule);color:var(--mute);font-size:.92rem}}
 </style></head>
 <body><main>
 <h1>What I found on {domain}</h1>
 <p class="lede">Prepared for {name}. Each item below was measured on your live site, with the page it was found on and the date it was checked, so you can confirm it yourself.</p>
-{body}
+{shots}{body}
 <footer>
 <p>{escape(owner_name)} &middot; {_link(portfolio_url, "examples of my work")}</p>
 <p>Reply to my email if you would like to go through any of this. If you would rather not hear from me again, reply and say so and I will take you off the list.</p>
@@ -300,12 +365,15 @@ def not_found_html() -> str:
 __all__ = [
     "BEACON_DELAY_MS",
     "MAX_FINDINGS",
+    "SHOT_KINDS",
     "EvidencePage",
     "PageFinding",
     "evidence_token",
     "evidence_url",
+    "latest_shots",
     "load_page",
     "not_found_html",
     "render",
+    "shot_path",
     "verify_evidence_token",
 ]

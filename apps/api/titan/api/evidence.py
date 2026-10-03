@@ -11,6 +11,7 @@ event is logged and swallowed; the owner still sees what was found.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import logging
@@ -151,6 +152,48 @@ async def evidence_seen(token: str, request: Request) -> Response:
     except Exception:
         logger.exception("could not record an evidence-page beacon")
     return done
+
+
+@evidence_router.get("/e/{token}/shot/{view}.jpg", include_in_schema=False)
+async def evidence_shot(token: str, view: str) -> Response:
+    """One of the lead's homepage screenshots, for the page that names it.
+
+    The same token gates it, so a screenshot is no more public than the page.
+    The storage key is read from the database and checked against the one
+    shape a screenshot key has before any path is built from it.
+    """
+    missing = Response(status_code=404, headers=_HEADERS)
+    settings = get_settings()
+    if settings.evidence_secret is None or not settings.artifact_dir:
+        return missing
+    if view not in evidence_page.SHOT_KINDS:
+        return missing
+    lead_id = evidence_page.verify_evidence_token(token, settings.evidence_secret)
+    if lead_id is None:
+        return missing
+    async with get_sessionmaker()() as session:
+        workspace_id = await session.scalar(
+            text("SELECT workspace_id FROM leads WHERE id = :lead"), {"lead": lead_id}
+        )
+        if workspace_id is None:
+            return missing
+        shots = await evidence_page.latest_shots(
+            session, workspace_id=workspace_id, lead_id=lead_id
+        )
+    if view not in shots:
+        return missing
+    path = evidence_page.shot_path(settings.artifact_dir, shots[view][0])
+    if path is None:
+        return missing
+    try:
+        data = await asyncio.to_thread(path.read_bytes)
+    except OSError:
+        return missing
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={**_HEADERS, "Cache-Control": "private, max-age=3600"},
+    )
 
 
 __all__ = ["evidence_router"]

@@ -19,6 +19,7 @@ import type {
 import { CONTRACT_VERSION, WORKER_VERSION } from './contract.js';
 import { collectPage, readPerformance, readSecurityHeaders, runAxe } from './collect.js';
 import { validateUrl } from './urlGuard.js';
+import { SHOT_QUALITY, artifactDir, saveShot } from './shots.js';
 
 const MOBILE = { width: 390, height: 844 };
 const DESKTOP = { width: 1440, height: 900 };
@@ -568,11 +569,26 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
             ['screenshot_mobile', MOBILE],
           ] as const) {
             await page.setViewportSize(viewport);
-            const shot = await page.screenshot({ fullPage: false, type: 'png' });
+            // Kept on disk when a directory is configured, as JPEG; otherwise
+            // fingerprinted and dropped, as before. See shots.ts.
+            const dir = artifactDir();
+            const shot = dir
+              ? await page.screenshot({ fullPage: false, type: 'jpeg', quality: SHOT_QUALITY })
+              : await page.screenshot({ fullPage: false, type: 'png' });
+            let storageKey: string | null = null;
+            if (dir) {
+              try {
+                storageKey = await saveShot(dir, shot);
+              } catch {
+                // A full disk must not fail the crawl; the evidence page simply
+                // shows no picture for this one.
+                storageKey = null;
+              }
+            }
             result.artifacts.push({
               kind,
-              media_type: 'image/png',
-              storage_key: `${req.request_id}/${kind}.png`,
+              media_type: dir ? 'image/jpeg' : 'image/png',
+              storage_key: storageKey,
               payload: null,
               byte_size: shot.byteLength,
               content_fingerprint: crypto.createHash('sha256').update(shot).digest('hex'),

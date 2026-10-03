@@ -76,6 +76,10 @@ services:
     # fails to authenticate -- on a host nobody is watching.
     volumes:
       - ../secrets:/run/secrets:ro
+      # Read-only: the API serves screenshots on evidence pages, never writes them.
+      - artifacts:/data/artifacts:ro
+    environment:
+      TITAN_ARTIFACT_DIR: /data/artifacts
     # Not published to the host: nginx terminates TLS and is the only ingress.
     expose: ["8000"]
     depends_on:
@@ -294,6 +298,12 @@ services:
       BROWSER_WORKER_CONCURRENCY: "2"
       BROWSER_WORKER_PORT: "8800"
       BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:?set TITAN_BROWSER_WORKER_TOKEN}
+      # Screenshots, kept so the evidence page can show them. Named by content
+      # and purged after 21 days unrewritten -- see apps/browser-worker/src/shots.ts.
+      ARTIFACT_DIR: /data/artifacts
+      ARTIFACT_RETENTION_DAYS: "21"
+    volumes:
+      - artifacts:/data/artifacts
     expose: ["8800"]
     networks: [titan_network]
     security_opt: [no-new-privileges:true]
@@ -378,6 +388,7 @@ networks:
     driver: bridge
 
 volumes:
+  artifacts:
   postgres_data:
   temporal_postgres_data:
   redis_data:

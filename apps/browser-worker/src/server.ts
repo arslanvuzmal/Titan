@@ -12,6 +12,7 @@ import { recheckUrl, runCrawl } from './crawler.js';
 import { discoverOnMaps } from './mapsDiscovery.js';
 import type { ResearchRequest } from './contract.js';
 import { WORKER_VERSION } from './contract.js';
+import { artifactDir, purgeOld, retentionDays } from './shots.js';
 
 const PORT = Number(process.env.BROWSER_WORKER_PORT ?? 8800);
 const TOKEN = process.env.BROWSER_WORKER_TOKEN ?? '';
@@ -181,3 +182,18 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 server.listen(PORT, () => {
   process.stderr.write(`browser-worker ${WORKER_VERSION} listening on :${PORT}\n`);
 });
+
+// Screenshot retention. Hourly, and once at start so a worker that was down for
+// a week does not wait an hour to catch up.
+async function sweepShots(): Promise<void> {
+  const dir = artifactDir();
+  if (!dir) return;
+  try {
+    const removed = await purgeOld(dir, retentionDays());
+    if (removed > 0) console.log(JSON.stringify({ event: 'shots_purged', removed }));
+  } catch (err) {
+    console.error(JSON.stringify({ event: 'shots_purge_failed', error: String(err) }));
+  }
+}
+void sweepShots();
+setInterval(() => void sweepShots(), 3600 * 1000).unref();
