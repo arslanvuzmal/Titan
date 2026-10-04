@@ -31,7 +31,13 @@ THEIR_ID = "<CAF=reply-123@mail.gmail.com>"
 
 
 async def _replied(
-    session, workspace, *, reply_class=ReplyClass.WANTS_CALL, body=None, threaded=True
+    session,
+    workspace,
+    *,
+    reply_class=ReplyClass.WANTS_CALL,
+    body=None,
+    threaded=True,
+    their_id=THEIR_ID,
 ):
     """A lead whose first message went out and who wrote back."""
     fixture = await build_sendable(session, workspace, suffix=uuid.uuid4().hex[:6])
@@ -44,7 +50,7 @@ async def _replied(
     inbound = InboundMessage(
         workspace_id=workspace,
         provider="imap",
-        provider_inbound_id=THEIR_ID,
+        provider_inbound_id=their_id,
         in_reply_to_message_id=fixture.message_id if threaded else None,
         lead_id=fixture.lead_id,
         from_email_normalized=fixture.to_email,
@@ -331,3 +337,49 @@ async def test_a_mailbox_full_of_held_cold_drafts_still_carries_an_answer(
         decided_by=None,
     )
     assert outbox.sender_identity_id == fixture.sender_id
+
+
+def test_a_message_id_stored_without_brackets_still_threads() -> None:
+    """How the collector actually stores them -- the bug that cancelled the
+    first real reply sent from the desk."""
+    inbound = InboundMessage(
+        provider_inbound_id="CAPYiLBo@mail.gmail.com",
+        raw_payload={"in_reply_to": "718f1d52@arslanvuzmallone.com"},
+    )
+    assert thread_headers(inbound) == {
+        "In-Reply-To": "<CAPYiLBo@mail.gmail.com>",
+        "References": "<718f1d52@arslanvuzmallone.com> <CAPYiLBo@mail.gmail.com>",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reply_to_an_unbracketed_message_id_is_sent_not_cancelled(
+    db_session, workspace, monkeypatch
+) -> None:
+    """Exactly what happened to the first live reply: the collector's bare
+    Message-ID, the cold-mail gate on, and the worker cancelling it under the
+    cold rules (lead replied, no evidence, score)."""
+    from titan.db.models import SenderIdentity
+
+    fixture, draft_id = await _replied(
+        db_session, workspace, their_id="CAPYiLBo@mail.gmail.com"
+    )
+    await db_session.execute(
+        update(SenderIdentity)
+        .where(SenderIdentity.id == fixture.sender_id)
+        .values(unsubscribe_url_template="https://arslanvuzmallone.com/u/{token}")
+    )
+    await db_session.commit()
+    monkeypatch.setattr(
+        reply_desk, "get_settings", lambda: sending_settings(unsubscribe_secret="s" * 32)
+    )
+    outbox = await _edit_and_send(db_session, workspace, draft_id)
+    assert outbox.payload["headers"]["In-Reply-To"] == "<CAPYiLBo@mail.gmail.com>"
+
+    provider = MockEmailProvider()
+    results = await OutboxWorker(
+        provider,
+        sending_settings(placement_gate_enabled=True),
+        now_fn=lambda: dt.datetime.now(dt.UTC) + dt.timedelta(minutes=1),
+    ).run_once()
+    assert [r.outcome for r in results] == ["sent"], results

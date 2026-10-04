@@ -751,10 +751,12 @@ class OutboxWorker:
             # Only a payload the reply desk wrote, for a reply draft, threaded
             # under a message we received. All three, so a cold message cannot
             # claim the exemptions by setting one field.
+            # Two markers only the reply desk sets: the payload's kind and the
+            # draft's reply: template. Requiring In-Reply-To as well cancelled
+            # every real reply whose original carried no usable Message-ID.
             is_reply=(
                 (row.payload or {}).get("kind") == "reply"
                 and (draft.template_key or "").startswith("reply:")
-                and bool(((row.payload or {}).get("headers") or {}).get("In-Reply-To"))
             ),
         )
         # Unused but fetched for the audit trail; keeps the read in one place.

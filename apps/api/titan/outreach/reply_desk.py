@@ -362,12 +362,30 @@ def thread_headers(inbound: InboundMessage) -> dict[str, str]:
     IMAP. References carries what their message itself was replying to, when it
     said, so a client can rebuild the whole thread.
     """
-    theirs = (inbound.provider_inbound_id or "").strip()
-    if not theirs.startswith("<"):
+    theirs = _message_id(inbound.provider_inbound_id)
+    if theirs is None:
         return {}
-    earlier = str((inbound.raw_payload or {}).get("in_reply_to") or "").strip()
-    references = " ".join(x for x in (earlier, theirs) if x.startswith("<"))
+    earlier = _message_id((inbound.raw_payload or {}).get("in_reply_to"))
+    references = " ".join(x for x in (earlier, theirs) if x)
     return {"In-Reply-To": theirs, "References": references}
+
+
+def _message_id(value: object) -> str | None:
+    """A Message-ID in header form, ``<local@domain>``, or None.
+
+    The collector stores ids *without* their angle brackets
+    (``CAPYi...@mail.gmail.com``), and the first version of this accepted only
+    the bracketed form -- so every real reply went out unthreaded, was not
+    recognised as a reply at send time, and was cancelled by the cold-mail
+    rules. A content hash (no ``@``) is not a Message-ID and threads nothing.
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    bare = raw.removeprefix("<").removesuffix(">").strip()
+    if "@" not in bare or any(c.isspace() for c in bare):
+        return None
+    return f"<{bare}>"
 
 
 async def _thread_sender(
