@@ -397,6 +397,17 @@ async def _thread_sender(
         cold_mail=False,
     )
     chosen = sender_pool.choose(slots).chosen_id
+    if chosen is None:
+        # Every usable mailbox is "full" -- but full of cold drafts that the
+        # placement gate is holding, which count against a mailbox the moment
+        # they are queued. One answer to one person is not volume; it goes
+        # from the healthiest usable mailbox regardless, and the send-time
+        # quota still counts it.
+        usable = [s for s in slots if s.available]
+        if usable:
+            chosen = sorted(
+                usable, key=lambda s: (-s.daily_limit, str(s.sender_identity_id))
+            )[0].sender_identity_id
     return await session.get(SenderIdentity, chosen) if chosen else None
 
 

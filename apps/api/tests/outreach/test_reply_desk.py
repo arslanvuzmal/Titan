@@ -288,3 +288,46 @@ async def test_a_reply_not_threaded_to_us_still_finds_a_mailbox_with_the_gate_on
         decided_by=None,
     )
     assert outbox.sender_identity_id == fixture.sender_id
+
+
+@pytest.mark.asyncio
+async def test_a_mailbox_full_of_held_cold_drafts_still_carries_an_answer(
+    db_session, workspace
+) -> None:
+    """The second bug that shipped: arslan@ at 10 of 10, all of it cold drafts
+    waiting behind the gate, and the one answer to a real person refused."""
+    from titan.db.models import SenderIdentity
+
+    fixture, draft_id = await _replied(
+        db_session, workspace, body="Thanks, Tuesday works.\n", threaded=False
+    )
+    await db_session.execute(
+        update(SenderIdentity)
+        .where(SenderIdentity.id == fixture.sender_id)
+        .values(daily_send_limit=1)
+    )
+    # The opener's outbox row back to pending: one queued cold message fills
+    # a mailbox whose limit is one.
+    await db_session.execute(
+        update(OutboxMessage)
+        .where(OutboxMessage.id == fixture.outbox_id)
+        .values(status=OutboxStatus.PENDING)
+    )
+    await db_session.commit()
+    draft = await db_session.get(MessageDraft, draft_id)
+    edited = await reply_desk.edit(
+        db_session,
+        workspace_id=workspace,
+        draft_id=draft_id,
+        seen_version=draft.version,
+        subject="Re: Your booking page",
+        body="Thanks, Tuesday works.",
+    )
+    outbox = await reply_desk.send(
+        db_session,
+        workspace_id=workspace,
+        draft_id=draft_id,
+        seen_version=edited.version,
+        decided_by=None,
+    )
+    assert outbox.sender_identity_id == fixture.sender_id
