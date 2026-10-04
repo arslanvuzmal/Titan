@@ -30,7 +30,9 @@ pytestmark = [pytest.mark.integration]
 THEIR_ID = "<CAF=reply-123@mail.gmail.com>"
 
 
-async def _replied(session, workspace, *, reply_class=ReplyClass.WANTS_CALL, body=None):
+async def _replied(
+    session, workspace, *, reply_class=ReplyClass.WANTS_CALL, body=None, threaded=True
+):
     """A lead whose first message went out and who wrote back."""
     fixture = await build_sendable(session, workspace, suffix=uuid.uuid4().hex[:6])
     # The opener has gone; only the reply should be in the outbox from here.
@@ -43,7 +45,7 @@ async def _replied(session, workspace, *, reply_class=ReplyClass.WANTS_CALL, bod
         workspace_id=workspace,
         provider="imap",
         provider_inbound_id=THEIR_ID,
-        in_reply_to_message_id=fixture.message_id,
+        in_reply_to_message_id=fixture.message_id if threaded else None,
         lead_id=fixture.lead_id,
         from_email_normalized=fixture.to_email,
         subject="Re: Your booking page",
@@ -252,3 +254,37 @@ def test_thread_headers_need_a_real_message_id() -> None:
     assert thread_headers(inbound) == {}
     inbound = InboundMessage(provider_inbound_id=THEIR_ID, raw_payload={})
     assert thread_headers(inbound) == {"In-Reply-To": THEIR_ID, "References": THEIR_ID}
+
+
+@pytest.mark.asyncio
+async def test_a_reply_not_threaded_to_us_still_finds_a_mailbox_with_the_gate_on(
+    db_session, workspace, monkeypatch
+) -> None:
+    """The bug that shipped: with the cold-mail gate on and no test inbox, the
+    pool said no mailbox could send, and an answer was refused outright."""
+    from titan.delivery import sender_pool
+
+    # Not threaded to one of our messages: the mailbox comes from the pool.
+    fixture, draft_id = await _replied(
+        db_session, workspace, body="Thanks, Tuesday works.\n", threaded=False
+    )
+    monkeypatch.setattr(
+        sender_pool, "get_settings", lambda: sending_settings(placement_gate_enabled=True)
+    )
+    draft = await db_session.get(MessageDraft, draft_id)
+    edited = await reply_desk.edit(
+        db_session,
+        workspace_id=workspace,
+        draft_id=draft_id,
+        seen_version=draft.version,
+        subject="Re: Your booking page",
+        body="Thanks, Tuesday works.",
+    )
+    outbox = await reply_desk.send(
+        db_session,
+        workspace_id=workspace,
+        draft_id=draft_id,
+        seen_version=edited.version,
+        decided_by=None,
+    )
+    assert outbox.sender_identity_id == fixture.sender_id

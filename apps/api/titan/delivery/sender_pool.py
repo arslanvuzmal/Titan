@@ -175,6 +175,7 @@ async def load_slots(
     *,
     now: dt.datetime,
     limit_for: LimitResolver | None = None,
+    cold_mail: bool = True,
 ) -> list[MailboxSlot]:
     """The campaign's pool, with each mailbox's remaining capacity today.
 
@@ -289,7 +290,10 @@ async def load_slots(
     # Placement is asked once for the whole pool rather than per row: one
     # query, and every mailbox judged against the same readings.
     placement: dict[str, Any] = {}
-    if get_settings().placement_gate_enabled and rows:
+    # ``cold_mail=False`` is the reply desk asking: an answer to somebody who
+    # wrote in is not held behind the cold-mail placement gate, so it must not
+    # be refused a mailbox by it either.
+    if cold_mail and get_settings().placement_gate_enabled and rows:
         from titan.delivery import placement_gate
 
         placement = await placement_gate.verdicts_for(

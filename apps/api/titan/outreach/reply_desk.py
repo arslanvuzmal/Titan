@@ -386,8 +386,15 @@ async def _thread_sender(
             sender = await session.get(SenderIdentity, original.sender_identity_id)
             if sender is not None and sender.is_active:
                 return sender
+    # cold_mail=False: the placement gate pauses cold mail, never an answer.
+    # Without it every mailbox read as unavailable while no test inbox
+    # existed, and the desk refused to send at all.
     slots = await sender_pool.load_slots(
-        session, workspace_id, draft.campaign_id, now=dt.datetime.now(dt.UTC)
+        session,
+        workspace_id,
+        draft.campaign_id,
+        now=dt.datetime.now(dt.UTC),
+        cold_mail=False,
     )
     chosen = sender_pool.choose(slots).chosen_id
     return await session.get(SenderIdentity, chosen) if chosen else None
