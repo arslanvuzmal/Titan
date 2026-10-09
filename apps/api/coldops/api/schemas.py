@@ -270,6 +270,16 @@ class LeadOut(BaseModel):
     grade: str | None = None
 
 
+class LeadEventOut(BaseModel):
+    """One fact from the event stream. ``payload`` never holds personal data."""
+
+    occurred_at: dt.datetime
+    kind: str
+    source: str
+    source_id: str
+    payload: dict[str, Any]
+
+
 class GradePartOut(BaseModel):
     key: str
     points: float

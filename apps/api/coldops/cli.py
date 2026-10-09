@@ -33,6 +33,7 @@ from typing import Any
 from pydantic_core import PydanticUndefined
 
 from coldops import __version__
+from coldops.cli_events import add_events_parser
 from coldops.cli_placement import add_placement_parser
 from coldops.config import Settings, get_settings
 from coldops.intelligence import sender_auth
@@ -2480,6 +2481,7 @@ def main() -> int:
     # Placement lives in its own module: this file is past 2,600 lines and
     # every command in it has to be read to find any one of them.
     add_placement_parser(sub)
+    add_events_parser(sub)
 
     verify_parser = sub.add_parser(
         "verify-contacts",

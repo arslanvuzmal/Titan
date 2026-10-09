@@ -25,6 +25,7 @@ from coldops.activities import claim_verification
 from coldops.activities import daily_report as daily_report_activities
 from coldops.activities import delivery_events as delivery_event_activities
 from coldops.activities import discovery as discovery_activities
+from coldops.activities import events as event_activities
 from coldops.activities import mailbox_ramp as mailbox_ramp_activities
 from coldops.activities import optouts as optout_activities
 from coldops.activities import orchestration as orchestration_activities
@@ -51,6 +52,7 @@ from coldops.observability.logging import configure_logging
 from coldops.runtime import configure_event_loop
 from coldops.workflows.daily_report import DailyReportWorkflow
 from coldops.workflows.delivery_events import DeliveryEventPollWorkflow
+from coldops.workflows.events import EventProjectionWorkflow
 from coldops.workflows.housekeeping import HousekeepingWorkflow
 from coldops.workflows.mailbox_ramp import MailboxRampWorkflow
 from coldops.workflows.optouts import PullOptOutsWorkflow
@@ -85,7 +87,7 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(
         level=settings.log_level,
-        service="titan-temporal-worker",
+        service="coldops-temporal-worker",
         environment=settings.environment.value,
     )
 
@@ -111,6 +113,7 @@ async def main() -> None:
             WarmupRoundWorkflow,
             SupervisorWorkflow,
             DailyReportWorkflow,
+            EventProjectionWorkflow,
         ],
         activities=[
             research_activities.close_research_run,
@@ -178,6 +181,9 @@ async def main() -> None:
             # pipeline rather than part of it, and it must keep running while
             # a crawl backlog saturates the research lane.
             *claim_verification.ALL_CLAIM_VERIFICATION_ACTIVITIES,
+            # The event stream: bounded INSERT ... SELECTs, and the stream is
+            # most worth reading exactly when the research lane is saturated.
+            *event_activities.ALL_EVENT_ACTIVITIES,
         ],
         max_concurrent_activities=2,
         graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),

@@ -42,6 +42,7 @@ from coldops.api.schemas import (
     DeferralOut,
     DraftOut,
     GradePartOut,
+    LeadEventOut,
     LeadGradeOut,
     LeadOut,
     MailboxDayOut,
@@ -95,7 +96,7 @@ from coldops.delivery.day_digest import day_state
 from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from coldops.delivery.outbox_worker import ONE_PAGER_NOTE
 from coldops.delivery.suppression import is_suppressed
-from coldops.intelligence import domain_health, insights, timing
+from coldops.intelligence import domain_health, event_stream, insights, timing
 from coldops.intelligence import portfolio as portfolio_mod
 from coldops.intelligence.contacts import check_contact_eligibility
 from coldops.intelligence.grading import choose_channel, grade_from_components, letter_for
@@ -515,6 +516,27 @@ async def lead_messages(
             .all()
         )
         return [MessageOut.model_validate(r) for r in rows]
+
+
+# ==========================================================================
+# History
+# ==========================================================================
+@router.get("/leads/{lead_id}/history", response_model=list[LeadEventOut])
+async def lead_history(
+    lead_id: uuid.UUID,
+    principal: Principal = Depends(require("research:read")),
+) -> list[LeadEventOut]:
+    """Everything that happened to this business, oldest first, from ``events``.
+
+    As current as the last projection -- at most fifteen minutes behind.
+    """
+    async with workspace_session(principal.workspace_id) as session:
+        if await session.get(Lead, lead_id) is None:
+            raise await _not_found("lead")
+        rows = await event_stream.lead_history(
+            session, workspace_id=principal.workspace_id, lead_id=lead_id
+        )
+    return [LeadEventOut.model_validate(r) for r in rows]
 
 
 # ==========================================================================

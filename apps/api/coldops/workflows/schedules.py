@@ -62,6 +62,8 @@ from coldops.db.enums import CampaignStatus
 from coldops.workflows.daily_report import DEFAULT_CRON as DAILY_REPORT_CRON
 from coldops.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from coldops.workflows.delivery_events import delivery_event_poll_workflow_id
+from coldops.workflows.events import DEFAULT_CRON as EVENTS_CRON
+from coldops.workflows.events import event_projection_workflow_id
 from coldops.workflows.housekeeping import DEFAULT_CRON as HOUSEKEEPING_CRON
 from coldops.workflows.housekeeping import housekeeping_workflow_id
 from coldops.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
@@ -82,6 +84,7 @@ from coldops.workflows.types import (
     HealSchedulesInput,
     PlacementRoundInput,
     PollDeliveryEventsInput,
+    ProjectEventsInput,
     PullOptOutsInput,
     RampMailboxesInput,
     SweepStrandedInput,
@@ -294,6 +297,17 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=DailyReportInput(workspace_id=ws),
             task_queue=task_queue,
             note="mails the operator what the day sent, once the day is done",
+        ),
+        ScheduledJob(
+            # Still the titan- prefix: schedule healing strips it to find the
+            # job, and every schedule is renamed together in rename step 3.
+            schedule_id=f"titan-events::{ws}",
+            workflow="EventProjectionWorkflow",
+            workflow_id=event_projection_workflow_id(ws),
+            cron=EVENTS_CRON,
+            arg=ProjectEventsInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="projects every outcome into one table, the history models learn from",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

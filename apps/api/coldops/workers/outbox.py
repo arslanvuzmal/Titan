@@ -141,7 +141,7 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(
         level=settings.log_level,
-        service="titan-outbox-worker",
+        service="coldops-outbox-worker",
         environment=settings.environment.value,
     )
 

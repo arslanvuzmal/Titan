@@ -134,6 +134,9 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # the rented carrier's warm-up stopped on 24 August the domain had
         # none -- through the week it sent 492 cold messages.
         "WarmupRoundWorkflow",
+        # The event stream every model trains on. A projection nobody
+        # scheduled would be a history that stops on the day it was deployed.
+        "EventProjectionWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

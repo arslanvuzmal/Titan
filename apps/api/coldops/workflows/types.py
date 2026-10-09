@@ -902,3 +902,21 @@ __all__ = [
     "WeeklyReportResult",
     "utc_iso",
 ]
+
+
+@dataclasses.dataclass(frozen=True)
+class ProjectEventsInput:
+    workspace_id: str
+    #: ISO-8601 instant to project from. ``None`` means the default lookback;
+    #: a backfill passes the epoch.
+    since: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ProjectEventsResult:
+    #: Rows newly written, all sources together. Zero on a quiet quarter-hour
+    #: is normal; zero for a day while mail is going out is the projector
+    #: broken, which is what the per-source counts are for.
+    inserted: int = 0
+    by_source: tuple[tuple[str, int], ...] = ()
+    unavailable: str | None = None

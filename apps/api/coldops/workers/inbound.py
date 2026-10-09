@@ -134,7 +134,7 @@ async def main() -> None:
     settings = get_settings()
     configure_logging(
         level=settings.log_level,
-        service="titan-inbound-worker",
+        service="coldops-inbound-worker",
         environment=settings.environment.value,
     )
 
