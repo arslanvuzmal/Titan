@@ -22,7 +22,7 @@ import { ClerkProvider, SignIn, useAuth } from '@clerk/nextjs';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CLERK_PUBLISHABLE_KEY } from '@/lib/authMode';
 import { SessionContext, type SessionValue } from '@/lib/session';
-import { api, type Principal, type Workspace } from '@/lib/titan';
+import { api, type Principal, type Workspace } from '@/lib/coldops';
 
 function ClerkSessionBridge({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn, getToken, signOut: clerkSignOut } = useAuth();

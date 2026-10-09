@@ -1,5 +1,5 @@
 {
-  "name": "titan-web",
+  "name": "coldops-web",
   "version": "0.1.0",
   "private": true,
   "//packageManager": "Must match the repository root. Vercel reads this from the Root Directory (apps/web) only; without it Vercel installs with pnpm 8, which cannot read a lockfileVersion 9 lockfile and fails the build. A CI check keeps the two in step.",

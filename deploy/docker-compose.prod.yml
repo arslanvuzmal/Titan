@@ -1,4 +1,4 @@
-# Self-hosted Titan-OS.
+# Self-hosted ColdOps.
 #
 # This is the single-VM path. The managed path (Vercel for the dashboard,
 # Railway for everything else) is in deploy/railway/README.md; the two are
@@ -53,25 +53,25 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    networks: [titan_network]
+    networks: [coldops_network]
 
   # One-shot. Everything else waits for it, so no process opens a connection
   # against a schema it does not understand.
   migrate:
-    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE, e.g. ghcr.io/arslanvuzmal/titan-api:sha-abc1234}
+    image: ${COLDOPS_API_IMAGE:?set COLDOPS_API_IMAGE, e.g. ghcr.io/arslanvuzmal/coldops-api:sha-abc1234}
     restart: "no"
     env_file: [../.env]
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres:
         condition: service_healthy
-    networks: [titan_network]
+    networks: [coldops_network]
 
   api:
-    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    image: ${COLDOPS_API_IMAGE:?set COLDOPS_API_IMAGE}
     restart: unless-stopped
     env_file: [../.env]
-    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # The mailbox passwords. `.env` sets COLDOPS_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
     # fails to authenticate -- on a host nobody is watching.
     volumes:
@@ -81,8 +81,8 @@ services:
       # Writable: `coldops oauth-microsoft` runs here and keeps the token.
       - oauth_tokens:/data/oauth
     environment:
-      TITAN_ARTIFACT_DIR: /data/artifacts
-      TITAN_OAUTH_TOKEN_DIR: /data/oauth
+      COLDOPS_ARTIFACT_DIR: /data/artifacts
+      COLDOPS_OAUTH_TOKEN_DIR: /data/oauth
     # Not published to the host: nginx terminates TLS and is the only ingress.
     expose: ["8000"]
     depends_on:
@@ -90,7 +90,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-    networks: [titan_network]
+    networks: [coldops_network]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -104,7 +104,7 @@ services:
   # Leases outbox rows and talks to the email provider. The only component
   # that holds a delivery credential.
   outbox-worker:
-    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    image: ${COLDOPS_API_IMAGE:?set COLDOPS_API_IMAGE}
     restart: unless-stopped
     env_file: [../.env]
     # Which host this is, for the sending claim. Declared here as well as in
@@ -112,18 +112,18 @@ services:
     # which estate it belongs to fails closed and sends nothing, and finding
     # that out from a silent day is worse than finding it out from compose.
     environment:
-      TITAN_SENDER_HOST_ID: ${TITAN_SENDER_HOST_ID:?set TITAN_SENDER_HOST_ID, e.g. vps-hetzner-cx33}
-      TITAN_SENDER_HOST_LABEL: ${TITAN_SENDER_HOST_LABEL:-}
-      TITAN_ARTIFACT_DIR: /data/artifacts
+      COLDOPS_SENDER_HOST_ID: ${COLDOPS_SENDER_HOST_ID:?set COLDOPS_SENDER_HOST_ID, e.g. vps-hetzner-cx33}
+      COLDOPS_SENDER_HOST_LABEL: ${COLDOPS_SENDER_HOST_LABEL:-}
+      COLDOPS_ARTIFACT_DIR: /data/artifacts
     command: ["python", "-m", "coldops.workers.outbox"]
-    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # The mailbox passwords. `.env` sets COLDOPS_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
     # fails to authenticate -- on a host nobody is watching.
     volumes:
       - ../secrets:/run/secrets:ro
       # The one-page brief attached to every message.
       #
-      # `.env` has pointed TITAN_ONE_PAGER_ATTACHMENT_PATH at
+      # `.env` has pointed COLDOPS_ONE_PAGER_ATTACHMENT_PATH at
       # /run/one-pager/one-pager.pdf since the migration to this host, and the
       # directory was never mounted -- so `with_one_pager` read a path that did
       # not exist, failed open exactly as designed, and every message went
@@ -143,7 +143,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    networks: [titan_network]
+    networks: [coldops_network]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
@@ -153,7 +153,7 @@ services:
       # also wrong here -- it exits non-zero whenever sending is blocked,
       # which is the normal and desired state in research_only mode. This
       # checks the one dependency the worker genuinely needs.
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -169,7 +169,7 @@ services:
   # have looked healthy -- sending, crawling, drafting -- while quietly losing
   # both halves of the feedback loop.
   inbound-worker:
-    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    image: ${COLDOPS_API_IMAGE:?set COLDOPS_API_IMAGE}
     # on-failure, not unless-stopped. The worker exits zero when IMAP is not
     # configured, and `unless-stopped` restarts a container whatever its exit
     # code -- which turns a clean "nothing to do" into a permanent crash loop
@@ -177,7 +177,7 @@ services:
     restart: on-failure
     env_file: [../.env]
     command: ["python", "-m", "coldops.workers.inbound"]
-    # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
+    # The mailbox passwords. `.env` sets COLDOPS_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
     # fails to authenticate -- on a host nobody is watching.
     volumes:
@@ -185,24 +185,24 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    networks: [titan_network]
+    networks: [coldops_network]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 60s
       timeout: 15s
       retries: 3
       start_period: 20s
 
   temporal-worker:
-    image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
+    image: ${COLDOPS_API_IMAGE:?set COLDOPS_API_IMAGE}
     restart: unless-stopped
     env_file: [../.env]
     command: ["python", "-m", "coldops.workers.temporal_worker"]
     # DailyReportWorkflow and the other operator mail run here, and
-    # mail_the_operator() reads TITAN_MAILBOX_FILE. Without this mount the
+    # mail_the_operator() reads COLDOPS_MAILBOX_FILE. Without this mount the
     # worker came up healthy and threw MailboxConfigError once an hour
     # instead: a stack that looks fine while the operator hears nothing.
     volumes:
@@ -214,19 +214,19 @@ services:
       # personal PDF before asking the browser worker to render one.
       - artifacts:/data/artifacts:ro
     environment:
-      TITAN_OAUTH_TOKEN_DIR: /data/oauth
-      TITAN_ARTIFACT_DIR: /data/artifacts
+      COLDOPS_OAUTH_TOKEN_DIR: /data/oauth
+      COLDOPS_ARTIFACT_DIR: /data/artifacts
     depends_on:
       migrate:
         condition: service_completed_successfully
       temporal:
         condition: service_healthy
-    networks: [titan_network]
+    networks: [coldops_network]
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -247,19 +247,19 @@ services:
   # shipped calling port 8000 while the API was published on 8010. The runtime
   # value below is the one server-side rendering reads.
   web:
-    image: ${TITAN_WEB_IMAGE:?set TITAN_WEB_IMAGE, e.g. titan-web:local}
+    image: ${COLDOPS_WEB_IMAGE:?set COLDOPS_WEB_IMAGE, e.g. coldops-web:local}
     restart: unless-stopped
     environment:
       # Origin only, no path: the client appends /api/v1 itself. Read here at
       # runtime by server-side rendering; the browser bundle carries its own
       # copy, compiled in at build time -- see apps/web/Dockerfile.
-      NEXT_PUBLIC_API_URL: ${TITAN_PUBLIC_ORIGIN:?set TITAN_PUBLIC_ORIGIN, e.g. http://168.119.161.220}
+      NEXT_PUBLIC_API_URL: ${COLDOPS_PUBLIC_ORIGIN:?set COLDOPS_PUBLIC_ORIGIN, e.g. http://168.119.161.220}
       NODE_ENV: production
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
     expose: ["3000"]
     depends_on: [api]
-    networks: [titan_network]
+    networks: [coldops_network]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -272,12 +272,12 @@ services:
   # with no database, email, or model credentials. `env_file` is deliberately
   # absent -- a full browser escape must yield nothing worth having.
   browser-worker:
-    image: ${TITAN_BROWSER_WORKER_IMAGE:?set TITAN_BROWSER_WORKER_IMAGE}
+    image: ${COLDOPS_BROWSER_WORKER_IMAGE:?set COLDOPS_BROWSER_WORKER_IMAGE}
     restart: unless-stopped
     # Stated here rather than left to the default, because it has a partner.
     #
     # The API client keeps its own semaphore of
-    # TITAN_BROWSER_WORKER_CONCURRENCY lanes and will happily dispatch that
+    # COLDOPS_BROWSER_WORKER_CONCURRENCY lanes and will happily dispatch that
     # many crawls at once. This worker refuses anything past its own limit with
     # a 503. The client's default was 4 and this worker's was 2, neither set
     # anywhere, so two of every four concurrent crawls were refused by design
@@ -315,7 +315,7 @@ services:
     environment:
       BROWSER_WORKER_CONCURRENCY: "2"
       BROWSER_WORKER_PORT: "8800"
-      BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:?set TITAN_BROWSER_WORKER_TOKEN}
+      BROWSER_WORKER_TOKEN: ${COLDOPS_BROWSER_WORKER_TOKEN:?set COLDOPS_BROWSER_WORKER_TOKEN}
       # Screenshots, kept so the evidence page can show them. Named by content
       # and purged after 21 days unrewritten -- see apps/browser-worker/src/shots.ts.
       ARTIFACT_DIR: /data/artifacts
@@ -323,7 +323,7 @@ services:
     volumes:
       - artifacts:/data/artifacts
     expose: ["8800"]
-    networks: [titan_network]
+    networks: [coldops_network]
     security_opt: [no-new-privileges:true]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8800/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -342,7 +342,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-titan}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks: [titan_network]
+    networks: [coldops_network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
@@ -360,7 +360,7 @@ services:
       POSTGRES_DB: temporal
     volumes:
       - temporal_postgres_data:/var/lib/postgresql/data
-    networks: [titan_network]
+    networks: [coldops_network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${TEMPORAL_POSTGRES_USER:-temporal}"]
       interval: 10s
@@ -373,7 +373,7 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
-    networks: [titan_network]
+    networks: [coldops_network]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -393,7 +393,7 @@ services:
       temporal-postgres:
         condition: service_healthy
     expose: ["7233"]
-    networks: [titan_network]
+    networks: [coldops_network]
     healthcheck:
       test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
       interval: 30s
@@ -402,7 +402,7 @@ services:
       start_period: 30s
 
 networks:
-  titan_network:
+  coldops_network:
     driver: bridge
 
 volumes:

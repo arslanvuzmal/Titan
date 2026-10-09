@@ -28,7 +28,7 @@ import {
   Time,
 } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api } from '@/lib/titan';
+import { api } from '@/lib/coldops';
 
 type Filter = 'all' | 'deliverable' | 'gaps';
 

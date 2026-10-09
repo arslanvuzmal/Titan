@@ -1,8 +1,8 @@
 // Render the one-pager to a single-page A4 PDF.
 //
 // Run inside the browser-worker container, which already carries Chromium:
-//   docker cp docs/one-pager titan-browser-worker-1:/tmp/op
-//   docker exec titan-browser-worker-1 node /tmp/op/render.js
+//   docker cp docs/one-pager coldops-browser-worker-1:/tmp/op
+//   docker exec coldops-browser-worker-1 node /tmp/op/render.js
 //
 // The page is deliberately fixed at 297mm and the render asserts one page:
 // a two-page "one-pager" is a different document, and finding that out from a

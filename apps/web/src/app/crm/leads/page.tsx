@@ -26,7 +26,7 @@ import {
   Value,
 } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api, type LeadFilters } from '@/lib/titan';
+import { api, type LeadFilters } from '@/lib/coldops';
 
 const STATUSES = [
   'discovered',

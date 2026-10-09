@@ -30,7 +30,7 @@ import {
   Value,
 } from '@/components/crm/ui';
 import { useApi, useSession } from '@/lib/session';
-import { api, type Evidence, type Finding, type Score } from '@/lib/titan';
+import { api, type Evidence, type Finding, type Score } from '@/lib/coldops';
 
 const TABS = [
   'Findings',

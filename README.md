@@ -1,9 +1,9 @@
-# Titan-OS
+# ColdOps
 
 **Evidence-first sales intelligence, website research, lead qualification, and
 controlled outreach.**
 
-Titan-OS observes before it pitches, proves before it claims, and refuses to
+ColdOps observes before it pitches, proves before it claims, and refuses to
 send when it cannot show its working. A model can draft a message; only the
 outbox worker can deliver one, and only after every gate has passed.
 
@@ -73,7 +73,7 @@ counts are in the verification report.
   permit one.
 - **Exactly-once delivery**, proven with 8 concurrent workers and an injected
   mid-send crash.
-- **A campaign platform cannot widen the blast radius.** Titan can deliver
+- **A campaign platform cannot widen the blast radius.** ColdOps can deliver
   through Smartlead, but only via a carrier campaign it checks has exactly one
   sequence step — a second step would send mail no gate here ever evaluated, so
   the adapter refuses to run against such a campaign.
@@ -110,7 +110,7 @@ docker compose up -d postgres
 # 2. Backend
 cd apps/api
 uv venv --python 3.11 && uv pip install -e ".[dev]"
-export TITAN_DATABASE_URL="postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan"
+export COLDOPS_DATABASE_URL="postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan"
 python -m alembic upgrade head
 
 # 3. Verify
@@ -126,7 +126,7 @@ npm test
 ```
 
 Full-stack `docker compose up` builds the API, outbox worker, browser worker,
-and web app. The Temporal services start but **no Titan worker registers against
+and web app. The Temporal services start but **no ColdOps worker registers against
 them** — Phase 7 is not implemented, and a service pointing at a nonexistent
 module would be fiction.
 
@@ -139,10 +139,10 @@ every one. `python -m coldops.cli preflight` reports which gates are closed:
 
 ```
 PROCESS GATE CLOSED: 4 blocker(s).
-  - TITAN_PRODUCTION_SENDING_ENABLED is false (global kill switch)
-  - TITAN_EMAIL_PROVIDER is 'mock'; no real provider configured
-  - TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED is false (SPF/DKIM/DMARC not acknowledged)
-  - TITAN_SENDER_MAILING_ADDRESS is not set
+  - COLDOPS_PRODUCTION_SENDING_ENABLED is false (global kill switch)
+  - COLDOPS_EMAIL_PROVIDER is 'mock'; no real provider configured
+  - COLDOPS_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED is false (SPF/DKIM/DMARC not acknowledged)
+  - COLDOPS_SENDER_MAILING_ADDRESS is not set
 ```
 
 Enabling outreach is a deliberate, documented operator action:

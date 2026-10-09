@@ -25,7 +25,7 @@
 import React from 'react';
 import { Badge, Card, Empty, ErrorNote, Spinner, Table } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api, type OutcomeRollup, type OutcomeSlice } from '@/lib/titan';
+import { api, type OutcomeRollup, type OutcomeSlice } from '@/lib/coldops';
 
 const DIMENSIONS: Array<{ key: string; label: string; blurb: string }> = [
   { key: 'campaign', label: 'Campaign', blurb: 'which campaigns are landing' },

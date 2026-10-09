@@ -1,14 +1,14 @@
 #!/bin/sh
 # Give each cold-sending domain its tracking host (go.<domain>), with TLS.
 #
-# Reads TITAN_TRACKING_HOSTS from the repo .env -- a comma- or space-separated
+# Reads COLDOPS_TRACKING_HOSTS from the repo .env -- a comma- or space-separated
 # list such as "go.vuzmalstudio.com,go.workwitharslan.com" -- and, for each
 # host not already serving, proves locally that Let's Encrypt's challenge would
 # succeed, asks for a certificate, installs the server block, and checks the
 # pixel answers over https. Safe to re-run; a host that is not ready yet is
 # skipped with the reason, never half-installed.
 #
-# TITAN_TRACKING_HOME is where every other path on these hosts redirects
+# COLDOPS_TRACKING_HOME is where every other path on these hosts redirects
 # (default arslanvuzmallone.com).
 #
 # Exit codes: 0 every host is serving; 75 at least one is not ready yet;
@@ -31,11 +31,11 @@ command -v certbot >/dev/null 2>&1 || die "certbot is not installed"
 
 # Read three values, and only these, from our own .env -- never source it.
 read_env() { sed -n "s/^$1=//p" "$ENV_FILE" | head -1 | tr -d '\r"'; }
-HOSTS=$(read_env TITAN_TRACKING_HOSTS | tr ',' ' ')
-HOME_SITE=$(read_env TITAN_TRACKING_HOME)
-EMAIL=$(read_env TITAN_TLS_EMAIL)
-[ -n "$HOSTS" ] || die "set TITAN_TRACKING_HOSTS in $ENV_FILE"
-[ -n "$EMAIL" ] || die "set TITAN_TLS_EMAIL in $ENV_FILE"
+HOSTS=$(read_env COLDOPS_TRACKING_HOSTS | tr ',' ' ')
+HOME_SITE=$(read_env COLDOPS_TRACKING_HOME)
+EMAIL=$(read_env COLDOPS_TLS_EMAIL)
+[ -n "$HOSTS" ] || die "set COLDOPS_TRACKING_HOSTS in $ENV_FILE"
+[ -n "$EMAIL" ] || die "set COLDOPS_TLS_EMAIL in $ENV_FILE"
 [ -n "$HOME_SITE" ] || HOME_SITE=arslanvuzmallone.com
 
 [ -f "$DEPLOY/nginx/tls/443.conf" ] || die \

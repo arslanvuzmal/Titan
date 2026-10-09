@@ -22,7 +22,7 @@ import Link from 'next/link';
 import React from 'react';
 import { Badge, Card, Empty, ErrorNote, Spinner, Table, Time } from '@/components/crm/ui';
 import { useApi, useLiveApi } from '@/lib/session';
-import { api, type MailboxStatus } from '@/lib/titan';
+import { api, type MailboxStatus } from '@/lib/coldops';
 
 const WHY: Record<string, string> = {
   placement_unmeasured: 'paused: no recent inbox reading',

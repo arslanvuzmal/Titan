@@ -17,10 +17,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-OUT_DIR="${TITAN_BACKUP_DIR:-${TMPDIR:-/tmp}}/titan-migrate-${STAMP}"
-DB_CONTAINER="${TITAN_DB_CONTAINER:-titan-postgres-1}"
-DB_USER="${TITAN_DB_USER:-titan}"
-DB_NAME="${TITAN_DB_NAME:-titan}"
+OUT_DIR="${COLDOPS_BACKUP_DIR:-${TMPDIR:-/tmp}}/titan-migrate-${STAMP}"
+DB_CONTAINER="${COLDOPS_DB_CONTAINER:-titan-postgres-1}"
+DB_USER="${COLDOPS_DB_USER:-titan}"
+DB_NAME="${COLDOPS_DB_NAME:-titan}"
 
 say() { printf '  %s\n' "$*"; }
 

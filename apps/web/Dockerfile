@@ -28,7 +28,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL=http://localhost:8000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 
-RUN npm install -g pnpm@8 && pnpm --filter titan-web build
+RUN npm install -g pnpm@8 && pnpm --filter coldops-web build
 
 # Runner stage
 FROM base AS runner

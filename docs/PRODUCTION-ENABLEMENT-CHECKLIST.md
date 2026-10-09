@@ -1,8 +1,8 @@
-# Titan-OS — Production Enablement & Deployment Checklist
+# ColdOps — Production Enablement & Deployment Checklist
 
 **Owner:** Arslan Vuzmal Lone  
 **Portfolio:** `https://arslanvuzmallone.com` (Fallback: `https://arslanvuzmallone.vercel.app`)  
-**Target Repository:** `arslanvuzmal/Titan-OS`  
+**Target Repository:** `arslanvuzmal/ColdOps`  
 **Document Version:** 0.2.0  
 **Status:** Preflight Operational Checklist  
 
@@ -12,7 +12,7 @@
 
 This checklist covers the **external** actions needed to enable production
 outreach. As of commit `c4cd89a`, several **internal** prerequisites are not yet
-built, and no amount of DNS or credential work will make Titan send until they
+built, and no amount of DNS or credential work will make ColdOps send until they
 are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
 
 Blocking, in order:
@@ -33,14 +33,14 @@ Blocking, in order:
       logic (`coldops/delivery/webhooks.py`) is written and tested; the HTTP route
       that calls it is not.
 - [ ] **Dashboard** (§17) — the shipped UI is still the pre-0.2 demo and renders
-      fabricated analytics. Do not show it to anyone as Titan-OS.
-- [ ] **Model IDs** — the `TITAN_MODEL_ROUTE_*` defaults in `config.py` are
+      fabricated analytics. Do not show it to anyone as ColdOps.
+- [ ] **Model IDs** — the `COLDOPS_MODEL_ROUTE_*` defaults in `config.py` are
       unverified placeholders. Validate each against the provider's live
       catalogue before configuring.
 
 What *is* ready today: the schema, workspace isolation, the SSRF guard, the
 policy engine, the intelligence layer, and the outbox/suppression/webhook
-delivery path. Titan can safely run in `research_only` or `draft_only` mode.
+delivery path. ColdOps can safely run in `research_only` or `draft_only` mode.
 
 ---
 
@@ -56,11 +56,11 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
   - Verify records using `dig txt _dmarc.arslanvuzmallone.com` and `dig txt mail.arslanvuzmallone.com`.
 - [ ] **Resend Domain Verification:**
   - Register `mail.arslanvuzmallone.com` in Resend Console.
-  - Obtain Resend API Key (`re_...`) and store in production secret manager (`TITAN_RESEND_API_KEY`).
+  - Obtain Resend API Key (`re_...`) and store in production secret manager (`COLDOPS_RESEND_API_KEY`).
   - Configure webhook endpoint in Resend Console pointing to `https://api.arslanvuzmallone.com/api/v1/delivery/webhooks/resend`.
-  - Obtain Resend Webhook Signing Secret (`whsec_...`) and store as `TITAN_RESEND_WEBHOOK_SECRET`.
+  - Obtain Resend Webhook Signing Secret (`whsec_...`) and store as `COLDOPS_RESEND_WEBHOOK_SECRET`.
 - [ ] **Physical Mailing Address & Compliance Footer:**
-  - Configure legal mailing address in `TITAN_SENDER_MAILING_ADDRESS`.
+  - Configure legal mailing address in `COLDOPS_SENDER_MAILING_ADDRESS`.
   - Verify unsubscribe mechanism renders in all message draft footers.
 
 ---
@@ -70,17 +70,17 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
 - [ ] **Google Places API:**
   - Provision Google Cloud Platform project and enable Google Places API (New).
   - Create API Key with API restrictions limited strictly to Places API.
-  - Set key in environment as `TITAN_GOOGLE_PLACES_API_KEY`.
+  - Set key in environment as `COLDOPS_GOOGLE_PLACES_API_KEY`.
 - [ ] **Agent Reach API:**
   - Obtain API credentials for Agent Reach discovery/enrichment service.
-  - Set key as `TITAN_AGENT_REACH_API_KEY`.
+  - Set key as `COLDOPS_AGENT_REACH_API_KEY`.
 - [ ] **Model Gateway Providers:**
-  - **NVIDIA:** Obtain a key (`nvapi-...`) → set `TITAN_NVIDIA_API_KEY`. Confirm
+  - **NVIDIA:** Obtain a key (`nvapi-...`) → set `COLDOPS_NVIDIA_API_KEY`. Confirm
     the exact model ids with `coldops validate-models`; the defaults are placeholders.
-  - **Google Gemini:** Obtain a key → set `TITAN_GEMINI_API_KEY`. Confirm the
+  - **Google Gemini:** Obtain a key → set `COLDOPS_GEMINI_API_KEY`. Confirm the
     exact model id with `coldops validate-models`; the default in config is a placeholder.
-  - **OpenRouter:** Obtain key for fallback model routing → set `TITAN_OPENROUTER_API_KEY`.
-  - **Cloudflare AI Gateway:** Obtain Account ID & Gateway Name for Claude routing → set `TITAN_CLOUDFLARE_API_TOKEN` (plus `TITAN_CLOUDFLARE_ACCOUNT_ID` and `TITAN_CLOUDFLARE_GATEWAY_ID`).
+  - **OpenRouter:** Obtain key for fallback model routing → set `COLDOPS_OPENROUTER_API_KEY`.
+  - **Cloudflare AI Gateway:** Obtain Account ID & Gateway Name for Claude routing → set `COLDOPS_CLOUDFLARE_API_TOKEN` (plus `COLDOPS_CLOUDFLARE_ACCOUNT_ID` and `COLDOPS_CLOUDFLARE_GATEWAY_ID`).
 
 ---
 
@@ -88,16 +88,16 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
 
 - [ ] **Managed PostgreSQL Database:**
   - Provision PostgreSQL 16+ instance with `pgvector` extension enabled (`CREATE EXTENSION IF NOT EXISTS vector;`).
-  - Configure database connection string: `TITAN_DATABASE_URL="postgresql+psycopg://user:pass@host:5432/titan"`.
+  - Configure database connection string: `COLDOPS_DATABASE_URL="postgresql+psycopg://user:pass@host:5432/titan"`.
   - Run database migrations: `alembic upgrade head`.
 - [ ] **Temporal Cluster:**
   - Deploy self-hosted Temporal cluster via Docker Compose / Kubernetes or configure Temporal Cloud.
-  - Configure host: `TITAN_TEMPORAL_HOST="temporal.internal:7233"`.
+  - Configure host: `COLDOPS_TEMPORAL_HOST="temporal.internal:7233"`.
   - Register task queues: `titan-research`, `titan-models`, `titan-delivery`, `titan-maintenance`.
 - [ ] **Browser Evidence Worker:**
   - Deploy `apps/browser-worker` as a non-root container on isolated port `8800`.
   - Confirm container environment contains NO database or email provider API keys.
-  - Set `TITAN_BROWSER_WORKER_URL="http://browser-worker:8800"`.
+  - Set `COLDOPS_BROWSER_WORKER_URL="http://browser-worker:8800"`.
 
 ---
 
@@ -105,7 +105,7 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
 
 - [ ] **Seed Campaign Verification:**
   - Execute an initial research-only run. The effective mode is the *minimum* of
-    the process ceiling (derived from `TITAN_PRODUCTION_SENDING_ENABLED`), the
+    the process ceiling (derived from `COLDOPS_PRODUCTION_SENDING_ENABLED`), the
     workspace `operating_mode`, and the campaign policy `operating_mode`. Leave
     the kill switch off and set the campaign to `research_only`.
   - Verify evidence collection, screenshot capture, and finding generation.

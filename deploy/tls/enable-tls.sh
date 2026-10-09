@@ -30,10 +30,10 @@ later() { log "not yet: $*"; exit 75; }
 
 # Only these two, and only from our own .env -- never `set -a; . .env`, which
 # would execute whatever a password happens to contain.
-DOMAIN=$(sed -n 's/^TITAN_TLS_DOMAIN=//p' "$ENV_FILE" | head -1 | tr -d '\r"')
-EMAIL=$(sed -n 's/^TITAN_TLS_EMAIL=//p' "$ENV_FILE" | head -1 | tr -d '\r"')
-[ -n "$DOMAIN" ] || die "set TITAN_TLS_DOMAIN in $ENV_FILE"
-[ -n "$EMAIL" ] || die "set TITAN_TLS_EMAIL in $ENV_FILE (Let's Encrypt expiry warnings go there)"
+DOMAIN=$(sed -n 's/^COLDOPS_TLS_DOMAIN=//p' "$ENV_FILE" | head -1 | tr -d '\r"')
+EMAIL=$(sed -n 's/^COLDOPS_TLS_EMAIL=//p' "$ENV_FILE" | head -1 | tr -d '\r"')
+[ -n "$DOMAIN" ] || die "set COLDOPS_TLS_DOMAIN in $ENV_FILE"
+[ -n "$EMAIL" ] || die "set COLDOPS_TLS_EMAIL in $ENV_FILE (Let's Encrypt expiry warnings go there)"
 
 LIVE="/etc/letsencrypt/live/$DOMAIN"
 INSTALLED="$DEPLOY/nginx/tls/443.conf"
@@ -74,7 +74,7 @@ HOOK
 
 if [ -f "$INSTALLED" ] && [ -s "$LIVE/fullchain.pem" ]; then
     arm_renewal
-    systemctl disable --now titan-tls-bootstrap.timer >/dev/null 2>&1 || true
+    systemctl disable --now coldops-tls-bootstrap.timer >/dev/null 2>&1 || true
     log "TLS is already on for $DOMAIN; renewal re-armed; nothing else to do"
     exit 0
 fi
@@ -134,11 +134,11 @@ set_env() {
     fi
 }
 
-set_env TITAN_PUBLIC_ORIGIN "https://$DOMAIN"
+set_env COLDOPS_PUBLIC_ORIGIN "https://$DOMAIN"
 # CORS. The bare IP stays allowed on purpose: it is the way back in when DNS or
 # the certificate breaks, and a diagnostic page that renders but cannot call the
 # API is not much of a way back in.
-set_env TITAN_FRONTEND_URL "https://$DOMAIN"
+set_env COLDOPS_FRONTEND_URL "https://$DOMAIN"
 # A JSON array, not a bare URL. `extra_cors_origins` is `list[str]`, and
 # pydantic-settings parses a complex type from the environment as JSON -- a
 # bare value raises SettingsError, which is raised while *settings load*, so
@@ -146,13 +146,13 @@ set_env TITAN_FRONTEND_URL "https://$DOMAIN"
 # use. That is what took the stack down on the first run of this script: the
 # migrate one-shot exited 1, api could not start behind it, and the failure
 # looked like TLS because TLS was what had just changed.
-set_env TITAN_EXTRA_CORS_ORIGINS "[\"http://$MY_IP\"]"
+set_env COLDOPS_EXTRA_CORS_ORIGINS "[\"http://$MY_IP\"]"
 
 log "rebuilding the CRM bundle against https://$DOMAIN"
 build_web() {
     (cd "$ROOT" && docker build -q -f apps/web/Dockerfile \
         --build-arg "NEXT_PUBLIC_API_URL=$1" \
-        -t titan-web:local . >/dev/null 2>&1)
+        -t coldops-web:local . >/dev/null 2>&1)
 }
 
 if ! build_web "https://$DOMAIN"; then
@@ -217,7 +217,7 @@ log "TLS is on: https://$DOMAIN/crm -> $CODE (fallback http://$MY_IP/crm -> $IP_
 arm_renewal
 
 # This script's own timer has done its job and should stop waking up.
-systemctl disable --now titan-tls-bootstrap.timer >/dev/null 2>&1 || true
+systemctl disable --now coldops-tls-bootstrap.timer >/dev/null 2>&1 || true
 
 log "renewal armed (certbot.timer + nginx reload hook); bootstrap timer stopped"
 exit 0

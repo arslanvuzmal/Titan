@@ -30,7 +30,7 @@ import {
   Time,
 } from '@/components/crm/ui';
 import { useLiveApi, useSession } from '@/lib/session';
-import { api, type DeskReply } from '@/lib/titan';
+import { api, type DeskReply } from '@/lib/coldops';
 
 /** How each reading of a reply is labelled, in words an owner would use. */
 const READING: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | 'info' | 'neutral' }> = {

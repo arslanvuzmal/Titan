@@ -7,7 +7,7 @@ one is dead* -- are where rotations actually go wrong, and they are what this
 does.
 
     python scripts/rotate-keys.py --check
-    python scripts/rotate-keys.py --set TITAN_NVIDIA_API_KEY
+    python scripts/rotate-keys.py --set COLDOPS_NVIDIA_API_KEY
 
 
 **The old key is checked too.** A rotation that issues a new key and leaves the
@@ -39,25 +39,25 @@ ENV_PATH = REPO / ".env"
 #: listing models or fetching key metadata -- so a check costs nothing and
 #: changes nothing.
 PROBES: dict[str, dict] = {
-    "TITAN_OPENROUTER_API_KEY": {
+    "COLDOPS_OPENROUTER_API_KEY": {
         "label": "OpenRouter",
         "url": "https://openrouter.ai/api/v1/key",
         "header": lambda k: {"Authorization": f"Bearer {k}"},
         "console": "https://openrouter.ai/keys",
     },
-    "TITAN_NVIDIA_API_KEY": {
+    "COLDOPS_NVIDIA_API_KEY": {
         "label": "NVIDIA",
         "url": "https://integrate.api.nvidia.com/v1/models",
         "header": lambda k: {"Authorization": f"Bearer {k}"},
         "console": "https://build.nvidia.com/settings/api-keys",
     },
-    "TITAN_GEMINI_API_KEY": {
+    "COLDOPS_GEMINI_API_KEY": {
         "label": "Gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/models",
         "header": lambda k: {"x-goog-api-key": k},
         "console": "https://aistudio.google.com/apikey",
     },
-    "TITAN_GOOGLE_PLACES_API_KEY": {
+    "COLDOPS_GOOGLE_PLACES_API_KEY": {
         "label": "Google Places",
         "url": "https://places.googleapis.com/v1/places:searchText",
         "header": lambda k: {

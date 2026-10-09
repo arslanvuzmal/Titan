@@ -30,7 +30,7 @@ NOW = dt.datetime(2026, 9, 7, 13, 0, tzinfo=dt.UTC)
 
 def wedged_estate(workspace: uuid.UUID) -> tuple[FakeClient, str]:
     """An estate with housekeeping's clock stopped a week ago."""
-    housekeeping = f"titan-housekeeping::{workspace}"
+    housekeeping = f"coldops-housekeeping::{workspace}"
     live = estate(workspace=workspace)
     live[housekeeping] = described((NOW - dt.timedelta(days=7),))
     return FakeClient(live), housekeeping

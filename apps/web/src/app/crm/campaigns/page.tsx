@@ -23,7 +23,7 @@ import {
   Value,
 } from '@/components/crm/ui';
 import { useApi, useSession } from '@/lib/session';
-import { api, type Campaign, type CampaignPolicy } from '@/lib/titan';
+import { api, type Campaign, type CampaignPolicy } from '@/lib/coldops';
 
 const REQUIRED_ACK = 'I authorize production sending for this campaign';
 

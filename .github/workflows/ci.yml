@@ -1,4 +1,4 @@
-# Titan-OS CI.
+# ColdOps CI.
 #
 # Replaces the pre-0.2 pipeline, which suffixed ruff, black, mypy, pytest and
 # coverage with `|| true` -- so the job was green whether or not the code
@@ -69,9 +69,9 @@ jobs:
           --health-cmd "pg_isready -U titan" --health-interval 5s
           --health-timeout 5s --health-retries 20
     env:
-      TITAN_ENVIRONMENT: test
-      TITAN_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
-      TITAN_TEST_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
+      COLDOPS_ENVIRONMENT: test
+      COLDOPS_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
+      COLDOPS_TEST_DATABASE_URL: postgresql+psycopg://titan:titan_dev_password@localhost:5432/titan
     defaults:
       run: {working-directory: apps/api}
     steps:
@@ -156,8 +156,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Fixture sites + crawl tests
         env:
-          TITAN_UNSAFE_ALLOW_LOOPBACK: "1"
-          TITAN_FIXTURE_PORT: "8899"
+          COLDOPS_UNSAFE_ALLOW_LOOPBACK: "1"
+          COLDOPS_FIXTURE_PORT: "8899"
         run: |
           npx tsx fixtures/server.ts &
           for i in $(seq 1 30); do
@@ -224,13 +224,13 @@ jobs:
         run: |
           # A change that flips the kill switch on in a committed config must
           # fail the build, not reach a reviewer's judgement.
-          if docker compose config | grep -qiE 'TITAN_PRODUCTION_SENDING_ENABLED:\s*"?true'; then
+          if docker compose config | grep -qiE 'COLDOPS_PRODUCTION_SENDING_ENABLED:\s*"?true'; then
             echo "::error::compose enables production sending by default"
             exit 1
           fi
       - name: Assert the loopback escape hatch is not enabled
         run: |
-          if docker compose config | grep -q 'TITAN_UNSAFE_ALLOW_LOOPBACK'; then
+          if docker compose config | grep -q 'COLDOPS_UNSAFE_ALLOW_LOOPBACK'; then
             echo "::error::compose enables the SSRF loopback test hatch"
             exit 1
           fi
@@ -239,7 +239,7 @@ jobs:
   #
   # The image built fine every time. Publishing it did not:
   #
-  #   failed to push ghcr.io/<owner>/titan-api:sha-<sha>
+  #   failed to push ghcr.io/<owner>/coldops-api:sha-<sha>
   #   HEAD .../blobs/sha256:... -> 403 Forbidden
   #
   # The cause is a repository setting, not this file: Settings -> Actions ->
@@ -262,7 +262,7 @@ jobs:
   #   {"default_workflow_permissions": "read", ...}
   #
   # and the package did not exist -- GET /users/arslanvuzmal/packages listed
-  # two unrelated containers and no titan-api. So every failure so far was on
+  # two unrelated containers and no coldops-api. So every failure so far was on
   # *creating* a package, never on writing to one that was already there, which
   # is a different permission check and the one the note above did not separate.
   #
@@ -312,13 +312,13 @@ jobs:
           # sha-<commit>; `latest` is for convenience only and must not be what
           # a production compose references.
           tags: |
-            ghcr.io/${{ github.repository_owner }}/titan-api:sha-${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/titan-api:latest
+            ghcr.io/${{ github.repository_owner }}/coldops-api:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/coldops-api:latest
           # Scoped per image so the two builds cannot overwrite each other's
           # cache manifests. Hygiene, not a bug fix -- see the note on this job
           # about what actually broke the build on main.
-          cache-from: type=gha,scope=titan-api
-          cache-to: type=gha,mode=max,scope=titan-api
+          cache-from: type=gha,scope=coldops-api
+          cache-to: type=gha,mode=max,scope=coldops-api
 
       - name: Build browser worker image
         uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
@@ -328,13 +328,13 @@ jobs:
           load: true
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/titan-browser-worker:sha-${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/titan-browser-worker:latest
-          cache-from: type=gha,scope=titan-browser-worker
-          cache-to: type=gha,mode=max,scope=titan-browser-worker
+            ghcr.io/${{ github.repository_owner }}/coldops-browser-worker:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/coldops-browser-worker:latest
+          cache-from: type=gha,scope=coldops-browser-worker
+          cache-to: type=gha,mode=max,scope=coldops-browser-worker
 
-      # buildx pushes every tag it is given, and a bare `titan-api:ci` resolves
-      # to docker.io/library/titan-api -- a repository this project has no
+      # buildx pushes every tag it is given, and a bare `coldops-api:ci` resolves
+      # to docker.io/library/coldops-api -- a repository this project has no
       # rights to and no reason to want. On a pull request nothing is pushed so
       # the bare tag was harmless; on main it took the whole job down *after*
       # the GHCR push had already succeeded, which is why the failure looked
@@ -345,12 +345,12 @@ jobs:
       # adding a push target.
       - name: Tag images for local assertions
         run: |
-          docker tag ghcr.io/${{ github.repository_owner }}/titan-api:latest titan-api:ci
-          docker tag ghcr.io/${{ github.repository_owner }}/titan-browser-worker:latest titan-browser-worker:ci
+          docker tag ghcr.io/${{ github.repository_owner }}/coldops-api:latest coldops-api:ci
+          docker tag ghcr.io/${{ github.repository_owner }}/coldops-browser-worker:latest coldops-browser-worker:ci
 
       - name: API image runs as non-root
         run: |
-          uid=$(docker run --rm --entrypoint id titan-api:ci -u)
+          uid=$(docker run --rm --entrypoint id coldops-api:ci -u)
           if [ "$uid" = "0" ]; then
             echo "::error::API image runs as root"
             exit 1
@@ -359,7 +359,7 @@ jobs:
 
       - name: Browser worker image runs as non-root
         run: |
-          uid=$(docker run --rm --entrypoint id titan-browser-worker:ci -u)
+          uid=$(docker run --rm --entrypoint id coldops-browser-worker:ci -u)
           if [ "$uid" = "0" ]; then
             echo "::error::browser worker image runs as root"
             exit 1
@@ -370,7 +370,7 @@ jobs:
       # means the two-stage build has collapsed back into one.
       - name: Browser worker image ships no compiler
         run: |
-          if docker run --rm --entrypoint sh titan-browser-worker:ci                -c "test -d node_modules/typescript"; then
+          if docker run --rm --entrypoint sh coldops-browser-worker:ci                -c "test -d node_modules/typescript"; then
             echo "::error::typescript is present in the runtime image"
             exit 1
           fi

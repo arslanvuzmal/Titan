@@ -22,7 +22,7 @@ import {
   Time,
 } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api } from '@/lib/titan';
+import { api } from '@/lib/coldops';
 
 export default function MessagesPage() {
   const { data, error, loading, reload } = useApi((t) => api.messages(t, 200), []);

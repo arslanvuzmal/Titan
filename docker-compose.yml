@@ -1,4 +1,4 @@
-# Titan-OS local development stack.
+# ColdOps local development stack.
 #
 # Replaces the pre-0.2 compose file, which defined only postgres/redis/temporal
 # and therefore never delivered a single environment variable to the API or the
@@ -12,26 +12,26 @@
 
 name: titan
 
-x-titan-env: &titan-env
-  TITAN_ENVIRONMENT: ${TITAN_ENVIRONMENT:-local}
-  TITAN_LOG_LEVEL: ${TITAN_LOG_LEVEL:-INFO}
-  TITAN_DATABASE_URL: postgresql+psycopg://titan:${POSTGRES_PASSWORD:-titan_dev_password}@postgres:5432/titan
-  TITAN_TEMPORAL_HOST: temporal:7233
-  TITAN_TEMPORAL_NAMESPACE: ${TITAN_TEMPORAL_NAMESPACE:-default}
-  TITAN_BROWSER_WORKER_URL: http://browser-worker:8800
-  TITAN_BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
+x-coldops-env: &coldops-env
+  COLDOPS_ENVIRONMENT: ${COLDOPS_ENVIRONMENT:-local}
+  COLDOPS_LOG_LEVEL: ${COLDOPS_LOG_LEVEL:-INFO}
+  COLDOPS_DATABASE_URL: postgresql+psycopg://titan:${POSTGRES_PASSWORD:-titan_dev_password}@postgres:5432/titan
+  COLDOPS_TEMPORAL_HOST: temporal:7233
+  COLDOPS_TEMPORAL_NAMESPACE: ${COLDOPS_TEMPORAL_NAMESPACE:-default}
+  COLDOPS_BROWSER_WORKER_URL: http://browser-worker:8800
+  COLDOPS_BROWSER_WORKER_TOKEN: ${COLDOPS_BROWSER_WORKER_TOKEN:-}
   # Same variable, same default as the browser worker's own
   # BROWSER_WORKER_CONCURRENCY below, so the callers cannot start more crawls
   # than there are lanes to run them. If you raise one, raise both.
-  TITAN_BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-4}
-  TITAN_FRONTEND_URL: ${TITAN_FRONTEND_URL:-http://localhost:3000}
+  COLDOPS_BROWSER_WORKER_CONCURRENCY: ${BROWSER_WORKER_CONCURRENCY:-4}
+  COLDOPS_FRONTEND_URL: ${COLDOPS_FRONTEND_URL:-http://localhost:3000}
   # --- the global kill switch. Never default this to true. ---
-  TITAN_PRODUCTION_SENDING_ENABLED: ${TITAN_PRODUCTION_SENDING_ENABLED:-false}
-  TITAN_EMAIL_PROVIDER: ${TITAN_EMAIL_PROVIDER:-mock}
-  TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED: ${TITAN_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED:-false}
-  TITAN_RESEND_API_KEY: ${TITAN_RESEND_API_KEY:-}
-  TITAN_RESEND_WEBHOOK_SECRET: ${TITAN_RESEND_WEBHOOK_SECRET:-}
-  TITAN_SENDER_MAILING_ADDRESS: ${TITAN_SENDER_MAILING_ADDRESS:-}
+  COLDOPS_PRODUCTION_SENDING_ENABLED: ${COLDOPS_PRODUCTION_SENDING_ENABLED:-false}
+  COLDOPS_EMAIL_PROVIDER: ${COLDOPS_EMAIL_PROVIDER:-mock}
+  COLDOPS_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED: ${COLDOPS_EMAIL_AUTH_PREFLIGHT_ACKNOWLEDGED:-false}
+  COLDOPS_RESEND_API_KEY: ${COLDOPS_RESEND_API_KEY:-}
+  COLDOPS_RESEND_WEBHOOK_SECRET: ${COLDOPS_RESEND_WEBHOOK_SECRET:-}
+  COLDOPS_SENDER_MAILING_ADDRESS: ${COLDOPS_SENDER_MAILING_ADDRESS:-}
   # --- smartlead ---
   # These were absent from this file entirely, so no container could reach
   # Smartlead: the provider, the mailbox ramp and the delivery-event poller all
@@ -40,54 +40,54 @@ x-titan-env: &titan-env
   #
   # The key alone is read-mostly -- it is what lets the poller collect delivery
   # outcomes. The two switches below are what allow *writing*, and they keep the
-  # same discipline as TITAN_PRODUCTION_SENDING_ENABLED above: never defaulted
+  # same discipline as COLDOPS_PRODUCTION_SENDING_ENABLED above: never defaulted
   # to true, so a fresh checkout cannot push leads or send on its own.
-  TITAN_SMARTLEAD_API_KEY: ${TITAN_SMARTLEAD_API_KEY:-}
-  TITAN_INSTANTLY_API_KEY: ${TITAN_INSTANTLY_API_KEY:-}
-  TITAN_INSTANTLY_CAMPAIGN_ID: ${TITAN_INSTANTLY_CAMPAIGN_ID:-}
-  TITAN_INSTANTLY_WEBHOOK_SECRET: ${TITAN_INSTANTLY_WEBHOOK_SECRET:-}
-  TITAN_SMARTLEAD_BASE_URL: ${TITAN_SMARTLEAD_BASE_URL:-https://server.smartlead.ai/api/v1}
-  TITAN_SMARTLEAD_CAMPAIGN_ID: ${TITAN_SMARTLEAD_CAMPAIGN_ID:-}
-  TITAN_SMARTLEAD_SANDBOX_CAMPAIGN_ID: ${TITAN_SMARTLEAD_SANDBOX_CAMPAIGN_ID:-}
-  TITAN_SMARTLEAD_TIMEOUT_SECONDS: ${TITAN_SMARTLEAD_TIMEOUT_SECONDS:-30}
-  TITAN_SMARTLEAD_WEBHOOK_SECRET: ${TITAN_SMARTLEAD_WEBHOOK_SECRET:-}
-  TITAN_SMARTLEAD_PRODUCTION_ENABLED: ${TITAN_SMARTLEAD_PRODUCTION_ENABLED:-false}
-  TITAN_SMARTLEAD_IMPORT_ENABLED: ${TITAN_SMARTLEAD_IMPORT_ENABLED:-false}
+  COLDOPS_SMARTLEAD_API_KEY: ${COLDOPS_SMARTLEAD_API_KEY:-}
+  COLDOPS_INSTANTLY_API_KEY: ${COLDOPS_INSTANTLY_API_KEY:-}
+  COLDOPS_INSTANTLY_CAMPAIGN_ID: ${COLDOPS_INSTANTLY_CAMPAIGN_ID:-}
+  COLDOPS_INSTANTLY_WEBHOOK_SECRET: ${COLDOPS_INSTANTLY_WEBHOOK_SECRET:-}
+  COLDOPS_SMARTLEAD_BASE_URL: ${COLDOPS_SMARTLEAD_BASE_URL:-https://server.smartlead.ai/api/v1}
+  COLDOPS_SMARTLEAD_CAMPAIGN_ID: ${COLDOPS_SMARTLEAD_CAMPAIGN_ID:-}
+  COLDOPS_SMARTLEAD_SANDBOX_CAMPAIGN_ID: ${COLDOPS_SMARTLEAD_SANDBOX_CAMPAIGN_ID:-}
+  COLDOPS_SMARTLEAD_TIMEOUT_SECONDS: ${COLDOPS_SMARTLEAD_TIMEOUT_SECONDS:-30}
+  COLDOPS_SMARTLEAD_WEBHOOK_SECRET: ${COLDOPS_SMARTLEAD_WEBHOOK_SECRET:-}
+  COLDOPS_SMARTLEAD_PRODUCTION_ENABLED: ${COLDOPS_SMARTLEAD_PRODUCTION_ENABLED:-false}
+  COLDOPS_SMARTLEAD_IMPORT_ENABLED: ${COLDOPS_SMARTLEAD_IMPORT_ENABLED:-false}
   # --- direct SMTP sending ---
   # These were defined in config.py and never passed through here, so setting
   # any of them in .env changed nothing and the smtp provider could not be
   # reached at all. Same class of gap as the Smartlead env block.
-  TITAN_SMTP_HOST: ${TITAN_SMTP_HOST:-}
-  TITAN_SMTP_PORT: ${TITAN_SMTP_PORT:-587}
-  TITAN_SMTP_USERNAME: ${TITAN_SMTP_USERNAME:-}
-  TITAN_SMTP_PASSWORD: ${TITAN_SMTP_PASSWORD:-}
-  TITAN_SMTP_SECURITY: ${TITAN_SMTP_SECURITY:-ssl}
-  TITAN_SMTP_TIMEOUT_SECONDS: ${TITAN_SMTP_TIMEOUT_SECONDS:-30}
-  # One credential per sending mailbox, for TITAN_EMAIL_PROVIDER=smtp_pool.
+  COLDOPS_SMTP_HOST: ${COLDOPS_SMTP_HOST:-}
+  COLDOPS_SMTP_PORT: ${COLDOPS_SMTP_PORT:-587}
+  COLDOPS_SMTP_USERNAME: ${COLDOPS_SMTP_USERNAME:-}
+  COLDOPS_SMTP_PASSWORD: ${COLDOPS_SMTP_PASSWORD:-}
+  COLDOPS_SMTP_SECURITY: ${COLDOPS_SMTP_SECURITY:-ssl}
+  COLDOPS_SMTP_TIMEOUT_SECONDS: ${COLDOPS_SMTP_TIMEOUT_SECONDS:-30}
+  # One credential per sending mailbox, for COLDOPS_EMAIL_PROVIDER=smtp_pool.
   # A path, not the credentials themselves: the pool holds one password per
   # address and a password put here would appear in `docker compose config`,
   # in `docker inspect`, and in every screenshot of either. The file is
   # mounted read-only into the three services that genuinely need it and
   # into nothing else. See coldops.delivery.mailboxes.
-  TITAN_MAILBOX_FILE: ${TITAN_MAILBOX_FILE:-}
+  COLDOPS_MAILBOX_FILE: ${COLDOPS_MAILBOX_FILE:-}
   # Daily warm-up traffic with partner mailboxes on Gmail/Outlook. See
   # coldops.delivery.warmup.round_pool; partners must not be placement seeds.
-  TITAN_WARMUP_ENABLED: ${TITAN_WARMUP_ENABLED:-false}
-  TITAN_WARMUP_PARTNER_FILE: ${TITAN_WARMUP_PARTNER_FILE:-}
+  COLDOPS_WARMUP_ENABLED: ${COLDOPS_WARMUP_ENABLED:-false}
+  COLDOPS_WARMUP_PARTNER_FILE: ${COLDOPS_WARMUP_PARTNER_FILE:-}
   # Evidence pages: the public origin they are served from, and the key that
   # signs their links. Either unset and no message carries an evidence link.
-  TITAN_EVIDENCE_BASE_URL: ${TITAN_EVIDENCE_BASE_URL:-}
-  TITAN_EVIDENCE_SECRET: ${TITAN_EVIDENCE_SECRET:-}
+  COLDOPS_EVIDENCE_BASE_URL: ${COLDOPS_EVIDENCE_BASE_URL:-}
+  COLDOPS_EVIDENCE_SECRET: ${COLDOPS_EVIDENCE_SECRET:-}
   # --- mailbox verification ---
-  # Titan's own probe. Same class of gap as the SMTP block above: the
+  # ColdOps's own probe. Same class of gap as the SMTP block above: the
   # settings existed and nothing passed them in, so a container read the
   # default 'null' and reported a clean sweep over addresses it had never
   # checked. See coldops/intelligence/smtp_probe.py.
-  TITAN_MAILBOX_VERIFIER: ${TITAN_MAILBOX_VERIFIER:-null}
-  TITAN_SMTP_PROBE_HELO: ${TITAN_SMTP_PROBE_HELO:-}
-  TITAN_SMTP_PROBE_MAIL_FROM: ${TITAN_SMTP_PROBE_MAIL_FROM:-}
-  TITAN_SMTP_PROBE_TIMEOUT_SECONDS: ${TITAN_SMTP_PROBE_TIMEOUT_SECONDS:-12}
-  TITAN_SMTP_PROBE_CONCURRENCY: ${TITAN_SMTP_PROBE_CONCURRENCY:-4}
+  COLDOPS_MAILBOX_VERIFIER: ${COLDOPS_MAILBOX_VERIFIER:-null}
+  COLDOPS_SMTP_PROBE_HELO: ${COLDOPS_SMTP_PROBE_HELO:-}
+  COLDOPS_SMTP_PROBE_MAIL_FROM: ${COLDOPS_SMTP_PROBE_MAIL_FROM:-}
+  COLDOPS_SMTP_PROBE_TIMEOUT_SECONDS: ${COLDOPS_SMTP_PROBE_TIMEOUT_SECONDS:-12}
+  COLDOPS_SMTP_PROBE_CONCURRENCY: ${COLDOPS_SMTP_PROBE_CONCURRENCY:-4}
   # --- reply collection (inbound-worker) ---
   # No kill switch here, unlike sending. Reading replies is how unsubscribes,
   # complaints and bounces are honoured, so the safe default is *on* wherever
@@ -95,83 +95,83 @@ x-titan-env: &titan-env
   # cannot hear them answer.
   # Shared with the unsubscribe endpoint on the portfolio, which verifies
   # the signature on every opt-out link and guards the list it exposes.
-  TITAN_UNSUBSCRIBE_SECRET: ${TITAN_UNSUBSCRIBE_SECRET:-}
-  TITAN_IMAP_HOST: ${TITAN_IMAP_HOST:-}
-  TITAN_IMAP_PORT: ${TITAN_IMAP_PORT:-993}
-  TITAN_IMAP_USERNAME: ${TITAN_IMAP_USERNAME:-}
-  TITAN_IMAP_PASSWORD: ${TITAN_IMAP_PASSWORD:-}
-  TITAN_IMAP_SECURITY: ${TITAN_IMAP_SECURITY:-ssl}
-  TITAN_IMAP_FOLDER: ${TITAN_IMAP_FOLDER:-INBOX}
-  TITAN_IMAP_POLL_SECONDS: ${TITAN_IMAP_POLL_SECONDS:-60}
-  TITAN_IMAP_WORKSPACE_ID: ${TITAN_IMAP_WORKSPACE_ID:-}
+  COLDOPS_UNSUBSCRIBE_SECRET: ${COLDOPS_UNSUBSCRIBE_SECRET:-}
+  COLDOPS_IMAP_HOST: ${COLDOPS_IMAP_HOST:-}
+  COLDOPS_IMAP_PORT: ${COLDOPS_IMAP_PORT:-993}
+  COLDOPS_IMAP_USERNAME: ${COLDOPS_IMAP_USERNAME:-}
+  COLDOPS_IMAP_PASSWORD: ${COLDOPS_IMAP_PASSWORD:-}
+  COLDOPS_IMAP_SECURITY: ${COLDOPS_IMAP_SECURITY:-ssl}
+  COLDOPS_IMAP_FOLDER: ${COLDOPS_IMAP_FOLDER:-INBOX}
+  COLDOPS_IMAP_POLL_SECONDS: ${COLDOPS_IMAP_POLL_SECONDS:-60}
+  COLDOPS_IMAP_WORKSPACE_ID: ${COLDOPS_IMAP_WORKSPACE_ID:-}
   # Optional chat webhook for operator alerts. Every notification is written to
   # the tasks table regardless; this only decides whether one also arrives
   # somewhere noisier. Unset degrades the channel, never the record.
-  TITAN_OPERATOR_WEBHOOK_URL: ${TITAN_OPERATOR_WEBHOOK_URL:-}
+  COLDOPS_OPERATOR_WEBHOOK_URL: ${COLDOPS_OPERATOR_WEBHOOK_URL:-}
   # The operator's own address, so mail *from* it is not read as a prospect
   # reply. A delivery test sent from the operator's Gmail threaded onto a real
   # lead, classified HUMAN, and retired it -- REPLIED is terminal, so that
   # dental practice would never have been written to again.
   #
-  # The same omission as TITAN_MODEL_REWRITES_ENABLED below: the setting was
+  # The same omission as COLDOPS_MODEL_REWRITES_ENABLED below: the setting was
   # added to .env and to the code, and this list was not updated, so every
   # container read the default of None and the guard was half-installed.
-  TITAN_OPERATOR_EMAIL: ${TITAN_OPERATOR_EMAIL:-}
+  COLDOPS_OPERATOR_EMAIL: ${COLDOPS_OPERATOR_EMAIL:-}
   # --- discovery ---
-  TITAN_GOOGLE_PLACES_API_KEY: ${TITAN_GOOGLE_PLACES_API_KEY:-}
-  TITAN_AGENT_REACH_API_KEY: ${TITAN_AGENT_REACH_API_KEY:-}
-  TITAN_AGENT_REACH_BASE_URL: ${TITAN_AGENT_REACH_BASE_URL:-}
+  COLDOPS_GOOGLE_PLACES_API_KEY: ${COLDOPS_GOOGLE_PLACES_API_KEY:-}
+  COLDOPS_AGENT_REACH_API_KEY: ${COLDOPS_AGENT_REACH_API_KEY:-}
+  COLDOPS_AGENT_REACH_BASE_URL: ${COLDOPS_AGENT_REACH_BASE_URL:-}
   # --- models ---
-  TITAN_NVIDIA_API_KEY: ${TITAN_NVIDIA_API_KEY:-}
-  TITAN_GEMINI_API_KEY: ${TITAN_GEMINI_API_KEY:-}
-  TITAN_OPENROUTER_API_KEY: ${TITAN_OPENROUTER_API_KEY:-}
-  TITAN_CLOUDFLARE_ACCOUNT_ID: ${TITAN_CLOUDFLARE_ACCOUNT_ID:-}
-  TITAN_CLOUDFLARE_GATEWAY_ID: ${TITAN_CLOUDFLARE_GATEWAY_ID:-}
-  TITAN_CLOUDFLARE_API_TOKEN: ${TITAN_CLOUDFLARE_API_TOKEN:-}
+  COLDOPS_NVIDIA_API_KEY: ${COLDOPS_NVIDIA_API_KEY:-}
+  COLDOPS_GEMINI_API_KEY: ${COLDOPS_GEMINI_API_KEY:-}
+  COLDOPS_OPENROUTER_API_KEY: ${COLDOPS_OPENROUTER_API_KEY:-}
+  COLDOPS_CLOUDFLARE_ACCOUNT_ID: ${COLDOPS_CLOUDFLARE_ACCOUNT_ID:-}
+  COLDOPS_CLOUDFLARE_GATEWAY_ID: ${COLDOPS_CLOUDFLARE_GATEWAY_ID:-}
+  COLDOPS_CLOUDFLARE_API_TOKEN: ${COLDOPS_CLOUDFLARE_API_TOKEN:-}
   # Whether Gemini phrases the message. The keys above were passed and this was
-  # not, so `TITAN_MODEL_REWRITES_ENABLED=true` sat in .env while every
-  # container read the code default of false -- and every email Titan has ever
+  # not, so `COLDOPS_MODEL_REWRITES_ENABLED=true` sat in .env while every
+  # container read the code default of false -- and every email ColdOps has ever
   # sent was the deterministic template text. The rewriter never ran once.
-  TITAN_MODEL_REWRITES_ENABLED: ${TITAN_MODEL_REWRITES_ENABLED:-false}
+  COLDOPS_MODEL_REWRITES_ENABLED: ${COLDOPS_MODEL_REWRITES_ENABLED:-false}
   # Model IDs are configuration. Pinned routes that leave a provider's
   # catalogue must be changeable without a rebuild; `coldops validate-models`
   # checks them against the live catalogue.
-  TITAN_MODEL_ROUTE_EXTRACTION: ${TITAN_MODEL_ROUTE_EXTRACTION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
-  TITAN_MODEL_ROUTE_RESEARCH: ${TITAN_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/nemotron-3-super-120b-a12b}
-  TITAN_MODEL_ROUTE_VERIFICATION: ${TITAN_MODEL_ROUTE_VERIFICATION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
-  TITAN_MODEL_ROUTE_MESSAGE: ${TITAN_MODEL_ROUTE_MESSAGE:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
-  TITAN_MODEL_ROUTE_PREMIUM: ${TITAN_MODEL_ROUTE_PREMIUM:-cloudflare:workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast}
+  COLDOPS_MODEL_ROUTE_EXTRACTION: ${COLDOPS_MODEL_ROUTE_EXTRACTION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  COLDOPS_MODEL_ROUTE_RESEARCH: ${COLDOPS_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  COLDOPS_MODEL_ROUTE_VERIFICATION: ${COLDOPS_MODEL_ROUTE_VERIFICATION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
+  COLDOPS_MODEL_ROUTE_MESSAGE: ${COLDOPS_MODEL_ROUTE_MESSAGE:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
+  COLDOPS_MODEL_ROUTE_PREMIUM: ${COLDOPS_MODEL_ROUTE_PREMIUM:-cloudflare:workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast}
   # --- message content ---
   # Real previous projects, cited in the credibility paragraph. Unset is a
   # working state: the message keeps its generic credential sentence rather
   # than inventing a client. See coldops/intelligence/case_studies.py.
-  TITAN_CASE_STUDIES_PATH: ${TITAN_CASE_STUDIES_PATH:-}
+  COLDOPS_CASE_STUDIES_PATH: ${COLDOPS_CASE_STUDIES_PATH:-}
   # A one-page summary, linked from the references block. A link and not an
   # attachment: an unsolicited PDF from an unknown sender is a strong spam
   # signal, corporate gateways strip them, and a hosted page produces a click
   # -- which is the engagement signal this system otherwise does not have.
-  TITAN_ONE_PAGER_URL: ${TITAN_ONE_PAGER_URL:-}
+  COLDOPS_ONE_PAGER_URL: ${COLDOPS_ONE_PAGER_URL:-}
   # No cold mail from a mailbox without a recent inbox reading. See
   # coldops.delivery.placement_gate.
-  TITAN_PLACEMENT_GATE_ENABLED: ${TITAN_PLACEMENT_GATE_ENABLED:-false}
+  COLDOPS_PLACEMENT_GATE_ENABLED: ${COLDOPS_PLACEMENT_GATE_ENABLED:-false}
   # "brief" for the cold domains: 60-120 words, one link. See Settings.message_form.
-  TITAN_MESSAGE_FORM: ${TITAN_MESSAGE_FORM:-full}
+  COLDOPS_MESSAGE_FORM: ${COLDOPS_MESSAGE_FORM:-full}
   # The one-page brief, attached to every message. Unset attaches nothing.
   # The file is read at send time from the docs mount below, so regenerating it
   # takes effect without a rebuild.
-  TITAN_ONE_PAGER_ATTACHMENT_PATH: ${TITAN_ONE_PAGER_ATTACHMENT_PATH:-}
+  COLDOPS_ONE_PAGER_ATTACHMENT_PATH: ${COLDOPS_ONE_PAGER_ATTACHMENT_PATH:-}
   # What share of messages carry it, 0-100. Zero attaches to nothing, which is
   # the shipped default: an attachment is a new signal to receivers, so it goes
   # to a sample first and to everything only once the mailboxes are healthy.
-  TITAN_ONE_PAGER_SAMPLE_PERCENT: ${TITAN_ONE_PAGER_SAMPLE_PERCENT:-0}
-  TITAN_MODEL_ROUTE_CONTACT: ${TITAN_MODEL_ROUTE_CONTACT:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
+  COLDOPS_ONE_PAGER_SAMPLE_PERCENT: ${COLDOPS_ONE_PAGER_SAMPLE_PERCENT:-0}
+  COLDOPS_MODEL_ROUTE_CONTACT: ${COLDOPS_MODEL_ROUTE_CONTACT:-openrouter:nvidia/nemotron-3-super-120b-a12b:free}
   # --- identity ---
-  TITAN_AUTH_MODE: ${TITAN_AUTH_MODE:-local}
-  TITAN_LOCAL_JWT_SECRET: ${TITAN_LOCAL_JWT_SECRET:-dev-only-not-for-production}
-  TITAN_CLERK_ISSUER_URL: ${TITAN_CLERK_ISSUER_URL:-}
+  COLDOPS_AUTH_MODE: ${COLDOPS_AUTH_MODE:-local}
+  COLDOPS_LOCAL_JWT_SECRET: ${COLDOPS_LOCAL_JWT_SECRET:-dev-only-not-for-production}
+  COLDOPS_CLERK_ISSUER_URL: ${COLDOPS_CLERK_ISSUER_URL:-}
   # --- observability ---
-  TITAN_OTEL_EXPORTER_OTLP_ENDPOINT: ${TITAN_OTEL_EXPORTER_OTLP_ENDPOINT:-}
-  TITAN_OTEL_TRACES_ENABLED: ${TITAN_OTEL_TRACES_ENABLED:-false}
+  COLDOPS_OTEL_EXPORTER_OTLP_ENDPOINT: ${COLDOPS_OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  COLDOPS_OTEL_TRACES_ENABLED: ${COLDOPS_OTEL_TRACES_ENABLED:-false}
 
 services:
   postgres:
@@ -280,7 +280,7 @@ services:
 
   migrate:
     build: {context: ., dockerfile: apps/api/Dockerfile}
-    environment: *titan-env
+    environment: *coldops-env
     command: ["alembic", "upgrade", "head"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -288,7 +288,7 @@ services:
 
   api:
     build: {context: ., dockerfile: apps/api/Dockerfile}
-    environment: *titan-env
+    environment: *coldops-env
     command: ["uvicorn", "coldops.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["${API_HOST_PORT:-8000}:8000"]
     volumes:
@@ -318,7 +318,7 @@ services:
   # so nothing could execute; this service is that missing registration.
   temporal-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
-    environment: *titan-env
+    environment: *coldops-env
     command: ["python", "-m", "coldops.workers.temporal_worker"]
     volumes:
       # The composer reads case_studies.json from here. This worker is where
@@ -330,7 +330,7 @@ services:
       # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
       # would be permanently unhealthy and restart-looped. This checks the one
       # dependency the worker genuinely needs.
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -349,7 +349,7 @@ services:
   # The only service holding an email provider credential.
   outbox-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
-    environment: *titan-env
+    environment: *coldops-env
     command: ["python", "-m", "coldops.workers.outbox"]
     volumes:
       # Read-only, and only here: the API for `coldops mailbox`, the outbox
@@ -361,7 +361,7 @@ services:
       # The API image's HEALTHCHECK curls :8000; a worker serves no HTTP, so it
       # would be permanently unhealthy and restart-looped. This checks the one
       # dependency the worker genuinely needs.
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -381,7 +381,7 @@ services:
   # this one holds a mailbox password and never sends, that one holds a provider
   # client and never reads. Neither can do the other's job by accident.
   #
-  # Reads every mailbox in TITAN_MAILBOX_FILE, or the single TITAN_IMAP_*
+  # Reads every mailbox in COLDOPS_MAILBOX_FILE, or the single COLDOPS_IMAP_*
   # mailbox when no pool file is set. With three sending addresses and one
   # poller, two thirds of the bounces and unsubscribe requests looked exactly
   # like silence.
@@ -389,7 +389,7 @@ services:
   # Exits zero, saying so, when no mailbox is configured at all.
   inbound-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
-    environment: *titan-env
+    environment: *coldops-env
     command: ["python", "-m", "coldops.workers.inbound"]
     volumes:
       # Read-only, and only here: the API for `coldops mailbox`, the outbox
@@ -397,7 +397,7 @@ services:
       # each one. The browser worker and the web app never see it.
       - ./secrets:/run/secrets:ro
     healthcheck:
-      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['TITAN_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
+      test: ["CMD", "python", "-c", "import os,psycopg;psycopg.connect(os.environ['COLDOPS_DATABASE_URL'].replace('postgresql+psycopg://','postgresql://')).close()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -423,7 +423,7 @@ services:
     build: {context: apps/browser-worker, dockerfile: Dockerfile}
     environment:
       BROWSER_WORKER_PORT: "8800"
-      BROWSER_WORKER_TOKEN: ${TITAN_BROWSER_WORKER_TOKEN:-}
+      BROWSER_WORKER_TOKEN: ${COLDOPS_BROWSER_WORKER_TOKEN:-}
       # Sized to the Temporal worker's activity slots. At 2 against 8 slots,
       # six of every eight crawl attempts got an immediate 503, burned their
       # four retries and failed -- 1,819 of 2,005 research runs in one day.

@@ -21,7 +21,7 @@ import {
   Value,
 } from '@/components/crm/ui';
 import { useApi } from '@/lib/session';
-import { api, type SendingPreflight } from '@/lib/titan';
+import { api, type SendingPreflight } from '@/lib/coldops';
 
 function Preflight() {
   const [data, setData] = React.useState<SendingPreflight | null>(null);

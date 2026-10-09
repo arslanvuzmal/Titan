@@ -395,3 +395,26 @@ def test_the_summary_calls_out_failures() -> None:
 
 def test_nothing_to_do_says_so() -> None:
     assert summarise([]) == "nothing to schedule"
+
+
+def test_only_a_legacy_schedule_with_a_replacement_is_retired() -> None:
+    from coldops.workflows.schedules import legacy_twins
+
+    installed = ["coldops-events::ws", "coldops-placement::ws"]
+    existing = [
+        "titan-events::ws",  # replaced -> retired
+        "titan-placement::ws",  # replaced -> retired
+        "titan-warmup::ws",  # no replacement in this plan -> kept
+        "titan-events::other-ws",  # another workspace -> kept
+        "coldops-events::ws",
+        "supervisor::ws",
+    ]
+    assert legacy_twins(installed, existing) == [
+        "titan-events::ws",
+        "titan-placement::ws",
+    ]
+
+
+def test_every_schedule_now_carries_the_coldops_prefix() -> None:
+    jobs = plan_schedules(WS, task_queue=QUEUE)
+    assert all(j.schedule_id.startswith("coldops-") for j in jobs)

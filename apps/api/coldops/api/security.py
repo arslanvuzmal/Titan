@@ -196,6 +196,8 @@ async def _resolve_clerk_user(
 async def current_principal(
     request: Request,
     authorization: str | None = Header(default=None),
+    x_coldops_workspace: str | None = Header(default=None),
+    #: The header's name before the rename; still read so an old client works.
     x_titan_workspace: str | None = Header(default=None),
 ) -> Principal:
     """Resolve the caller, or reject.
@@ -213,7 +215,7 @@ async def current_principal(
 
     if settings.auth_mode == "clerk":
         user_id, workspace_id = await _resolve_clerk_user(
-            token, settings, x_titan_workspace
+            token, settings, x_coldops_workspace or x_titan_workspace
         )
     else:
         user_id, workspace_id = _decode_local(token, settings)

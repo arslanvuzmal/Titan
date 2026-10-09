@@ -34,7 +34,7 @@ DAILY = "10 6 * * *"
 def observation(**overrides) -> ScheduleObservation:
     """An hourly schedule, healthy, with ten firings ahead of it."""
     base = {
-        "schedule_id": "titan-housekeeping::ws",
+        "schedule_id": "coldops-housekeeping::ws",
         "paused": False,
         "cron": HOURLY,
         "next_action_times": tuple(
@@ -277,7 +277,7 @@ async def test_only_the_wedged_schedule_is_reinstalled() -> None:
     seventh is churn on working machinery, and it is how a watchdog turns
     into the thing that needs watching.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     live = estate(**{housekeeping: described((NOW - dt.timedelta(days=7),))})
     client = FakeClient(live)
 
@@ -312,7 +312,7 @@ async def test_a_paused_schedule_is_not_reinstalled_however_far_behind() -> None
     keeps rewriting a schedule somebody paused during an incident is noise at
     the exact moment noise is most expensive.
     """
-    ramp = f"titan-mailbox-ramp::{WS}"
+    ramp = f"coldops-mailbox-ramp::{WS}"
     live = estate(**{ramp: described((NOW - dt.timedelta(days=30),), paused=True)})
     client = FakeClient(live)
 
@@ -332,9 +332,9 @@ async def test_one_unreadable_schedule_does_not_abandon_the_rest() -> None:
     One schedule the server cannot describe must not stop the other six being
     checked -- that failure mode would have hidden this very bug.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     live = estate(**{housekeeping: described((NOW - dt.timedelta(days=7),))})
-    del live[f"titan-opt-outs::{WS}"]
+    del live[f"coldops-opt-outs::{WS}"]
     client = FakeClient(live)
 
     result = await heal_wedged_schedules(
@@ -453,7 +453,7 @@ async def test_a_repair_that_did_not_take_is_not_reported_as_healed() -> None:
     update's own success was verified rather than assumed: the escalation is
     only reachable through a read-back that found it had not worked.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     stuck = described((NOW - dt.timedelta(hours=3),))
     live = estate(**{housekeeping: stuck})
 
@@ -518,7 +518,7 @@ async def test_a_schedule_that_will_not_restart_is_recreated() -> None:
     never catches up, and rewriting the spec does not move its position.
     Recreating it is the only repair that does.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
 
     class StubbornClient(FakeClient):
@@ -544,7 +544,7 @@ async def test_a_working_schedule_is_never_deleted() -> None:
     dangerous repair and it is only ever reached when the safe one has
     demonstrably failed.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
     client = FakeClient(live)  # repair_works is True
 
@@ -565,7 +565,7 @@ async def test_a_recreate_that_fails_leaves_a_loud_trail() -> None:
     now gone rather than late. It must never be reported as healed, and it
     must be the loudest thing the pass produces.
     """
-    housekeeping = f"titan-housekeeping::{WS}"
+    housekeeping = f"coldops-housekeeping::{WS}"
     live = estate(**{housekeeping: described((NOW - dt.timedelta(hours=3),))})
 
     class CannotRecreate(FakeClient):

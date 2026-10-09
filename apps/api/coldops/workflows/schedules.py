@@ -224,7 +224,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
     ws = str(workspace_id)
     return [
         ScheduledJob(
-            schedule_id=f"titan-weekly-report::{ws}",
+            schedule_id=f"coldops-weekly-report::{ws}",
             workflow="WeeklyReportWorkflow",
             workflow_id=weekly_report_workflow_id(ws),
             cron=REPORT_CRON,
@@ -233,7 +233,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="measures the week and writes the report",
         ),
         ScheduledJob(
-            schedule_id=f"titan-mailbox-ramp::{ws}",
+            schedule_id=f"coldops-mailbox-ramp::{ws}",
             workflow="MailboxRampWorkflow",
             workflow_id=mailbox_ramp_workflow_id(ws),
             cron=RAMP_CRON,
@@ -242,7 +242,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="grows each mailbox's daily volume as it earns it",
         ),
         ScheduledJob(
-            schedule_id=f"titan-placement::{ws}",
+            schedule_id=f"coldops-placement::{ws}",
             workflow="PlacementRoundWorkflow",
             workflow_id=placement_round_workflow_id(ws),
             cron=PLACEMENT_CRON,
@@ -251,7 +251,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="asks whether our mail is reaching inboxes, rather than assuming",
         ),
         ScheduledJob(
-            schedule_id=f"titan-warmup::{ws}",
+            schedule_id=f"coldops-warmup::{ws}",
             workflow="WarmupRoundWorkflow",
             workflow_id=warmup_round_workflow_id(ws),
             cron=WARMUP_CRON,
@@ -260,7 +260,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="sends and rescues warm-up mail with partners on Gmail and Outlook",
         ),
         ScheduledJob(
-            schedule_id=f"titan-housekeeping::{ws}",
+            schedule_id=f"coldops-housekeeping::{ws}",
             workflow="HousekeepingWorkflow",
             workflow_id=housekeeping_workflow_id(ws),
             cron=HOUSEKEEPING_CRON,
@@ -269,7 +269,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="puts stranded drafts and abandoned research runs back on the rails",
         ),
         ScheduledJob(
-            schedule_id=f"titan-opt-outs::{ws}",
+            schedule_id=f"coldops-opt-outs::{ws}",
             workflow="PullOptOutsWorkflow",
             workflow_id=pull_opt_outs_workflow_id(ws),
             cron=OPTOUT_CRON,
@@ -278,7 +278,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="honours unsubscribes the website collected",
         ),
         ScheduledJob(
-            schedule_id=f"titan-delivery-events::{ws}",
+            schedule_id=f"coldops-delivery-events::{ws}",
             workflow="DeliveryEventPollWorkflow",
             workflow_id=delivery_event_poll_workflow_id(ws),
             cron=POLL_CRON,
@@ -287,7 +287,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="pulls what happened to every send, so the rest can learn",
         ),
         ScheduledJob(
-            schedule_id=f"titan-sender-health::{ws}",
+            schedule_id=f"coldops-sender-health::{ws}",
             workflow="SenderHealthSnapshotWorkflow",
             workflow_id=sender_health_workflow_id(ws),
             cron=HEALTH_CRON,
@@ -296,7 +296,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="records each sender's health so a trend exists to respond to",
         ),
         ScheduledJob(
-            schedule_id=f"titan-daily-report::{ws}",
+            schedule_id=f"coldops-daily-report::{ws}",
             workflow="DailyReportWorkflow",
             workflow_id=f"daily-report::{ws}",
             cron=DAILY_REPORT_CRON,
@@ -307,7 +307,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
         ScheduledJob(
             # Still the titan- prefix: schedule healing strips it to find the
             # job, and every schedule is renamed together in rename step 3.
-            schedule_id=f"titan-events::{ws}",
+            schedule_id=f"coldops-events::{ws}",
             workflow="EventProjectionWorkflow",
             workflow_id=event_projection_workflow_id(ws),
             cron=EVENTS_CRON,
@@ -316,7 +316,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="projects every outcome into one table, the history models learn from",
         ),
         ScheduledJob(
-            schedule_id=f"titan-audit-pdf::{ws}",
+            schedule_id=f"coldops-audit-pdf::{ws}",
             workflow="AuditPdfWorkflow",
             workflow_id=audit_pdf_workflow_id(ws),
             cron=AUDIT_PDF_CRON,
@@ -325,7 +325,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="renders the one-page website check each first email carries",
         ),
         ScheduledJob(
-            schedule_id=f"titan-ml-shadow::{ws}",
+            schedule_id=f"coldops-ml-shadow::{ws}",
             workflow="MlShadowWorkflow",
             workflow_id=ml_shadow_workflow_id(ws),
             cron=ML_SHADOW_CRON,
@@ -334,7 +334,7 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             note="lets models in shadow read the latest replies; records, never acts",
         ),
         ScheduledJob(
-            schedule_id=f"titan-sender-verification::{ws}",
+            schedule_id=f"coldops-sender-verification::{ws}",
             workflow="SenderVerificationWorkflow",
             workflow_id=sender_verification_workflow_id(ws),
             cron=VERIFY_CRON,
@@ -422,6 +422,35 @@ def summarise(applied: list[Applied]) -> str:
 # ==========================================================================
 # Applying -- the part that talks to Temporal
 # ==========================================================================
+#: The schedule-id prefix used before the rename to ColdOps.
+LEGACY_PREFIX = "titan-"
+
+
+def legacy_twins(installed_ids: list[str], existing_ids: list[str]) -> list[str]:
+    """Old ``titan-*`` schedules whose ``coldops-*`` replacement is installed.
+
+    Only a twin is retired: a legacy schedule with no replacement in this plan
+    is left alone, so this can never delete a job that would then not exist
+    under either name. Pure, for the test.
+    """
+    wanted = set(installed_ids)
+    return sorted(
+        sid
+        for sid in existing_ids
+        if sid.startswith(LEGACY_PREFIX)
+        and "coldops-" + sid.removeprefix(LEGACY_PREFIX) in wanted
+    )
+
+
+async def retire_legacy(client: Any, jobs: list[ScheduledJob]) -> list[str]:
+    """Delete each old-named schedule now running under its new name. Returns the ids."""
+    existing = [entry.id async for entry in await client.list_schedules()]
+    retired = legacy_twins([job.schedule_id for job in jobs], existing)
+    for schedule_id in retired:
+        await client.get_schedule_handle(schedule_id).delete()
+    return retired
+
+
 async def install(client: Any, jobs: list[ScheduledJob]) -> list[Applied]:
     """Create each schedule, or update the spec of one that already exists.
 

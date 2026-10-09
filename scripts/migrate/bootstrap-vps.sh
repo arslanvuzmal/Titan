@@ -13,9 +13,9 @@
 set -euo pipefail
 
 TARBALL="${1:-}"
-INSTALL_DIR="${TITAN_INSTALL_DIR:-/opt/titan}"
-REPO_URL="${TITAN_REPO_URL:-https://github.com/arslanvuzmal/Titan.git}"
-BRANCH="${TITAN_BRANCH:-phase0/stop-the-bleeding}"
+INSTALL_DIR="${COLDOPS_INSTALL_DIR:-/opt/coldops}"
+REPO_URL="${COLDOPS_REPO_URL:-https://github.com/arslanvuzmal/Titan.git}"
+BRANCH="${COLDOPS_BRANCH:-phase0/stop-the-bleeding}"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n== %s ==\n' "$*"; }
@@ -80,7 +80,7 @@ step "normalising .env"
 # Two things bite here, both found the hard way on 16 September.
 #
 # CRLF: the file comes off a Windows laptop, so every value ends in a carriage
-# return. `set -a; . ./.env` then exports TITAN_DATABASE_URL with a trailing \r
+# return. `set -a; . ./.env` then exports COLDOPS_DATABASE_URL with a trailing \r
 # and every connection string is subtly wrong.
 if [ -f "${INSTALL_DIR}/.env" ]; then
   sed -i 's/\r$//' "${INSTALL_DIR}/.env"
@@ -95,15 +95,15 @@ fi
 # `postgres:5432`, and a copied .env points the whole stack at a port nothing
 # is listening on. migrate fails with "connection refused" and takes every
 # dependent service with it.
-if grep -qE '^TITAN_DATABASE_URL=.*(localhost|127\.0\.0\.1)' "${INSTALL_DIR}/.env" 2>/dev/null; then
-  sed -i 's|^TITAN_DATABASE_URL=.*|TITAN_DATABASE_URL=postgresql+psycopg://titan:titan_dev_password@postgres:5432/titan|' "${INSTALL_DIR}/.env"
-  echo "TITAN_DATABASE_URL pointed at the compose service"
+if grep -qE '^COLDOPS_DATABASE_URL=.*(localhost|127\.0\.0\.1)' "${INSTALL_DIR}/.env" 2>/dev/null; then
+  sed -i 's|^COLDOPS_DATABASE_URL=.*|COLDOPS_DATABASE_URL=postgresql+psycopg://titan:titan_dev_password@postgres:5432/titan|' "${INSTALL_DIR}/.env"
+  echo "COLDOPS_DATABASE_URL pointed at the compose service"
 fi
 
 # Variables compose interpolates into the file itself, as opposed to the ones
 # it passes into containers. These are `${VAR:?}` in the compose file, and an
 # assignment that exists but is *empty* counts as missing -- which is exactly
-# what TITAN_BROWSER_WORKER_TOKEN= was, so a `grep -q ^VAR=` guard matched it
+# what COLDOPS_BROWSER_WORKER_TOKEN= was, so a `grep -q ^VAR=` guard matched it
 # and never filled it in.
 ensure_var() {
   local name="$1" value="$2"
@@ -115,9 +115,9 @@ ensure_var() {
     echo "  set ${name}"
   fi
 }
-ensure_var TITAN_API_IMAGE "titan-api:local"
-ensure_var TITAN_BROWSER_WORKER_IMAGE "titan-browser-worker:local"
-ensure_var TITAN_BROWSER_WORKER_TOKEN "$(openssl rand -hex 24)"
+ensure_var COLDOPS_API_IMAGE "coldops-api:local"
+ensure_var COLDOPS_BROWSER_WORKER_IMAGE "coldops-browser-worker:local"
+ensure_var COLDOPS_BROWSER_WORKER_TOKEN "$(openssl rand -hex 24)"
 ensure_var POSTGRES_USER "titan"
 ensure_var POSTGRES_PASSWORD "titan_dev_password"
 ensure_var TEMPORAL_POSTGRES_PASSWORD "titan_dev_password"
@@ -127,9 +127,9 @@ ensure_var TEMPORAL_POSTGRES_PASSWORD "titan_dev_password"
 # target is one fewer moving part than pushing to one.
 step "images"
 cd "${INSTALL_DIR}"
-docker build -q -f apps/api/Dockerfile -t titan-api:local . >/dev/null
-docker build -q -f apps/browser-worker/Dockerfile -t titan-browser-worker:local apps/browser-worker >/dev/null
-echo "titan-api:local and titan-browser-worker:local built"
+docker build -q -f apps/api/Dockerfile -t coldops-api:local . >/dev/null
+docker build -q -f apps/browser-worker/Dockerfile -t coldops-browser-worker:local apps/browser-worker >/dev/null
+echo "coldops-api:local and coldops-browser-worker:local built"
 
 # ---- 6. database, then the stack, paused -----------------------------------
 step "database"
@@ -188,6 +188,6 @@ Next, in order:
   2. set the PTR record on this server's IP, and an A record pointing back
   3. stop the stack on the laptop
   4. send one test message from here and confirm it arrives
-  5. only then unpause, and set TITAN_HEALTHCHECK_PING_URL
+  5. only then unpause, and set COLDOPS_HEALTHCHECK_PING_URL
 
 NEXT

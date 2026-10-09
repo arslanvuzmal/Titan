@@ -16,9 +16,9 @@ dropped on 24 August.
 ### A1. Switch on the protections (server `.env`, then restart)
 
 ```
-TITAN_PLACEMENT_GATE_ENABLED=true
-TITAN_MESSAGE_FORM=brief
-TITAN_ONE_PAGER_SAMPLE_PERCENT=0
+COLDOPS_PLACEMENT_GATE_ENABLED=true
+COLDOPS_MESSAGE_FORM=brief
+COLDOPS_ONE_PAGER_SAMPLE_PERCENT=0
 ```
 
 - **Placement gate:** a mailbox sends cold mail only while its own probes
@@ -36,15 +36,15 @@ because the seed credentials were not on the server.
 
 - 2 Gmail and 1 Yahoo — fresh accounts used for nothing else. Each needs
   2-Step Verification switched on and an **app password** (16 characters,
-  pasted without spaces); Titan reads them over IMAP with it.
+  pasted without spaces); ColdOps reads them over IMAP with it.
 - **1 Outlook, through Microsoft sign-in — not a password.** Microsoft stopped
   accepting password logins over IMAP for personal Outlook, Hotmail, Live and
-  MSN accounts on 16 September 2024. Since 3 October Titan signs in the way
+  MSN accounts on 16 September 2024. Since 3 October ColdOps signs in the way
   Microsoft still allows (OAuth). See **A2b** below. *(The first version of
   this page asked for 2 Outlook inboxes with passwords; that could never have
   worked.)*
 - Listed in `secrets/seeds.json` (start from `secrets/seeds.json.example`),
-  with `TITAN_SEED_FILE=/run/secrets/seeds.json` in `.env`.
+  with `COLDOPS_SEED_FILE=/run/secrets/seeds.json` in `.env`.
 
 ### A2b. Outlook: one-time setup (free)
 
@@ -52,7 +52,7 @@ because the seed credentials were not on the server.
    (the Outlook test inbox itself is fine). No paid subscription is needed for
    this step.
 2. Search **App registrations** → **New registration**.
-   - Name: `Titan inbox reader`
+   - Name: `ColdOps inbox reader`
    - Supported account types: **Personal Microsoft accounts only**
    - Redirect URI: leave empty → **Register**.
 3. On the app's page, copy the **Application (client) ID**. It is not a secret.
@@ -67,7 +67,7 @@ because the seed credentials were not on the server.
 
    It prints a code and **microsoft.com/devicelogin**. Open that page on any
    device, enter the code, sign in **as the Outlook test inbox**, and accept.
-   Titan never sees the password. The command then prints a long token and
+   ColdOps never sees the password. The command then prints a long token and
    the lines to put in `secrets/seeds.json`. The entry looks like:
 
    ```json
@@ -85,7 +85,7 @@ because the seed credentials were not on the server.
    }
    ```
 
-   Titan keeps renewing the token itself.
+   ColdOps keeps renewing the token itself.
 
 ### A3. Warm-up partners
 
@@ -97,13 +97,13 @@ receive our warm-up mail, rescue it from spam, read it and reply.
   an app password, Outlook through the A2b sign-in. **Not** the seeds. A seed that
   rescues and replies to our mail would file our next probe in the inbox
   because of its own history, and the gate would reopen on a reading it
-  manufactured. Titan refuses the overlap.
+  manufactured. ColdOps refuses the overlap.
 - Listed in `secrets/warmup_partners.json` (same shape as `mailboxes.json`),
   then:
 
 ```
-TITAN_WARMUP_PARTNER_FILE=/run/secrets/warmup_partners.json
-TITAN_WARMUP_ENABLED=true
+COLDOPS_WARMUP_PARTNER_FILE=/run/secrets/warmup_partners.json
+COLDOPS_WARMUP_ENABLED=true
 ```
 
 The round runs daily at 09:10 UTC, after the placement round is read.
@@ -143,6 +143,6 @@ mailboxes each (Workspace + M365). Per domain:
 | TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:…` → `quarantine` after 30 clean days |
 | A | `go` | `168.119.161.220` |
 
-Then `TITAN_TRACKING_HOSTS=go.<domain>,…` and
+Then `COLDOPS_TRACKING_HOSTS=go.<domain>,…` and
 `deploy/tls/enable-tracking-hosts.sh`, credentials into `mailboxes.json`,
 21 days of warm-up, and the same placement gate before any cold send.

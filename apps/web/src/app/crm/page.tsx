@@ -21,7 +21,7 @@ import React from 'react';
 import { TodaySection } from '@/components/crm/Today';
 import { Badge, Card, ErrorNote, Spinner, Stat } from '@/components/crm/ui';
 import { useLiveApi } from '@/lib/session';
-import { api, type Health } from '@/lib/titan';
+import { api, type Health } from '@/lib/coldops';
 
 function Distribution({
   data,

@@ -27,7 +27,7 @@ import Link from 'next/link';
 import React from 'react';
 import { Badge, Card, ErrorNote, Spinner } from '@/components/crm/ui';
 import { useLiveApi } from '@/lib/session';
-import { api, type Deferral, type MailboxDay, type Today } from '@/lib/titan';
+import { api, type Deferral, type MailboxDay, type Today } from '@/lib/coldops';
 
 /**
  * Half a minute. The outbox worker's own cadence is the floor worth matching --

@@ -1,5 +1,5 @@
 [Unit]
-Description=Retry Titan TLS setup until it takes
+Description=Retry ColdOps TLS setup until it takes
 
 [Timer]
 OnBootSec=2min

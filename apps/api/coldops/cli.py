@@ -1029,6 +1029,15 @@ def cmd_schedules(args: argparse.Namespace) -> int:
         applied = await schedules.install(client, jobs)
         for supervisor in supervisors:
             applied.append(await schedules.start_supervisor(client, supervisor))
+        if args.retire_legacy and not any(
+            a.outcome is schedules.Outcome.FAILED for a in applied
+        ):
+            # Only after every new schedule installed: a failed install with
+            # the old one deleted would leave a job running under neither name.
+            for schedule_id in await schedules.retire_legacy(client, jobs):
+                print(
+                    f"           retired  {schedule_id}  (replaced by its coldops- twin)"
+                )
         if starts:
             applied.extend(await schedules.start_orchestrators(client, starts))
         print(schedules.summarise(applied))
@@ -2404,6 +2413,14 @@ def main() -> int:
         help=(
             "also start the always-on loop for each ACTIVE campaign. Separate "
             "from installing the schedules because this one starts work."
+        ),
+    )
+    schedules_parser.add_argument(
+        "--retire-legacy",
+        action="store_true",
+        help=(
+            "after installing, delete each old titan-* schedule whose coldops-* "
+            "replacement is now installed (the one-time rename)"
         ),
     )
     schedules_parser.set_defaults(func=cmd_schedules)

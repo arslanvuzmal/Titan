@@ -1,4 +1,4 @@
-# Deploying Titan-OS: Vercel + Railway
+# Deploying ColdOps: Vercel + Railway
 
 The dashboard goes to Vercel. Everything else goes to Railway. This split is
 not a preference — five of the six components cannot run on Vercel:
@@ -24,8 +24,8 @@ Rotating is minutes; a leaked Places key billed against your account is not.
 
 Decide which of these is true, because it changes what you deploy:
 
-- **Research only** — Titan discovers, crawls, scores, and drafts. Nothing is
-  ever sent. `TITAN_PRODUCTION_SENDING_ENABLED=false`. This is the tested
+- **Research only** — ColdOps discovers, crawls, scores, and drafts. Nothing is
+  ever sent. `COLDOPS_PRODUCTION_SENDING_ENABLED=false`. This is the tested
   configuration and the one to start with.
 - **Sending enabled** — do not do this yet. Deliverability has never been
   verified against a real sending domain, and without the follow-up scheduler
@@ -36,13 +36,13 @@ Decide which of these is true, because it changes what you deploy:
 
 ## 1. Authentication
 
-Pick one. `TITAN_AUTH_MODE` decides which, and selecting one closes the other:
+Pick one. `COLDOPS_AUTH_MODE` decides which, and selecting one closes the other:
 a deployment set to `clerk` returns 501 from `/api/v1/auth/token`, so there is
 no second way in.
 
-### Option A — username and passcode (`TITAN_AUTH_MODE=local`)
+### Option A — username and passcode (`COLDOPS_AUTH_MODE=local`)
 
-Titan's own identity provider. Two fields, argon2id, no external dependency.
+ColdOps's own identity provider. Two fields, argon2id, no external dependency.
 Suited to a system with a handful of operators, which is what this is.
 
 ```
@@ -54,22 +54,22 @@ It prompts for the passcode; it never takes it as an argument you would leave
 in your shell history. The account and its workspace membership must already
 exist — this command grants access to an existing member and creates nobody.
 
-What it does *not* give you: SSO, MFA, or a password-reset email. Titan has no
+What it does *not* give you: SSO, MFA, or a password-reset email. ColdOps has no
 outbound path for a reset link that is not the outreach mailbox itself, so
 recovery is the same command run again by someone with database access.
 
 Five consecutive failures lock the account for fifteen minutes
-(`TITAN_LOGIN_MAX_ATTEMPTS`, `TITAN_LOGIN_LOCKOUT_SECONDS`). That lockout is
+(`COLDOPS_LOGIN_MAX_ATTEMPTS`, `COLDOPS_LOGIN_LOCKOUT_SECONDS`). That lockout is
 what makes a short passcode defensible online — it does nothing for a stolen
 database, where only the argon2 cost stands between the dump and a login. If
 that is your threat model, use a long passcode or use Clerk.
 
-### Option B — Clerk (`TITAN_AUTH_MODE=clerk`)
+### Option B — Clerk (`COLDOPS_AUTH_MODE=clerk`)
 
 1. Create a Clerk application. Note the **Frontend API URL** — it looks like
    `https://something-12.clerk.accounts.dev`. That is the issuer.
-2. In Clerk, add the user who will operate Titan.
-3. Create the matching Titan user *before* first sign-in, with the same email:
+2. In Clerk, add the user who will operate ColdOps.
+3. Create the matching ColdOps user *before* first sign-in, with the same email:
 
    ```sql
    INSERT INTO users (email, display_name, is_active)
@@ -81,7 +81,7 @@ that is your threat model, use a long passcode or use Clerk.
    WHERE w.slug = 'titan' AND u.email = 'you@example.com';
    ```
 
-   Titan provisions nobody implicitly. A valid Clerk token for an unknown
+   ColdOps provisions nobody implicitly. A valid Clerk token for an unknown
    subject gets 401 — who may reach this system stays a deliberate act. On
    first sign-in the Clerk subject is bound to this row, and only if Clerk
    states the email is verified.
@@ -117,7 +117,7 @@ reached over the private network and must not be exposed.
 
 Railway has no Temporal plugin. Either:
 
-- **Temporal Cloud** — set `TITAN_TEMPORAL_HOST` to your namespace endpoint and
+- **Temporal Cloud** — set `COLDOPS_TEMPORAL_HOST` to your namespace endpoint and
   supply the client certificate. This is the option that does not require you
   to operate a Temporal cluster.
 - **A Railway service** from `temporalio/auto-setup:1.22.4` with its own
@@ -164,33 +164,33 @@ lists all of them. The ones that matter for a deployment:
 these fails in a way the API will not show you):
 
 ```
-TITAN_ENVIRONMENT=production
-TITAN_DATABASE_URL=${{Postgres.DATABASE_URL}}        # +psycopg, see below
-TITAN_RATE_LIMIT_REDIS_URL=${{Redis.REDIS_URL}}      # optional; see below
-TITAN_AUTH_MODE=local                                # or clerk; see section 1
-TITAN_LOCAL_JWT_SECRET=<32+ random bytes>            # local mode only
-TITAN_CLERK_ISSUER_URL=https://<your>.clerk.accounts.dev   # clerk mode only
-TITAN_FRONTEND_URL=https://<your-project>.vercel.app
-TITAN_TEMPORAL_HOST=<temporal endpoint>:7233
-TITAN_BROWSER_WORKER_URL=http://browser-worker.railway.internal:8800
-TITAN_BROWSER_WORKER_TOKEN=<generate a long random value>
-TITAN_PRODUCTION_SENDING_ENABLED=false
-TITAN_GOOGLE_PLACES_API_KEY=<rotated key>
-TITAN_OPENROUTER_API_KEY=<rotated key>
-TITAN_NVIDIA_API_KEY=<rotated key>
-TITAN_SENDER_MAILING_ADDRESS=<a real postal address>
+COLDOPS_ENVIRONMENT=production
+COLDOPS_DATABASE_URL=${{Postgres.DATABASE_URL}}        # +psycopg, see below
+COLDOPS_RATE_LIMIT_REDIS_URL=${{Redis.REDIS_URL}}      # optional; see below
+COLDOPS_AUTH_MODE=local                                # or clerk; see section 1
+COLDOPS_LOCAL_JWT_SECRET=<32+ random bytes>            # local mode only
+COLDOPS_CLERK_ISSUER_URL=https://<your>.clerk.accounts.dev   # clerk mode only
+COLDOPS_FRONTEND_URL=https://<your-project>.vercel.app
+COLDOPS_TEMPORAL_HOST=<temporal endpoint>:7233
+COLDOPS_BROWSER_WORKER_URL=http://browser-worker.railway.internal:8800
+COLDOPS_BROWSER_WORKER_TOKEN=<generate a long random value>
+COLDOPS_PRODUCTION_SENDING_ENABLED=false
+COLDOPS_GOOGLE_PLACES_API_KEY=<rotated key>
+COLDOPS_OPENROUTER_API_KEY=<rotated key>
+COLDOPS_NVIDIA_API_KEY=<rotated key>
+COLDOPS_SENDER_MAILING_ADDRESS=<a real postal address>
 ```
 
 **Sending through a mailbox rather than an API provider** (`outbox-worker`
 only — no other service may hold these):
 
 ```
-TITAN_EMAIL_PROVIDER=smtp
-TITAN_SMTP_HOST=mail.spacemail.com
-TITAN_SMTP_PORT=465
-TITAN_SMTP_SECURITY=ssl                    # or starttls on 587
-TITAN_SMTP_USERNAME=outreach@example.com
-TITAN_SMTP_PASSWORD=<the mailbox password>
+COLDOPS_EMAIL_PROVIDER=smtp
+COLDOPS_SMTP_HOST=mail.spacemail.com
+COLDOPS_SMTP_PORT=465
+COLDOPS_SMTP_SECURITY=ssl                    # or starttls on 587
+COLDOPS_SMTP_USERNAME=outreach@example.com
+COLDOPS_SMTP_PASSWORD=<the mailbox password>
 ```
 
 Use a mailbox dedicated to outreach, never the administrative one. Cold email
@@ -198,17 +198,17 @@ earns complaints even when it is done well, and reputation damage lands on the
 mailbox and the domain that sent it -- so the address you rely on for invoices
 and password resets must not be the address that sends campaigns.
 
-`TITAN_SMTP_SECURITY=none` is refused for anything but a loopback host, so a
+`COLDOPS_SMTP_SECURITY=none` is refused for anything but a loopback host, so a
 misconfiguration cannot put the mailbox password on the wire in clear. Point it
 at Mailpit (`localhost:1025`) to review rendered messages without sending.
 
 Redis is used only for distributed rate limiting. Leaving
-`TITAN_RATE_LIMIT_REDIS_URL` unset is supported — limits then apply per
+`COLDOPS_RATE_LIMIT_REDIS_URL` unset is supported — limits then apply per
 process rather than across replicas, which is fine for a single API instance
 and wrong the moment you scale to two.
 
-Railway's `DATABASE_URL` is `postgresql://`; Titan needs the driver named
-explicitly. Set `TITAN_DATABASE_URL` to the same value with
+Railway's `DATABASE_URL` is `postgresql://`; ColdOps needs the driver named
+explicitly. Set `COLDOPS_DATABASE_URL` to the same value with
 `postgresql+psycopg://`, or the API will start on the wrong driver and fail on
 the first query.
 
@@ -216,7 +216,7 @@ the first query.
 
 ```
 BROWSER_WORKER_PORT=8800
-BROWSER_WORKER_TOKEN=<the same value as TITAN_BROWSER_WORKER_TOKEN>
+BROWSER_WORKER_TOKEN=<the same value as COLDOPS_BROWSER_WORKER_TOKEN>
 ```
 
 That is the complete list for this service. It is the only component that
@@ -247,7 +247,7 @@ Every Vercel preview gets a unique hostname, so it cannot be listed in the
 API's allowed origins in advance. Set on the API:
 
 ```
-TITAN_VERCEL_PREVIEW_SCOPE=<your-project-scope>
+COLDOPS_VERCEL_PREVIEW_SCOPE=<your-project-scope>
 ```
 
 which allows `https://<anything>-<scope>.vercel.app` and nothing else. Leaving
@@ -259,8 +259,8 @@ it unset means previews cannot reach the API — the safe default, since
 ## 5. Continuous deployment
 
 - **Vercel** deploys `apps/web` on every push, with a preview per pull request.
-- **CI** publishes `ghcr.io/<owner>/titan-api` and
-  `ghcr.io/<owner>/titan-browser-worker` on every push to `main`, tagged both
+- **CI** publishes `ghcr.io/<owner>/coldops-api` and
+  `ghcr.io/<owner>/coldops-browser-worker` on every push to `main`, tagged both
   `sha-<commit>` and `latest`. Pull requests build but never push.
 - **Railway** can watch the repository, or pull the image by tag.
 
@@ -294,7 +294,7 @@ curl -s -o /dev/null -w '%{http_code}\n' $API/api/v1/stats
 
 # 5. Local sign-in refuses a wrong passcode and does not say why.
 #    Expect 401 {"detail":"invalid credentials"} -- the same answer an
-#    unknown username gets. A 501 here means TITAN_AUTH_MODE is clerk.
+#    unknown username gets. A 501 here means COLDOPS_AUTH_MODE is clerk.
 curl -s -X POST $API/api/v1/auth/token -H 'content-type: application/json' \
   -d '{"username":"nobody","passcode":"wrong-on-purpose"}'
 ```
@@ -308,7 +308,7 @@ Then sign in to the Vercel URL and confirm:
 
 ### What "deployed" does not mean
 
-- **Nothing sends.** `TITAN_PRODUCTION_SENDING_ENABLED` is false, and turning
+- **Nothing sends.** `COLDOPS_PRODUCTION_SENDING_ENABLED` is false, and turning
   it on requires the deliverability work in
   `docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` first.
 - **Follow-ups are scheduled, not composed.** `coldops.intelligence.sequencing`

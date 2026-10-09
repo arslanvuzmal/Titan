@@ -21,7 +21,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { api, login, TitanError, type Principal, type Workspace } from '@/lib/titan';
+import { api, login, TitanError, type Principal, type Workspace } from '@/lib/coldops';
 
 const STORAGE_KEY = 'titan.session';
 

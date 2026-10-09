@@ -60,7 +60,11 @@ async def heal_schedules_for(
             # gets its own wording. Reporting it as a restart would close the
             # ticket on a schedule that is still dead -- and the daily dedupe
             # would then suppress every later warning about it.
-            name = assessment.schedule_id.split("::", 1)[0].removeprefix("titan-")
+            name = (
+                assessment.schedule_id.split("::", 1)[0]
+                .removeprefix("coldops-")
+                .removeprefix("titan-")
+            )
             await record_notification(
                 session,
                 workspace_id=workspace_id,
@@ -85,7 +89,11 @@ async def heal_schedules_for(
             # The job name, not the full schedule id: the id carries a
             # workspace uuid that makes every title unreadable at a glance,
             # and the title is the part anybody actually sees.
-            name = assessment.schedule_id.split("::", 1)[0].removeprefix("titan-")
+            name = (
+                assessment.schedule_id.split("::", 1)[0]
+                .removeprefix("coldops-")
+                .removeprefix("titan-")
+            )
             await record_notification(
                 session,
                 workspace_id=workspace_id,
