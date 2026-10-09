@@ -9,7 +9,7 @@
 
 set -uo pipefail
 
-INSTALL_DIR="${TITAN_INSTALL_DIR:-/opt/titan}"
+INSTALL_DIR="${COLDOPS_INSTALL_DIR:-/opt/coldops}"
 cd "${INSTALL_DIR}" 2>/dev/null || { echo "no ${INSTALL_DIR}"; exit 1; }
 # --env-file for the same reason bootstrap-vps.sh gives: compose
 # interpolation does not read `env_file:`, only the shell or a .env beside
@@ -24,7 +24,7 @@ note() { printf '        %s\n' "$*"; }
 
 psql_q() { ${COMPOSE} exec -T postgres psql -U titan -d titan -t -A -c "$1" 2>/dev/null | tr -d '\r'; }
 
-echo "Titan post-migration verification"
+echo "ColdOps post-migration verification"
 echo
 
 # ---- containers ------------------------------------------------------------
@@ -70,13 +70,13 @@ else bad "no draft carries a sequence step -- follow-ups cannot advance"; fi
 # ---- secrets ---------------------------------------------------------------
 echo
 echo "credentials"
-MAILBOX_PATH="$(${COMPOSE} exec -T outbox-worker sh -c 'echo "$TITAN_MAILBOX_FILE"' 2>/dev/null | tr -d '\r')"
+MAILBOX_PATH="$(${COMPOSE} exec -T outbox-worker sh -c 'echo "$COLDOPS_MAILBOX_FILE"' 2>/dev/null | tr -d '\r')"
 if [ -z "${MAILBOX_PATH}" ]; then
-  note "TITAN_MAILBOX_FILE unset; single-mailbox mode via TITAN_SMTP_*"
+  note "COLDOPS_MAILBOX_FILE unset; single-mailbox mode via COLDOPS_SMTP_*"
 elif ${COMPOSE} exec -T outbox-worker sh -c "[ -r '${MAILBOX_PATH}' ]" 2>/dev/null; then
   ok "mailbox file readable at ${MAILBOX_PATH}"
 else
-  bad "TITAN_MAILBOX_FILE=${MAILBOX_PATH} is not readable -- every send will fail to authenticate"
+  bad "COLDOPS_MAILBOX_FILE=${MAILBOX_PATH} is not readable -- every send will fail to authenticate"
 fi
 
 # ---- schedules -------------------------------------------------------------
@@ -109,11 +109,12 @@ echo
 echo "outbound SMTP"
 SMTP_HOST="$(${COMPOSE} exec -T api python -c "
 import json, os
-p = os.environ.get('TITAN_MAILBOX_FILE')
+p = os.environ.get('COLDOPS_MAILBOX_FILE')
 d = json.load(open(p)) if p else {}
 mbs = d['mailboxes'] if isinstance(d, dict) and 'mailboxes' in d else (d if isinstance(d, list) else [])
 print(mbs[0]['smtp']['host'], mbs[0]['smtp']['port']) if mbs else print('')
-" 2>/dev/null | tr -d '')"
+" 2>/dev/null | tr -d '
+')"
 if [ -z "${SMTP_HOST}" ]; then
   note "no mailbox file to read an SMTP host from"
 else
