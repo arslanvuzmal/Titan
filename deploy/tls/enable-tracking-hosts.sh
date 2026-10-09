@@ -63,7 +63,7 @@ for HOST in $HOSTS; do
     # The :80 default server answers the challenge path for any name, so this
     # works before the host has a server block of its own.
     mkdir -p "$ACME/.well-known/acme-challenge"
-    TOKEN="titan-selftest-$$"
+    TOKEN="coldops-selftest-$$"
     printf 'ok' > "$ACME/.well-known/acme-challenge/$TOKEN"
     GOT=$(curl -fsS --max-time 20 "http://$HOST/.well-known/acme-challenge/$TOKEN" 2>/dev/null || true)
     rm -f "$ACME/.well-known/acme-challenge/$TOKEN"
@@ -90,7 +90,17 @@ for HOST in $HOSTS; do
 
     # The pixel is served for any token, signed or not, so a made-up one is a
     # fair test of the whole path without recording anything.
-    CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$HOST/o/selftest.gif" || echo 000)
+    #
+    # Retried, because a reload is asynchronous: for a moment after it the old
+    # workers still answer, with the old certificate, and curl refuses the
+    # name. Checking once, a second after the reload, removed a working block
+    # on 9 Oct 2026 for exactly that reason.
+    CODE=000
+    for _ in 1 2 3 4 5 6 7 8; do
+        sleep 2
+        CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$HOST/o/selftest.gif" || true)
+        [ "$CODE" = "200" ] && break
+    done
     if [ "$CODE" != "200" ]; then
         rm -f "$INSTALLED"
         docker exec deploy-nginx-1 nginx -s reload || true
