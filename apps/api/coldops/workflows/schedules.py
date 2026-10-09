@@ -59,6 +59,8 @@ from enum import StrEnum
 from typing import Any
 
 from coldops.db.enums import CampaignStatus
+from coldops.workflows.audit_pdf import DEFAULT_CRON as AUDIT_PDF_CRON
+from coldops.workflows.audit_pdf import audit_pdf_workflow_id
 from coldops.workflows.daily_report import DEFAULT_CRON as DAILY_REPORT_CRON
 from coldops.workflows.delivery_events import DEFAULT_CRON as POLL_CRON
 from coldops.workflows.delivery_events import delivery_event_poll_workflow_id
@@ -87,6 +89,7 @@ from coldops.workflows.types import (
     ProjectEventsInput,
     PullOptOutsInput,
     RampMailboxesInput,
+    RenderAuditPdfsInput,
     SweepStrandedInput,
     VerifySendersInput,
     WarmupRoundInput,
@@ -308,6 +311,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=ProjectEventsInput(workspace_id=ws),
             task_queue=task_queue,
             note="projects every outcome into one table, the history models learn from",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-audit-pdf::{ws}",
+            workflow="AuditPdfWorkflow",
+            workflow_id=audit_pdf_workflow_id(ws),
+            cron=AUDIT_PDF_CRON,
+            arg=RenderAuditPdfsInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="renders the one-page website check each first email carries",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

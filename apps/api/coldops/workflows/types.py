@@ -920,3 +920,20 @@ class ProjectEventsResult:
     inserted: int = 0
     by_source: tuple[tuple[str, int], ...] = ()
     unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class RenderAuditPdfsInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RenderAuditPdfsResult:
+    #: Written to disk, ready for the outbox worker to attach.
+    rendered: int = 0
+    #: Leads with nothing the evidence page would show: they go without a PDF.
+    skipped: int = 0
+    #: Rendered but over a page or size limit, so not saved.
+    refused: int = 0
+    detail: tuple[str, ...] = ()
+    unavailable: str | None = None

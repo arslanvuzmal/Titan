@@ -137,6 +137,8 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         # The event stream every model trains on. A projection nobody
         # scheduled would be a history that stops on the day it was deployed.
         "EventProjectionWorkflow",
+        # The personal PDF, rendered ahead of the first email that carries it.
+        "AuditPdfWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

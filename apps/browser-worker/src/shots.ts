@@ -58,9 +58,19 @@ export async function saveShot(dir: string, bytes: Buffer): Promise<string> {
   return key;
 }
 
-/** Delete screenshots not rewritten within the retention window. Returns the count. */
-export async function purgeOld(dir: string, days: number, now = Date.now()): Promise<number> {
-  const root = path.join(dir, 'shots');
+/**
+ * Delete files not rewritten within the retention window. Returns the count.
+ *
+ * `shots/` is fanned out one level; `pdfs/` is flat. Both are walked the same
+ * way, one level of buckets or files at a time.
+ */
+export async function purgeOld(
+  dir: string,
+  days: number,
+  now = Date.now(),
+  sub: 'shots' | 'pdfs' = 'shots',
+): Promise<number> {
+  const root = path.join(dir, sub);
   const cutoff = now - days * 24 * 3600 * 1000;
   let removed = 0;
   let buckets: string[];
@@ -75,7 +85,8 @@ export async function purgeOld(dir: string, days: number, now = Date.now()): Pro
     try {
       files = await fs.readdir(folder);
     } catch {
-      continue;
+      // A flat directory: the entry is itself a file.
+      files = [''];
     }
     for (const file of files) {
       const full = path.join(folder, file);

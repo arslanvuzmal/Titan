@@ -89,7 +89,7 @@ from coldops.delivery.providers.base import (
     SendResult,
 )
 from coldops.delivery.suppression import is_suppressed, suppress
-from coldops.intelligence import domain_health
+from coldops.intelligence import audit_pdf, domain_health
 from coldops.intelligence.domain_health import DomainHealth, DomainWindow
 from coldops.intelligence.greeting import retimed_pair
 from coldops.intelligence.message_validator import (
@@ -251,7 +251,14 @@ def carries_one_pager(message_id: uuid.UUID, percent: int) -> bool:
     return (int.from_bytes(digest[:4], "big") % 100) < percent
 
 
-def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
+def with_one_pager(
+    email: OutboundEmail,
+    path: str | None,
+    *,
+    filename: str | None = None,
+    note: str = ONE_PAGER_NOTE,
+    max_bytes: int | None = None,
+) -> OutboundEmail:
     """Attach the one-page brief, and mention it in the body.
 
     Both, or neither. The words are written at compose time and the file is
@@ -273,9 +280,12 @@ def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
     if not content:
         logger.warning("one-pager not attached: %s is empty", path)
         return email
+    if max_bytes is not None and len(content) > max_bytes:
+        logger.warning("attachment not attached: %s is %d bytes", path, len(content))
+        return email
 
     attachment = Attachment(
-        filename=document.name,
+        filename=filename or document.name,
         content=content,
         maintype="application",
         subtype="pdf",
@@ -283,10 +293,10 @@ def with_one_pager(email: OutboundEmail, path: str | None) -> OutboundEmail:
     # Above the signature, at the end of the pitch: the reader has finished the
     # argument and this is the offer of more, which is where a supporting
     # document belongs. Below the signature it reads as a footer artefact.
-    text_body = _insert_before_signature(email.text_body, ONE_PAGER_NOTE, email.from_name)
+    text_body = _insert_before_signature(email.text_body, note, email.from_name)
     html_body = email.html_body
     if html_body:
-        block = f'\n    <p style="margin:0 0 16px;">{_html_escape(ONE_PAGER_NOTE)}</p>\n'
+        block = f'\n    <p style="margin:0 0 16px;">{_html_escape(note)}</p>\n'
         marker = '<p style="margin:24px 0 0;color:#444;">'
         html_body = (
             html_body.replace(marker, block + "    " + marker, 1)
@@ -809,7 +819,26 @@ class OutboxWorker:
         # The brief, for the share of messages in the trial. Before the
         # greeting repair so the greeting is decided on the body that is
         # actually going out.
-        if carries_one_pager(row.id, self._settings.one_pager_sample_percent):
+        #
+        # With the personal PDF switched on, a first email carries the
+        # recipient's own one-page check instead, and nothing else does: a
+        # follow-up refers back to it. A PDF that is not rendered yet means the
+        # email goes without one -- and without the sentence announcing it.
+        if self._settings.audit_pdf_enabled:
+            first = await self._first_contact(session, row)
+            if first is not None:
+                business_name, domain = first
+                email = with_one_pager(
+                    email,
+                    str(
+                        audit_pdf.pdf_path(self._settings.artifact_dir, row.draft_id)
+                        or ""
+                    ),
+                    filename=audit_pdf.attachment_filename(business_name),
+                    note=audit_pdf.attachment_note(domain),
+                    max_bytes=audit_pdf.MAX_PDF_BYTES,
+                )
+        elif carries_one_pager(row.id, self._settings.one_pager_sample_percent):
             email = with_one_pager(email, self._settings.one_pager_attachment_path)
         # Last, and after the footer repairs, so the greeting is decided on the
         # body that is actually going out.
@@ -1789,6 +1818,38 @@ class OutboxWorker:
             if when is not None
         ]
         return max(candidates) if candidates else None
+
+    @staticmethod
+    async def _first_contact(
+        session: AsyncSession, row: OutboxMessage
+    ) -> tuple[str | None, str | None] | None:
+        """The business's name and domain, if nothing has ever been sent to this lead.
+
+        "First" is read from what was actually delivered, not from the draft's
+        step number: a lead whose opener bounced off one address and is now
+        being written to at another has still never received anything.
+        """
+        found = (
+            await session.execute(
+                text(
+                    """
+                    SELECT o.display_name, o.canonical_domain,
+                           EXISTS (
+                               SELECT 1 FROM messages m
+                                WHERE m.workspace_id = :ws AND m.lead_id = l.id
+                                  AND m.sent_at IS NOT NULL AND m.id <> :message
+                           ) AS contacted
+                      FROM leads l
+                      JOIN organizations o ON o.id = l.organization_id
+                     WHERE l.id = :lead AND l.workspace_id = :ws
+                    """
+                ),
+                {"ws": row.workspace_id, "lead": row.lead_id, "message": row.message_id},
+            )
+        ).first()
+        if found is None or found.contacted:
+            return None
+        return found.display_name, found.canonical_domain
 
     @staticmethod
     def _recipient_local_time(ctx: SendContext) -> dt.datetime | None:

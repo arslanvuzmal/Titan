@@ -667,6 +667,13 @@ class Settings(BaseSettings):
     #: so this is set knowingly or not at all. ``delivery/deliverability.py``
     #: bounds what may go out -- one file, PDF, under 400 KB, never executable
     #: content whatever it is named.
+    #: The personal PDF -- a one-page check of the recipient's own site, with
+    #: their screenshots -- attached to first emails only. Off by default:
+    #: rendering needs the browser worker and the artifact volume, and the
+    #: outbox worker needs that volume mounted to attach it. When on, it
+    #: replaces the generic one-pager for first contacts; follow-ups carry no
+    #: attachment. See coldops.intelligence.audit_pdf.
+    audit_pdf_enabled: bool = False
     one_pager_attachment_path: str | None = None
 
     #: What share of messages carry the one-page brief, 0-100.

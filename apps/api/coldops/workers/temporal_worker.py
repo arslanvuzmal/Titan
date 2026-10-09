@@ -21,6 +21,7 @@ import signal
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from coldops.activities import audit_pdf as audit_pdf_activities
 from coldops.activities import claim_verification
 from coldops.activities import daily_report as daily_report_activities
 from coldops.activities import delivery_events as delivery_event_activities
@@ -50,6 +51,7 @@ from coldops.config import get_settings
 from coldops.db.session import dispose_engine
 from coldops.observability.logging import configure_logging
 from coldops.runtime import configure_event_loop
+from coldops.workflows.audit_pdf import AuditPdfWorkflow
 from coldops.workflows.daily_report import DailyReportWorkflow
 from coldops.workflows.delivery_events import DeliveryEventPollWorkflow
 from coldops.workflows.events import EventProjectionWorkflow
@@ -114,6 +116,7 @@ async def main() -> None:
             SupervisorWorkflow,
             DailyReportWorkflow,
             EventProjectionWorkflow,
+            AuditPdfWorkflow,
         ],
         activities=[
             research_activities.close_research_run,
@@ -184,6 +187,9 @@ async def main() -> None:
             # The event stream: bounded INSERT ... SELECTs, and the stream is
             # most worth reading exactly when the research lane is saturated.
             *event_activities.ALL_EVENT_ACTIVITIES,
+            # The personal PDF for each first email: a browser-worker call per
+            # draft, ahead of the outbox worker, which never waits for it.
+            *audit_pdf_activities.ALL_AUDIT_PDF_ACTIVITIES,
         ],
         max_concurrent_activities=2,
         graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),

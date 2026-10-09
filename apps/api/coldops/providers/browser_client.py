@@ -16,7 +16,9 @@ Two checks bracket the call:
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -106,6 +108,23 @@ class RecheckResult:
     @property
     def is_conclusive(self) -> bool:
         return self.status is not None
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedPdf:
+    """What the worker did with one personal PDF.
+
+    ``key`` is set only when the file was written. A document over its page or
+    size limit is rendered and then refused (``refused`` says why), so no file
+    exists for the outbox worker to find and attach.
+    """
+
+    key: str | None = None
+    bytes: int = 0
+    pages: int = 0
+    refused: str | None = None
+    error: str | None = None
+    pdf: bytes | None = None
 
 
 class BrowserWorkerClient:
@@ -318,6 +337,56 @@ class BrowserWorkerClient:
                 raise UrlBlockedError(
                     f"worker returned a page from a disallowed origin: {page.final_url}"
                 )
+
+    async def render_pdf(
+        self,
+        *,
+        draft_id: uuid.UUID,
+        html: str,
+        max_bytes: int | None = None,
+        max_pages: int | None = None,
+        return_pdf: bool = False,
+        save: bool = True,
+    ) -> RenderedPdf:
+        """Render one personal PDF in the worker's Chromium and save it there.
+
+        Fetches nothing: the HTML is sent whole, its images are screenshot keys
+        the worker resolves from its own volume, and the page has every
+        network request refused. Never raises for a worker problem -- a PDF is
+        not worth failing a sweep over, and the email goes without one.
+        """
+        async with _lanes(self._settings):
+            try:
+                http = await self._http()
+                response = await http.post(
+                    "/render-pdf",
+                    json={
+                        "draft_id": str(draft_id),
+                        "html": html,
+                        "max_bytes": max_bytes,
+                        "max_pages": max_pages,
+                        "return_pdf": return_pdf,
+                        "save": save,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                return RenderedPdf(error=f"{type(exc).__name__}: {str(exc)[:160]}")
+        if response.status_code != 200:
+            return RenderedPdf(
+                error=f"HTTP {response.status_code}: {response.text[:160]}"
+            )
+        try:
+            body = response.json()
+        except Exception as exc:
+            return RenderedPdf(error=f"unparseable response: {exc}")
+        encoded = body.get("pdf_base64")
+        return RenderedPdf(
+            key=body.get("key"),
+            bytes=int(body.get("bytes") or 0),
+            pages=int(body.get("pages") or 0),
+            refused=body.get("refused"),
+            pdf=base64.b64decode(encoded) if encoded else None,
+        )
 
     async def health_check(self) -> tuple[bool, str]:
         try:

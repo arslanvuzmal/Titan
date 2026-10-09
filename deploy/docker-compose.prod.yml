@@ -114,6 +114,7 @@ services:
     environment:
       TITAN_SENDER_HOST_ID: ${TITAN_SENDER_HOST_ID:?set TITAN_SENDER_HOST_ID, e.g. vps-hetzner-cx33}
       TITAN_SENDER_HOST_LABEL: ${TITAN_SENDER_HOST_LABEL:-}
+      TITAN_ARTIFACT_DIR: /data/artifacts
     command: ["python", "-m", "coldops.workers.outbox"]
     # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
@@ -134,6 +135,11 @@ services:
       # attachment it did not carry. What it cost was silence -- one warning
       # line per send, in a log nobody reads, for nine days.
       - ../docs/one-pager:/run/one-pager:ro
+      # Read-only: the personal PDF for each first email, rendered ahead of
+      # time by the browser worker into pdfs/<draft-id>.pdf on this volume.
+      # Without this mount the outbox worker finds no file and sends every
+      # first email without one -- correctly, and silently.
+      - artifacts:/data/artifacts:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -204,8 +210,12 @@ services:
       # Rotated Microsoft refresh tokens: the placement round and warm-up read
       # Outlook inboxes from here, and keep each renewed token for next time.
       - oauth_tokens:/data/oauth
+      # Read-only: the PDF sweep checks which first emails already have their
+      # personal PDF before asking the browser worker to render one.
+      - artifacts:/data/artifacts:ro
     environment:
       TITAN_OAUTH_TOKEN_DIR: /data/oauth
+      TITAN_ARTIFACT_DIR: /data/artifacts
     depends_on:
       migrate:
         condition: service_completed_successfully

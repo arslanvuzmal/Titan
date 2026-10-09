@@ -13,6 +13,8 @@ import { discoverOnMaps } from './mapsDiscovery.js';
 import type { ResearchRequest } from './contract.js';
 import { WORKER_VERSION } from './contract.js';
 import { artifactDir, purgeOld, retentionDays } from './shots.js';
+import { chromium } from 'playwright';
+import { renderPdf } from './pdf.js';
 
 const PORT = Number(process.env.BROWSER_WORKER_PORT ?? 8800);
 const TOKEN = process.env.BROWSER_WORKER_TOKEN ?? '';
@@ -101,8 +103,12 @@ const server = http.createServer(async (req, res) => {
   // cannot do is return more than sixty results for a query. See
   // mapsDiscovery.ts for the robots boundary this is held inside.
   const isDiscover = req.method === 'POST' && url.pathname === '/discover';
+  // The personal PDF attached to a first email. No URL is fetched: the HTML
+  // arrives whole, images come from this worker's own screenshot volume, and
+  // every network request the page makes is refused. See pdf.ts.
+  const isRenderPdf = req.method === 'POST' && url.pathname === '/render-pdf';
 
-  if (!isResearch && !isRecheck && !isDiscover) {
+  if (!isResearch && !isRecheck && !isDiscover && !isRenderPdf) {
     return send(res, 404, { error: 'not_found' });
   }
 
@@ -121,6 +127,40 @@ const server = http.createServer(async (req, res) => {
   inFlight += 1;
   try {
     const body = JSON.parse(await readBody(req));
+    if (isRenderPdf) {
+      const draftId = typeof body?.draft_id === 'string' ? body.draft_id : '';
+      const html = typeof body?.html === 'string' ? body.html : '';
+      if (!draftId || !html) throw new Error('draft_id and html are required');
+      const launchOptions: any = { args: ['--disable-dev-shm-usage', '--no-zygote'] };
+      if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+        launchOptions.executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+      }
+      const browser = await chromium.launch(launchOptions);
+      try {
+        const out = await renderPdf(
+          browser,
+          {
+            draftId,
+            html,
+            maxBytes: typeof body?.max_bytes === 'number' ? body.max_bytes : undefined,
+            maxPages: typeof body?.max_pages === 'number' ? body.max_pages : undefined,
+          },
+          // A preview is returned, never saved where the outbox worker looks.
+          body?.save === false ? null : artifactDir(),
+        );
+        send(res, 200, {
+          key: out.key,
+          refused: out.refused,
+          bytes: out.bytes,
+          pages: out.pages,
+          // Only on request: the API reads the file from the shared volume.
+          pdf_base64: body?.return_pdf === true ? out.pdf.toString('base64') : undefined,
+        });
+      } finally {
+        await browser.close();
+      }
+      return;
+    }
     if (isRecheck) {
       const target = typeof body?.url === 'string' ? body.url : '';
       if (!target) throw new Error('url is required');
@@ -191,6 +231,8 @@ async function sweepShots(): Promise<void> {
   try {
     const removed = await purgeOld(dir, retentionDays());
     if (removed > 0) console.log(JSON.stringify({ event: 'shots_purged', removed }));
+    const pdfs = await purgeOld(dir, retentionDays(), Date.now(), 'pdfs');
+    if (pdfs > 0) console.log(JSON.stringify({ event: 'pdfs_purged', removed: pdfs }));
   } catch (err) {
     console.error(JSON.stringify({ event: 'shots_purge_failed', error: String(err) }));
   }
