@@ -36,6 +36,16 @@ class DeskItemOut(BaseModel):
     body: str
     ready_to_send: bool
     status: str
+    labelled_as: str | None = None
+
+
+class ReplyLabel(BaseModel):
+    reply_class: str = Field(min_length=1, max_length=64)
+
+
+class ReplyLabelOut(BaseModel):
+    inbound_id: uuid.UUID
+    reply_class: str
 
 
 class ReplyEdit(BaseModel):
@@ -110,6 +120,27 @@ async def send_reply(
         except reply_desk.DeskError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
         return ReplySentOut(outbox_id=outbox.id, status=outbox.status.value)
+
+
+@router.post("/{draft_id}/label", response_model=ReplyLabelOut, status_code=201)
+async def label_reply(
+    draft_id: uuid.UUID,
+    payload: ReplyLabel,
+    principal: Principal = Depends(require("approval:decide")),
+) -> ReplyLabelOut:
+    """Say what the person actually wanted. Grades the reply reader; changes nothing else."""
+    async with workspace_unit_of_work(principal.workspace_id) as session:
+        try:
+            inbound_id = await reply_desk.label(
+                session,
+                workspace_id=principal.workspace_id,
+                draft_id=draft_id,
+                reply_class=payload.reply_class,
+                labelled_by=str(principal.user_id),
+            )
+        except reply_desk.DeskError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    return ReplyLabelOut(inbound_id=inbound_id, reply_class=payload.reply_class)
 
 
 __all__ = ["router"]

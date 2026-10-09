@@ -45,6 +45,17 @@ const READING: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | '
   unknown: { label: 'unclear', tone: 'neutral' },
 };
 
+/**
+ * Every class the operator can choose when saying what a reply really meant.
+ * READING covers the ones the rules usually produce; these add the rest.
+ */
+const VERDICTS: { value: string; label: string }[] = [
+  ...Object.entries(READING).map(([value, r]) => ({ value, label: r.label })),
+  { value: 'not_interested', label: 'not interested' },
+  { value: 'unsubscribe', label: 'asked to be removed' },
+  { value: 'complaint', label: 'complained' },
+];
+
 const BLANK = '[TODO:';
 
 function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) {
@@ -55,6 +66,7 @@ function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [verdict, setVerdict] = useState<string | null>(reply.labelled_as ?? null);
 
   const edited = subject !== reply.subject || body !== reply.body;
   const hasBlank = body.includes(BLANK) || subject.includes(BLANK);
@@ -76,6 +88,15 @@ function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) 
       setBusy(false);
     }
   };
+
+  // The operator's reading of their message. Grades the reply reader; it does
+  // not change the answer, the lead, or what gets sent.
+  const markVerdict = (value: string) =>
+    run(async () => {
+      if (!token || !value) return;
+      await api.labelReply(token, reply.draft_id, value);
+      setVerdict(value);
+    });
 
   const save = () =>
     run(async () => {
@@ -127,6 +148,30 @@ function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) 
             Read as &ldquo;{reading.label}&rdquo; ({Math.round(reply.confidence * 100)}% sure) ·{' '}
             <LeadLink id={reply.lead_id}>open the lead</LeadLink>
           </p>
+          {canAct ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              <label htmlFor={`verdict-${reply.draft_id}`}>What did they actually want?</label>
+              <select
+                id={`verdict-${reply.draft_id}`}
+                value={verdict ?? ''}
+                disabled={busy}
+                onChange={(e) => markVerdict(e.target.value)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+              >
+                <option value="" disabled>
+                  choose…
+                </option>
+                {VERDICTS.map((v) => (
+                  <option key={v.value} value={v.value}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+              {verdict ? (
+                <span className="text-emerald-700">Saved. This is how the reply reader is graded.</span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div>

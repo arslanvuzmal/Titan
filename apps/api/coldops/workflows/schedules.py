@@ -70,6 +70,8 @@ from coldops.workflows.housekeeping import DEFAULT_CRON as HOUSEKEEPING_CRON
 from coldops.workflows.housekeeping import housekeeping_workflow_id
 from coldops.workflows.mailbox_ramp import DEFAULT_CRON as RAMP_CRON
 from coldops.workflows.mailbox_ramp import mailbox_ramp_workflow_id
+from coldops.workflows.ml import DEFAULT_CRON as ML_SHADOW_CRON
+from coldops.workflows.ml import ml_shadow_workflow_id
 from coldops.workflows.optouts import DEFAULT_CRON as OPTOUT_CRON
 from coldops.workflows.optouts import pull_opt_outs_workflow_id
 from coldops.workflows.orchestrator import orchestrator_workflow_id
@@ -84,6 +86,7 @@ from coldops.workflows.types import (
     CaptureSenderHealthInput,
     DailyReportInput,
     HealSchedulesInput,
+    MlShadowInput,
     PlacementRoundInput,
     PollDeliveryEventsInput,
     ProjectEventsInput,
@@ -320,6 +323,15 @@ def plan_schedules(workspace_id: uuid.UUID, *, task_queue: str) -> list[Schedule
             arg=RenderAuditPdfsInput(workspace_id=ws),
             task_queue=task_queue,
             note="renders the one-page website check each first email carries",
+        ),
+        ScheduledJob(
+            schedule_id=f"titan-ml-shadow::{ws}",
+            workflow="MlShadowWorkflow",
+            workflow_id=ml_shadow_workflow_id(ws),
+            cron=ML_SHADOW_CRON,
+            arg=MlShadowInput(workspace_id=ws),
+            task_queue=task_queue,
+            note="lets models in shadow read the latest replies; records, never acts",
         ),
         ScheduledJob(
             schedule_id=f"titan-sender-verification::{ws}",

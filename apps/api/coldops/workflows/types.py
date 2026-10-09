@@ -937,3 +937,18 @@ class RenderAuditPdfsResult:
     refused: int = 0
     detail: tuple[str, ...] = ()
     unavailable: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class MlShadowInput:
+    workspace_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class MlShadowResult:
+    #: Rules verdicts newly copied into the shadow log.
+    rules_recorded: int = 0
+    #: Replies the LLM reader read this round.
+    llm_read: int = 0
+    failures: tuple[str, ...] = ()
+    unavailable: str | None = None

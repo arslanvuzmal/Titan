@@ -139,6 +139,8 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
         "EventProjectionWorkflow",
         # The personal PDF, rendered ahead of the first email that carries it.
         "AuditPdfWorkflow",
+        # Models in shadow, reading replies beside the rules. Records only.
+        "MlShadowWorkflow",
     }
     assert all(j.task_queue == QUEUE for j in jobs)
 

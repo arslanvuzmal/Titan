@@ -318,6 +318,8 @@ export interface DeskReply {
   subject: string;
   body: string;
   ready_to_send: boolean;
+  /** What the operator said they actually wanted, once they have said. */
+  labelled_as?: string | null;
   status: string;
 }
 
@@ -747,6 +749,12 @@ export const api = {
       token: t,
       method: 'POST',
       body: { draft_version: draftVersion, subject, body },
+    }),
+  labelReply: (t: string, draftId: string, replyClass: string) =>
+    call<{ inbound_id: string; reply_class: string }>(`/api/v1/reply-desk/${draftId}/label`, {
+      token: t,
+      method: 'POST',
+      body: { reply_class: replyClass },
     }),
   sendReply: (t: string, draftId: string, draftVersion: number) =>
     call<{ outbox_id: string; status: string }>(`/api/v1/reply-desk/${draftId}/send`, {

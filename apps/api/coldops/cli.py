@@ -34,6 +34,7 @@ from pydantic_core import PydanticUndefined
 
 from coldops import __version__
 from coldops.cli_events import add_events_parser
+from coldops.cli_ml import add_ml_parser
 from coldops.cli_pdf import add_pdf_parser
 from coldops.cli_placement import add_placement_parser
 from coldops.config import Settings, get_settings
@@ -2484,6 +2485,7 @@ def main() -> int:
     add_placement_parser(sub)
     add_events_parser(sub)
     add_pdf_parser(sub)
+    add_ml_parser(sub)
 
     verify_parser = sub.add_parser(
         "verify-contacts",

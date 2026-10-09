@@ -28,6 +28,7 @@ from coldops.activities import delivery_events as delivery_event_activities
 from coldops.activities import discovery as discovery_activities
 from coldops.activities import events as event_activities
 from coldops.activities import mailbox_ramp as mailbox_ramp_activities
+from coldops.activities import ml as ml_activities
 from coldops.activities import optouts as optout_activities
 from coldops.activities import orchestration as orchestration_activities
 from coldops.activities import pipeline as pipeline_activities
@@ -57,6 +58,7 @@ from coldops.workflows.delivery_events import DeliveryEventPollWorkflow
 from coldops.workflows.events import EventProjectionWorkflow
 from coldops.workflows.housekeeping import HousekeepingWorkflow
 from coldops.workflows.mailbox_ramp import MailboxRampWorkflow
+from coldops.workflows.ml import MlShadowWorkflow
 from coldops.workflows.optouts import PullOptOutsWorkflow
 from coldops.workflows.orchestrator import CampaignOrchestratorWorkflow
 from coldops.workflows.placement import PlacementRoundWorkflow
@@ -117,6 +119,7 @@ async def main() -> None:
             DailyReportWorkflow,
             EventProjectionWorkflow,
             AuditPdfWorkflow,
+            MlShadowWorkflow,
         ],
         activities=[
             research_activities.close_research_run,
@@ -190,6 +193,8 @@ async def main() -> None:
             # The personal PDF for each first email: a browser-worker call per
             # draft, ahead of the outbox worker, which never waits for it.
             *audit_pdf_activities.ALL_AUDIT_PDF_ACTIVITIES,
+            # Models in shadow reading what arrived. Records predictions only.
+            *ml_activities.ALL_ML_ACTIVITIES,
         ],
         max_concurrent_activities=2,
         graceful_shutdown_timeout=__import__("datetime").timedelta(seconds=30),

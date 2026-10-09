@@ -29,6 +29,7 @@ readings said. Suppression is still checked twice, here and at send.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import uuid
 from dataclasses import dataclass
@@ -87,6 +88,10 @@ class DeskItem:
     body: str
     ready_to_send: bool
     status: str
+    #: Their message, so the operator's verdict on it can be recorded.
+    inbound_id: uuid.UUID | None = None
+    #: What the operator said they actually wanted, if they have said.
+    labelled_as: str | None = None
 
 
 async def waiting(
@@ -136,9 +141,85 @@ async def waiting(
                 ready_to_send=bool(draft.validation_passed)
                 or bool(report.get("ready_to_send")),
                 status=draft.status.value,
+                inbound_id=inbound.id,
             )
         )
+    if items:
+        labels = await latest_labels(
+            session, workspace_id=workspace_id, inbound_ids=[i.inbound_id for i in items]
+        )
+        items = [
+            dataclasses.replace(i, labelled_as=labels.get(i.inbound_id)) for i in items
+        ]
     return items
+
+
+async def latest_labels(
+    session: AsyncSession, *, workspace_id: uuid.UUID, inbound_ids: list[uuid.UUID | None]
+) -> dict[uuid.UUID, str]:
+    """The operator's latest verdict on each reply, where there is one."""
+    from sqlalchemy import text
+
+    ids = [str(i) for i in inbound_ids if i is not None]
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT DISTINCT ON (subject_id) subject_id, label
+                  FROM ml_labels
+                 WHERE workspace_id = :ws AND task = 'reply_reader'
+                   AND subject_kind = 'inbound_message'
+                   AND subject_id = ANY(CAST(:ids AS uuid[]))
+                 ORDER BY subject_id, created_at DESC, id DESC
+                """
+            ),
+            {"ws": workspace_id, "ids": ids},
+        )
+    ).all()
+    return {r.subject_id: r.label for r in rows}
+
+
+async def label(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    reply_class: str,
+    labelled_by: str,
+) -> uuid.UUID:
+    """Record what the person actually wanted. Grades the reply reader; changes nothing else.
+
+    Deliberately separate from editing and sending: the verdict is about their
+    message, not about the answer, and a label that silently re-routed a lead
+    would make every past grade a lie about what the system did.
+    """
+    from coldops.ml import registry, reply_reader
+
+    if reply_class not in reply_reader.READER_CLASSES:
+        raise DeskError(f"{reply_class!r} is not one of the reply classes")
+    inbound_id = (
+        await session.execute(
+            select(ReplyClassification.inbound_message_id).where(
+                ReplyClassification.workspace_id == workspace_id,
+                ReplyClassification.suggested_reply_draft_id == draft_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if inbound_id is None:
+        raise DeskError("that reply is not on the desk")
+    await registry.record_label(
+        session,
+        workspace_id=workspace_id,
+        task=reply_reader.NAME,
+        subject_kind=reply_reader.SUBJECT,
+        subject_id=inbound_id,
+        label=reply_class,
+        source="operator",
+        created_by=labelled_by,
+    )
+    return inbound_id
 
 
 def check_reply_text(subject: str, body: str) -> None:

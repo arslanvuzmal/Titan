@@ -674,6 +674,10 @@ class Settings(BaseSettings):
     #: replaces the generic one-pager for first contacts; follow-ups carry no
     #: attachment. See coldops.intelligence.audit_pdf.
     audit_pdf_enabled: bool = False
+    #: The LLM reply reader, in shadow: it reads each human reply and its
+    #: verdict is kept beside the rules' for grading. It decides nothing. Off
+    #: by default because it spends model calls (on the extraction route).
+    ml_reply_reader_enabled: bool = False
     one_pager_attachment_path: str | None = None
 
     #: What share of messages carry the one-page brief, 0-100.
