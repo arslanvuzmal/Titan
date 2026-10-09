@@ -1,0 +1,906 @@
+"""Finding businesses to research.
+
+The stage that was missing. :mod:`coldops.providers.places` has been able to
+search Google since the first release and was called only by ``coldops/seed.py``,
+a one-shot developer script -- so nothing in the running system could create a
+lead, and every campaign worked a pool somebody had loaded by hand. The
+planner's ``NO_WORK_AVAILABLE`` verdict says as much in its own notification
+text: *"usually this means discovery has run dry"*.
+
+Three properties this activity is built around.
+
+**It costs real money.** Places bills per request, per field mask. So the spend
+is bounded by the campaign's own ``research_budget_usd``, counted from midnight
+UTC -- the same day boundary the send quota uses, because two components
+disagreeing about where "today" starts is how a limit gets silently exceeded.
+Every run writes what it spent to ``lead_sources`` whether it admitted anything
+or not.
+
+**It must not re-add somebody who opted out.** The suppression model says so
+explicitly: entries are not foreign-keyed to contacts precisely so that erasing
+a contact cannot resurrect them here. Domains are checked before the crawl is
+paid for, not only at the send gate.
+
+**Re-running it changes nothing.** Idempotent on the key the workflow supplies,
+recorded in ``lead_sources.query_parameters``. A retry after a partial failure
+finds its own ledger row and returns what the first attempt did, rather than
+running a second billable search.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import logging
+import uuid
+
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from temporalio import activity
+
+from coldops.config import get_settings
+from coldops.db.enums import Industry, LeadStatus
+from coldops.db.models import (
+    Campaign,
+    CampaignPolicy,
+    Lead,
+    LeadSource,
+    Organization,
+    OrganizationDomain,
+    OrganizationLocation,
+)
+from coldops.db.models.compliance import SuppressionEntry
+from coldops.db.session import workspace_session, workspace_unit_of_work
+from coldops.delivery.phone import strip_formatting
+from coldops.intelligence import territories, verticals
+from coldops.intelligence.discovery import (
+    MAX_RESULTS_PER_SEARCH,
+    admit_all,
+    build_query,
+    targeting_blockers,
+)
+from coldops.notify.operator import NotificationKind, record_notification
+from coldops.policy.subregions import subregion_from_longitude, timezone_for
+from coldops.providers.places import (
+    MAX_PAGES,
+    DiscoveredBusiness,
+    DiscoveryResult,
+    GooglePlacesProvider,
+    PlacesError,
+)
+from coldops.workflows.types import DiscoverActivityInput, DiscoverActivityResult
+
+logger = logging.getLogger(__name__)
+
+#: Ledger kind for rows this activity writes. Matches what ``seed.py`` uses, so
+#: a workspace seeded by hand and one discovered automatically read the same.
+SOURCE_KIND = "google_places"
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+#: How many recent runs of the same query to judge exhaustion on.
+#:
+#: One run is noise -- Places returns a slightly different slice each time, so a
+#: single lucky record would reprieve a territory that has nothing left.
+EXHAUSTION_WINDOW_RUNS = 3
+
+#: Records the window must have returned before the rate means anything.
+MIN_RETURNED_TO_JUDGE = 30
+
+#: Share of returned records that must be new for the ground to be worth
+#: re-asking.
+#:
+#: The rule used to be "admitted nothing at all", and a single new record kept a
+#: query alive for ever. Measured on the live workspace: "dentists in Manchester
+#: UK" ran **69 times**, returned 1,676 records and deduplicated 1,562 of them
+#: -- about one and a half new businesses per run, at 3.2 cents a run, while 92
+#: other territories in the catalogue had never been searched once. Across all
+#: queries: $53.98 spent, and the eleven most-repeated account for almost all of
+#: it.
+#:
+#: Five per cent. Below that a query is returning the same twenty-five
+#: businesses it returned yesterday, and the money is better spent on ground
+#: nobody has looked at.
+MIN_ADMIT_RATE = 0.05
+
+#: How long a query asked at full depth rests before it may be asked again.
+#:
+#: Every search now asks for all three pages Places will give (60 results) the
+#: first time, instead of page one -- twenty businesses -- every cycle until the
+#: rate rule above retired it. Page one asked three times is three billed
+#: requests for roughly the same twenty businesses; pages one to three asked
+#: once is three billed requests for sixty different ones. After that the
+#: answer does not change for weeks: a city does not grow a new set of dentists
+#: between Tuesday and Thursday. Thirty days, then it may be asked again.
+FULL_DEPTH_REST = dt.timedelta(days=30)
+
+
+async def _exhausted_geographies(
+    session: AsyncSession, *, campaign_id: uuid.UUID, business_type: str
+) -> set[str]:
+    """Query names whose most recent search returned nothing new.
+
+    A territory counts as spent when its last run **found results and admitted
+    none of them**. Read from the counters rather than from the refusal reasons:
+    a real run returns forty raw records of which twenty-five are already known
+    and the rest fail the quality bar, so testing `already_known >= returned`
+    never fires. Observed on live data, where every campaign reported healthy
+    while the system logged seventeen exhaustion alerts the same day.
+
+    Either way the conclusion is the same -- the query found nothing worth
+    having, and asking it again returns the same nothing. A run that found *no*
+    results at all is left alone: that is usually a query too narrow rather than
+    ground worked out, and it is worth retrying.
+
+    Computed, never stored. The alternative is a column marking a geography
+    exhausted, which would keep saying so after the ground refilled and would
+    have to be cleared by hand.
+
+    ``label`` holds the whole query -- "dentists in Liverpool UK" -- so the
+    geography is recovered by removing the business type this campaign searches
+    with. Splitting on " in " instead would be one business type containing the
+    word away from silently matching nothing, which is how the first version of
+    this failed against real data: every campaign reported healthy while the
+    system logged seventeen exhaustion alerts.
+    """
+    prefix = f"{business_type.strip()} in ".casefold()
+    rows = (
+        await session.execute(
+            select(
+                LeadSource.label,
+                LeadSource.records_returned,
+                LeadSource.records_deduplicated,
+                LeadSource.query_parameters,
+                LeadSource.created_at,
+            )
+            .where(
+                LeadSource.campaign_id == campaign_id,
+                LeadSource.kind == SOURCE_KIND,
+                # This business type only. Without it the rows of every *other*
+                # vertical this campaign has searched come back too, and since
+                # their labels do not carry this prefix they were stored whole
+                # -- "dentists in aberdeen uk" as a geography. Twenty of those
+                # against a twenty-territory region read as a fully worked-out
+                # vertical, which is how a campaign that had searched one of
+                # its ten reported all ten spent.
+                LeadSource.label.ilike(f"{business_type.strip()} in %"),
+            )
+            .order_by(LeadSource.created_at.desc())
+        )
+    ).all()
+
+    # The most recent few runs per query text, not just the last one: a
+    # geography that yielded nothing in March and everything in August is not
+    # exhausted, but one judged on a single run is judged on noise.
+    recent: dict[str, list[tuple[int, int]]] = {}
+    resting: set[str] = set()
+    rest_since = _now() - FULL_DEPTH_REST
+    for label, returned, deduped, parameters, created_at in rows:
+        key = (label or "").strip().casefold()
+        # Belt and braces beside the SQL filter: a label that does not carry
+        # this prefix is a different search and says nothing about this one.
+        # Storing it whole is what produced the geographies-that-are-not-
+        # geographies above, so it is dropped rather than kept.
+        if not key or not key.startswith(prefix):
+            continue
+        # Rows arrive newest first, so the first row seen for a key is its most
+        # recent run. Asked at full depth inside the rest window: there is
+        # nothing more to get from it yet, whatever it returned.
+        if (
+            key not in recent
+            and (parameters or {}).get("full_depth")
+            and created_at is not None
+            and created_at >= rest_since
+        ):
+            resting.add(key)
+        window = recent.setdefault(key, [])
+        if len(window) < EXHAUSTION_WINDOW_RUNS:
+            window.append((int(returned or 0), int(deduped or 0)))
+
+    spent: set[str] = {key.removeprefix(prefix).strip() for key in resting}
+    for key, window in recent.items():
+        returned = sum(r for r, _ in window)
+        admitted = sum(r - d for r, d in window)
+        if returned < MIN_RETURNED_TO_JUDGE:
+            # Too little to say. Not the same as worked out, and retiring a
+            # territory on one thin run would abandon ground nobody searched.
+            continue
+        if admitted / returned > MIN_ADMIT_RATE:
+            continue
+        spent.add(key.removeprefix(prefix).strip())
+    return spent
+
+
+async def places_requests_used(
+    session: AsyncSession, *, workspace_id: uuid.UUID, now: dt.datetime
+) -> tuple[int, int]:
+    """Billed Places requests this calendar month and this UTC day.
+
+    Counted from ``lead_sources``, which records every search: its
+    ``pages_fetched`` where it was stamped, one request where it was not
+    (every search costs at least one). Per workspace, as every raw query here
+    must be; the estate runs one real workspace, so this is the whole bill.
+    """
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  coalesce(sum(coalesce((query_parameters->>'pages_fetched')::int, 1)), 0)
+                    AS month,
+                  coalesce(sum(coalesce((query_parameters->>'pages_fetched')::int, 1))
+                    FILTER (WHERE created_at >= :day_start), 0) AS today
+                  FROM lead_sources
+                 WHERE workspace_id = :ws
+                   AND kind = :kind
+                   AND created_at >= :month_start
+                """
+            ),
+            {
+                "ws": workspace_id,
+                "kind": SOURCE_KIND,
+                "month_start": month_start,
+                "day_start": day_start,
+            },
+        )
+    ).one()
+    return int(row.month or 0), int(row.today or 0)
+
+
+def places_cap_refusal(
+    *, used_month: int, used_today: int, monthly_cap: int, daily_cap: int
+) -> str | None:
+    """Why a search may not run, or None. Room is needed for a full-depth search."""
+    if used_month + MAX_PAGES > monthly_cap:
+        return (
+            f"Places monthly cap reached: {used_month} of {monthly_cap} requests used "
+            "this month (Google's free allowance is 1,000)"
+        )
+    if used_today + MAX_PAGES > daily_cap:
+        return (
+            f"Places daily cap reached: {used_today} of {daily_cap} requests used today"
+        )
+    return None
+
+
+async def _exhausted_verticals(
+    session: AsyncSession,
+    *,
+    campaign_id: uuid.UUID,
+    industry: Industry | None,
+    reachable: int,
+) -> set[str]:
+    """Search terms with no territory left to try.
+
+    A term is spent when the number of territories it has worked out reaches
+    the number this campaign can reach at all. Anything less and there is still
+    somewhere to point it, which is the cheaper move.
+
+    ``reachable`` is passed in rather than recomputed because the caller
+    already knows whether this campaign is bound to its region or spans
+    markets, and that decision belongs in one place.
+    """
+    spent: set[str] = set()
+    if industry is None or reachable <= 0:
+        return spent
+    for term in verticals.verticals_for(industry):
+        worked = await _exhausted_geographies(
+            session, campaign_id=campaign_id, business_type=term
+        )
+        if len(worked) >= reachable:
+            spent.add(term.casefold())
+    return spent
+
+
+@activity.defn(name="discover_leads")
+async def discover_leads(request: DiscoverActivityInput) -> DiscoverActivityResult:
+    """Search for businesses matching a campaign's targeting and record them."""
+    workspace_id = uuid.UUID(request.workspace_id)
+    campaign_id = uuid.UUID(request.campaign_id)
+    now = _now()
+
+    async with workspace_session(workspace_id) as session:
+        existing = await _previous_run(session, campaign_id, request.idempotency_key)
+        if existing is not None:
+            logger.info(
+                "discovery already ran for this key; returning the recorded result",
+                extra={"campaign_id": str(campaign_id), "key": request.idempotency_key},
+            )
+            return existing
+
+        campaign = await session.get(Campaign, campaign_id)
+        if campaign is None:
+            return DiscoverActivityResult(
+                refused_reason=f"campaign {request.campaign_id} not found"
+            )
+
+        blockers = targeting_blockers(
+            business_type=campaign.target_business_type,
+            geography=campaign.target_geography,
+            spans_all_markets=bool(campaign.spans_all_markets),
+        )
+        if blockers:
+            return DiscoverActivityResult(refused_reason="; ".join(blockers))
+
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(CampaignPolicy.campaign_id == campaign_id)
+            )
+        ).scalar_one_or_none()
+        if policy is None:
+            return DiscoverActivityResult(
+                refused_reason="campaign has no policy row; nothing defines its budget"
+            )
+
+        day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        spent_today = float(
+            (
+                await session.execute(
+                    select(
+                        func.coalesce(func.sum(LeadSource.estimated_cost_usd), 0.0)
+                    ).where(
+                        LeadSource.campaign_id == campaign_id,
+                        LeadSource.created_at >= day_start,
+                    )
+                )
+            ).scalar_one()
+            or 0.0
+        )
+        if spent_today >= policy.research_budget_usd:
+            return DiscoverActivityResult(
+                spent_usd=spent_today,
+                refused_reason=(
+                    f"discovery budget spent: ${spent_today:.2f} of "
+                    f"${policy.research_budget_usd:.2f} used today"
+                ),
+            )
+
+        # Targeting is snapshotted before the session closes: the search below
+        # runs outside any transaction, and holding one open across a network
+        # call to Google is the pattern mission section 25 forbids.
+        business_type = (campaign.target_business_type or "").strip()
+        geography = (campaign.target_geography or "").strip()
+        country_code = campaign.target_country_code
+        industry = campaign.industry or Industry.GENERAL
+
+        # Move on when the ground is worked out. A campaign's configured
+        # geography returns about twenty-five businesses and then returns the
+        # same twenty-five for ever, so re-asking costs a billable request and
+        # admits nothing -- which is exactly what every campaign here was doing
+        # each cycle.
+        #
+        # Where it moves to depends on what kind of campaign it is, and the two
+        # answers are both right for their own case:
+        #
+        # A campaign that declared a market stays inside it. That refusal was
+        # written because a UK campaign quietly searching Phoenix would send on
+        # the wrong clock, in the wrong working week, with a message written for
+        # somewhere else.
+        #
+        # A campaign that is a *business type* declared no market, and its leads
+        # are routed to their own market's carrier by carrier_routing -- so the
+        # clock and the working week follow the recipient. Crossing a border is
+        # what it exists to do. What still binds it is language: it takes only
+        # territories where an English cold email is a reasonable thing to send.
+        spans_markets = bool(campaign.spans_all_markets)
+        spent = await _exhausted_geographies(
+            session, campaign_id=campaign_id, business_type=business_type
+        )
+        if geography.strip().casefold() in spent or (spans_markets and not geography):
+            moved_on = (
+                territories.next_territory_anywhere(exhausted=spent)
+                if spans_markets
+                else territories.next_territory(
+                    campaign.region, exhausted=spent, current=geography
+                )
+            )
+            if moved_on is not None:
+                logger.info(
+                    "geography exhausted; moving to the next territory",
+                    extra={
+                        "campaign_id": str(campaign_id),
+                        "from": geography or "(none)",
+                        "to": moved_on.query_name,
+                        "scope": "all markets"
+                        if spans_markets
+                        else campaign.region.value,
+                    },
+                )
+                geography = moved_on.query_name
+                country_code = moved_on.country_code
+            else:
+                # The map is out for this search term. Before giving up, ask a
+                # different question about the same ground: a campaign that has
+                # worked twenty cities looking for "dentists" has never asked
+                # any of them about "orthodontists" or "emergency dentists" --
+                # different businesses, same playbook, same offers.
+                #
+                # Territory first and vertical second, because a new city is
+                # the cheaper move: the crawler, the playbook and the
+                # vocabulary all stay where they are.
+                reachable = (
+                    len(territories.all_territories())
+                    if spans_markets
+                    else len(territories.for_region(campaign.region))
+                )
+                spent_terms = await _exhausted_verticals(
+                    session,
+                    campaign_id=campaign_id,
+                    industry=industry,
+                    reachable=reachable,
+                )
+                next_term = verticals.next_vertical(
+                    industry, exhausted=spent_terms, current=business_type
+                )
+                if next_term is not None:
+                    # Back to the top of the map with the new question. The
+                    # territories are spent for the *old* term only, so the
+                    # first one is fresh ground again.
+                    restart = await _exhausted_geographies(
+                        session, campaign_id=campaign_id, business_type=next_term
+                    )
+                    moved_on = (
+                        territories.next_territory_anywhere(exhausted=restart)
+                        if spans_markets
+                        else territories.next_territory(
+                            campaign.region, exhausted=restart, current=""
+                        )
+                    )
+                    if moved_on is not None:
+                        logger.info(
+                            "territories worked out; moving to the next vertical",
+                            extra={
+                                "campaign_id": str(campaign_id),
+                                "from_type": business_type,
+                                "to_type": next_term,
+                                "to_geography": moved_on.query_name,
+                                "verticals_spent": len(spent_terms),
+                            },
+                        )
+                        business_type = next_term
+                        geography = moved_on.query_name
+                        country_code = moved_on.country_code
+                    else:
+                        geography = ""
+                else:
+                    # Every territory *and* every vertical is worked out.
+                    # Falling through here searched the exhausted query anyway:
+                    # 286 runs in seven days returning forty records and
+                    # admitting none, at $0.064 each.
+                    #
+                    # The money was the small part. A campaign in this state
+                    # reported a completed discovery run every hour, so nothing
+                    # ever surfaced that it was finished -- it looked busy right
+                    # up until somebody counted the leads.
+                    logger.info(
+                        "every territory and vertical this campaign can reach "
+                        "is worked out",
+                        extra={
+                            "campaign_id": str(campaign_id),
+                            "business_type": business_type,
+                            "geography": geography or "(none)",
+                            "territories_spent": len(spent),
+                            "verticals_spent": len(spent_terms),
+                            "scope": "all markets"
+                            if spans_markets
+                            else campaign.region.value,
+                        },
+                    )
+                    geography = ""
+
+    if not geography.strip():
+        # Every territory this campaign can reach has been worked out -- either
+        # the language gate's list for a campaign that spans markets, or its
+        # own region's catalogue for one that does not. A real answer, and one
+        # that says "add a vertical to the catalogue, or add a language"
+        # "search again" -- so it is reported, not retried.
+        return DiscoverActivityResult(
+            refused_reason=(
+                "every territory and vertical this campaign can write to is "
+                "worked out; add a vertical to intelligence/verticals.py or "
+                "add a language"
+            )
+        )
+
+    settings = get_settings()
+    if settings.google_places_api_key is None:
+        return DiscoverActivityResult(
+            refused_reason="COLDOPS_GOOGLE_PLACES_API_KEY is not configured"
+        )
+
+    # The spending cap, checked before anything is billed. A full-depth search
+    # can cost up to MAX_PAGES requests, so it needs that much room left.
+    async with workspace_session(workspace_id) as session:
+        used_month, used_today = await places_requests_used(
+            session, workspace_id=workspace_id, now=now
+        )
+    over = places_cap_refusal(
+        used_month=used_month,
+        used_today=used_today,
+        monthly_cap=settings.places_monthly_request_cap,
+        daily_cap=settings.places_daily_request_cap,
+    )
+    if over is not None:
+        return DiscoverActivityResult(refused_reason=over)
+
+    query = build_query(
+        business_type=business_type,
+        geography=geography,
+        country_code=country_code,
+        # All the pages Places will give, once, rather than page one every
+        # cycle. See FULL_DEPTH_REST.
+        max_results=MAX_RESULTS_PER_SEARCH,
+        # Places drops businesses with no website before billing for them,
+        # which is the right default and exactly wrong when those are the
+        # businesses being looked for. The local `admit` check stays either
+        # way: the provider filter is advisory, and Places returns records
+        # with an empty websiteUri regardless.
+        require_website=not settings.discover_siteless,
+    )
+
+    provider = GooglePlacesProvider.from_settings(settings)
+    try:
+        activity.heartbeat("searching places")
+        result = await provider.search(query)
+    except PlacesError as exc:
+        # Retryable errors propagate so Temporal's policy decides; a permanent
+        # one is a configuration problem an operator must see, and burning the
+        # retry budget on it would only delay them finding out.
+        if exc.retryable:
+            raise
+        logger.warning("places search refused", extra={"error": str(exc)[:200]})
+        return DiscoverActivityResult(refused_reason=f"places: {exc}")
+    finally:
+        await provider.aclose()
+
+    return await _record(
+        workspace_id=workspace_id,
+        campaign_id=campaign_id,
+        industry=industry,
+        query_text=query.text_query,
+        country_code=country_code,
+        # The one thing this activity knows for certain about every business it
+        # is about to write: which city it searched. Passed down so the lead
+        # carries its own clock rather than its market's representative one.
+        timezone=territories.timezone_of(geography),
+        result=result,
+        idempotency_key=request.idempotency_key,
+        # Every admissible business from the search, not the first twenty: the
+        # query now rests for thirty days, so anything left out here would be
+        # paid for and then not seen again for a month.
+        max_new_leads=MAX_RESULTS_PER_SEARCH,
+        now=now,
+    )
+
+
+async def _previous_run(
+    session: AsyncSession, campaign_id: uuid.UUID, key: str
+) -> DiscoverActivityResult | None:
+    """What a prior attempt on this key already did, if there was one.
+
+    Reads the indexed column, which carries a unique constraint on
+    ``(workspace_id, idempotency_key)``. That constraint is the real guarantee:
+    two workers racing on one key both find no row and both search, and the
+    loser fails its insert rather than both charging the account. A JSON path
+    lookup could see the duplicate but never prevent it.
+    """
+    row = (
+        await session.execute(
+            select(LeadSource).where(
+                LeadSource.campaign_id == campaign_id,
+                LeadSource.idempotency_key == key,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return DiscoverActivityResult(
+        leads_created=int(row.records_returned) - int(row.records_deduplicated),
+        returned=int(row.records_returned),
+        spent_usd=float(row.estimated_cost_usd),
+        lead_source_id=str(row.id),
+        duplicate=True,
+    )
+
+
+async def _record(
+    *,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    industry: Industry,
+    query_text: str,
+    country_code: str | None,
+    timezone: str | None,
+    result: DiscoveryResult,
+    idempotency_key: str,
+    max_new_leads: int,
+    now: dt.datetime,
+) -> DiscoverActivityResult:
+    """Admit what came back and write the survivors."""
+    async with workspace_unit_of_work(workspace_id) as session:
+        candidates = result.businesses
+        domains = {b.canonical_domain for b in candidates if b.canonical_domain}
+        place_ids = {b.place_id for b in candidates}
+
+        # Bounded by what this search returned rather than by the workspace's
+        # whole history: a workspace with a hundred thousand organizations must
+        # not load all of them to check sixty.
+        known_domains, known_place_ids = await _known(
+            session, domains=domains, place_ids=place_ids
+        )
+        suppressed = await _suppressed_domains(session, domains=domains)
+
+        admissions, refused = admit_all(
+            candidates,
+            known_domains=known_domains,
+            known_place_ids=known_place_ids,
+            suppressed_domains=suppressed,
+            limit=max_new_leads,
+            allow_siteless=get_settings().discover_siteless,
+        )
+        admitted = [a.business for a in admissions if a.admitted]
+
+        source = LeadSource(
+            workspace_id=workspace_id,
+            kind=SOURCE_KIND,
+            label=query_text[:200],
+            campaign_id=campaign_id,
+            idempotency_key=idempotency_key,
+            query_parameters={
+                "text_query": query_text,
+                "region": country_code,
+                # Also kept in the blob, which is this run's recorded
+                # provenance. The column is what is queried and constrained;
+                # this is what a person reads when asking what the run did.
+                "idempotency_key": idempotency_key,
+                "refused": refused,
+                # Read by _exhausted_geographies: a full-depth query rests.
+                "full_depth": True,
+                "pages_fetched": result.pages_fetched,
+            },
+            records_returned=result.returned_before_filtering,
+            records_deduplicated=result.returned_before_filtering - len(admitted),
+            estimated_cost_usd=result.estimated_cost_usd,
+            usage_policy=result.usage_policy,
+        )
+        session.add(source)
+        await session.flush()
+        # Read inside the transaction, not from the object afterwards. The
+        # session is configured with expire_on_commit=False so it would work
+        # either way today, and would start raising the day somebody changes
+        # that -- from a line that looks nothing like the cause.
+        source_id = source.id
+
+        for business in admitted:
+            await _create_lead(
+                session,
+                workspace_id=workspace_id,
+                campaign_id=campaign_id,
+                source_id=source_id,
+                industry=industry,
+                business=business,
+                country_code=country_code,
+                timezone=timezone,
+                now=now,
+            )
+
+        notification = None
+        if not admitted and result.returned_before_filtering:
+            # Worth waking somebody for: the search worked, Google returned
+            # businesses, and every one was refused. That is a targeting problem
+            # -- usually a query that finds chains with no independent website --
+            # and it will repeat every cycle until a person changes something.
+            notification = await record_notification(
+                session,
+                workspace_id=workspace_id,
+                kind=NotificationKind.CAMPAIGN_STALLED,
+                title=f"Discovery found {result.returned_before_filtering} businesses, admitted none",
+                description=(
+                    f"Search: {query_text}\n"
+                    f"Refused: {_describe(refused)}\n\n"
+                    "The search is working and every result was rejected, so the "
+                    "targeting is finding the wrong kind of business. This repeats "
+                    "each cycle and costs a Places request every time."
+                ),
+                lead_id=None,
+                dedupe_key=f"discovery-empty:{campaign_id}:{now.date().isoformat()}",
+                now=now,
+            )
+
+    logger.info(
+        "discovery complete",
+        extra={
+            "campaign_id": str(campaign_id),
+            "returned": result.returned_before_filtering,
+            "admitted": len(admitted),
+            "refused": refused,
+            "cost_usd": result.estimated_cost_usd,
+        },
+    )
+    return DiscoverActivityResult(
+        leads_created=len(admitted),
+        returned=result.returned_before_filtering,
+        refused_counts=tuple(sorted(refused.items())),
+        spent_usd=result.estimated_cost_usd,
+        lead_source_id=str(source_id),
+        notified=notification is not None,
+    )
+
+
+async def _known(
+    session: AsyncSession, *, domains: set[str], place_ids: set[str]
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Which of these candidates the workspace already has an organization for."""
+    if not domains and not place_ids:
+        return frozenset(), frozenset()
+
+    rows = (
+        await session.execute(
+            select(Organization.canonical_domain, Organization.google_place_id).where(
+                Organization.canonical_domain.in_(domains or {""})
+                | Organization.google_place_id.in_(place_ids or {""})
+            )
+        )
+    ).all()
+    return (
+        frozenset(domain for domain, _ in rows if domain),
+        frozenset(place_id for _, place_id in rows if place_id),
+    )
+
+
+async def _suppressed_domains(
+    session: AsyncSession, *, domains: set[str]
+) -> frozenset[str]:
+    """Domains under a domain-scoped suppression.
+
+    Only ``scope='domain'`` entries are consulted. A single suppressed address
+    at a company does not make the company unreachable -- somebody's colleague
+    opting out is not the business opting out -- and treating it that way would
+    quietly destroy a workspace's reachable pool one unsubscribe at a time.
+    """
+    if not domains:
+        return frozenset()
+    rows = (
+        await session.execute(
+            select(SuppressionEntry.normalized_value).where(
+                SuppressionEntry.scope == "domain",
+                SuppressionEntry.normalized_value.in_(domains),
+            )
+        )
+    ).scalars()
+    return frozenset(rows)
+
+
+async def _create_lead(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    campaign_id: uuid.UUID,
+    source_id: uuid.UUID,
+    industry: Industry,
+    business: DiscoveredBusiness,
+    country_code: str | None,
+    timezone: str | None,
+    now: dt.datetime,
+) -> None:
+    """One organization, its location and domain, and the lead pointing at it.
+
+    ``industry`` comes from the campaign rather than from sniffing the search
+    text. ``seed.py`` infers it with ``"dent" in query.lower()``, which is fine
+    for a script and wrong here: the industry selects the playbook, the playbook
+    constrains which offers may ever be proposed, and a substring match would
+    let a search for "dental supplies wholesaler" pitch patient-recall
+    automation to a distributor.
+    """
+    org = Organization(
+        workspace_id=workspace_id,
+        display_name=business.display_name[:300],
+        normalized_name=business.display_name.lower().strip()[:300],
+        industry=industry,
+        canonical_domain=business.canonical_domain,
+        google_place_id=business.place_id,
+        website_url=business.website_uri,
+        phone_e164=_to_e164(business.phone),
+        rating=business.rating,
+        review_count=business.review_count,
+        business_status=business.business_status,
+        # Verbatim, and only the fields Places permits storing. The evidence
+        # ColdOps derives itself lives in separate tables so the two are never
+        # confused (Places ToS, section 6.1).
+        provenance=[
+            {
+                "source": SOURCE_KIND,
+                "source_id": business.place_id,
+                "retrieved_at": now.isoformat(),
+                "fields": ["name", "address", "website", "rating", "reviews"],
+            }
+        ],
+    )
+    session.add(org)
+    await session.flush()
+
+    session.add(
+        OrganizationLocation(
+            workspace_id=workspace_id,
+            organization_id=org.id,
+            formatted_address=business.formatted_address,
+            country_code=(business.country_code or country_code or None),
+            latitude=business.latitude,
+            longitude=business.longitude,
+            timezone=_timezone_for(business, country_code, timezone),
+            is_primary=True,
+        )
+    )
+    if business.canonical_domain:
+        session.add(
+            OrganizationDomain(
+                workspace_id=workspace_id,
+                organization_id=org.id,
+                domain=business.canonical_domain[:253],
+                is_primary=True,
+                # Null: Places said this is their website, and nothing has yet
+                # confirmed it serves their site. The crawl sets it.
+                verified_at=None,
+            )
+        )
+    session.add(
+        Lead(
+            workspace_id=workspace_id,
+            campaign_id=campaign_id,
+            organization_id=org.id,
+            lead_source_id=source_id,
+            status=LeadStatus.DISCOVERED,
+        )
+    )
+
+
+#: Kept as a name local to this module; the implementation moved to
+#: ``coldops.delivery.phone`` when ``coldops/seed.py`` turned out to be writing
+#: the Places string verbatim down a second path. One rule, two callers.
+_to_e164 = strip_formatting
+
+
+def _timezone_for(
+    business: DiscoveredBusiness,
+    country_code: str | None,
+    searched_timezone: str | None,
+) -> str | None:
+    """The clock this one business keeps.
+
+    The searched metro answers it exactly and answers it for every market: a
+    business returned by "Bucharest Romania" is in Bucharest. That is used
+    first, because it is a fact about the query rather than an inference from
+    the result.
+
+    Coordinates are the fallback, and only for the USA, where a hand-configured
+    geography outside the catalogue still spans four zones and guessing Eastern
+    for a Californian business would be three hours wrong. Everywhere else an
+    uncatalogued geography returns None, and the send window falls back to the
+    market default exactly as it did before -- which is the honest outcome, not
+    a zone nobody has grounds for.
+
+    None is a real value here. ``resolve_timezone`` reads it as "this lead has
+    no clock of its own, use the campaign's", which is a different statement
+    from naming the wrong one.
+    """
+    if searched_timezone is not None:
+        return searched_timezone
+    band = subregion_from_longitude(
+        business.country_code or country_code, business.longitude
+    )
+    return timezone_for(band)
+
+
+def _describe(refused: dict[str, int]) -> str:
+    if not refused:
+        return "nothing"
+    return ", ".join(f"{count} {reason}" for reason, count in sorted(refused.items()))
+
+
+ALL_DISCOVERY_ACTIVITIES = [discover_leads]
+
+__all__ = ["ALL_DISCOVERY_ACTIVITIES", "SOURCE_KIND", "discover_leads"]

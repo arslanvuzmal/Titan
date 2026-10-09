@@ -7,7 +7,7 @@ instead, and that the third one inside the window gives up -- writing
 written.
 
 Both intake paths are exercised deliberately. They were two separate answers to
-"what does a bounce mean", and the point of ``titan.delivery.bounces`` is that
+"what does a bounce mean", and the point of ``coldops.delivery.bounces`` is that
 there is now one.
 """
 
@@ -16,18 +16,18 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import select, update
-from titan.db.enums import LeadStatus, SuppressionReason
-from titan.db.models import Lead, Message
-from titan.db.session import get_sessionmaker
-from titan.delivery.bounces import (
+from coldops.db.enums import LeadStatus, SuppressionReason
+from coldops.db.models import Lead, Message
+from coldops.db.session import get_sessionmaker
+from coldops.delivery.bounces import (
     _ATTRIBUTION_WINDOW,
     SOFT_BOUNCE_BACKOFF,
     SOFT_BOUNCES_TO_SUPPRESS,
     BounceKind,
     record_bounce,
 )
-from titan.delivery.suppression import is_suppressed
+from coldops.delivery.suppression import is_suppressed
+from sqlalchemy import select, update
 
 from .conftest import NOW, build_sendable
 
@@ -64,7 +64,7 @@ async def _sent_message(
     sent_at: dt.datetime,
     to_email: str | None = None,
 ):
-    """A message Titan actually sent, which is what a bounce is about.
+    """A message ColdOps actually sent, which is what a bounce is about.
 
     ``to_email`` matters more than it looks: build_sendable mints a fresh
     address per call, and the soft-bounce counter counts per address. Leaving it
@@ -421,7 +421,7 @@ async def test_a_hard_bounce_for_an_address_we_never_mailed_is_ignored(
     """The other half of the distinction above, and the one that was missing.
 
     ``jordan-wup@fluxhqcrest.co`` is a real value from the live suppression
-    list, put there by a bounce for a message Titan never sent. Nothing about
+    list, put there by a bounce for a message ColdOps never sent. Nothing about
     it is dangerous on its own; what is dangerous is that anything able to
     reach the mailbox could add to the list of people the system refuses to
     contact.
@@ -456,7 +456,7 @@ async def test_another_workspace_soft_bounces_do_not_count(db_session, sendable)
     predicate -- nothing about the session supplies one."""
     import uuid as _uuid
 
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{_uuid.uuid4().hex[:12]}")
     db_session.add(other)

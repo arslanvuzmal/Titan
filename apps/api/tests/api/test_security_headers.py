@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from titan.api.main import SecurityHeadersMiddleware, _is_https
+from coldops.api.main import SecurityHeadersMiddleware, _is_https
 
 HSTS = b"strict-transport-security"
 

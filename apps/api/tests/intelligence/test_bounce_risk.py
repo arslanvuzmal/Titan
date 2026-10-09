@@ -12,15 +12,15 @@ that prove a legitimate address still is.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import (
+from coldops.db.enums import (
     SENDABLE_VERIFICATION_STATUSES,
     ContactSource,
     VerificationStatus,
     verification_permits_sending,
 )
-from titan.intelligence.bounce_risk import Verdict, assess
-from titan.intelligence.mx import MxCheck, MxStatus
-from titan.intelligence.recipient_domains import (
+from coldops.intelligence.bounce_risk import Verdict, assess
+from coldops.intelligence.mx import MxCheck, MxStatus
+from coldops.intelligence.recipient_domains import (
     FREE_MAILBOX_PROVIDERS,
     TYPO_REFERENCE_DOMAINS,
     is_disposable,
@@ -28,7 +28,7 @@ from titan.intelligence.recipient_domains import (
     is_one_edit_apart,
     typo_of,
 )
-from titan.intelligence.verifier import (
+from coldops.intelligence.verifier import (
     DeterministicVerifier,
     MailboxVerifier,
     NullVerifier,
@@ -367,7 +367,7 @@ def test_a_dead_domain_outranks_a_confirmed_mailbox() -> None:
 # ==========================================================================
 def test_a_free_provider_address_is_noted_and_still_sendable() -> None:
     """A great many small businesses run on Gmail. Refusing them would discard
-    the population Titan targets."""
+    the population ColdOps targets."""
     risk = assess(
         email="bellrosedental@gmail.com",
         source=ContactSource.FIRST_PARTY_WEBSITE,
@@ -611,7 +611,7 @@ def test_an_ordinary_page_address_still_sends(url: str) -> None:
     """The false-positive control. This rule costs leads if it is too broad,
     and a contact page is the population it must never touch.
 
-    Solicitors are one of the larger verticals Titan sends to, so a rule that
+    Solicitors are one of the larger verticals ColdOps sends to, so a rule that
     reads "legal" in a domain name as a compliance page aims at the smallest
     bad population and hits one of the best good ones."""
     risk = assess(

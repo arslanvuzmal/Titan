@@ -18,8 +18,8 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from titan.delivery import deliverability as d
-from titan.delivery.sender_pool import MailboxSlot, capacity, daily_ceiling
+from coldops.delivery import deliverability as d
+from coldops.delivery.sender_pool import MailboxSlot, capacity, daily_ceiling
 
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 

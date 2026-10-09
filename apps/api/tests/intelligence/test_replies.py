@@ -4,14 +4,14 @@ The pair of errors these exist to prevent, in opposite directions:
 
 * an out-of-office read as a reply stops outreach to an interested lead
   permanently;
-* a human reply read as an out-of-office keeps Titan mailing somebody who
+* a human reply read as an out-of-office keeps ColdOps mailing somebody who
   already answered.
 """
 
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.replies import (
+from coldops.intelligence.replies import (
     InboundMessage,
     ReplyKind,
     classify_reply,

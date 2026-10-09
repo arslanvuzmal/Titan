@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from titan.intelligence.composer import (
+from coldops.intelligence.composer import (
     ComposerContext,
     compose,
 )

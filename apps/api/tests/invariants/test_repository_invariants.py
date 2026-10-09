@@ -18,7 +18,7 @@ import pytest
 # .../apps/api/tests/invariants/this_file.py -> repo root is 4 levels up.
 REPO = pathlib.Path(__file__).resolve().parents[4]
 API = REPO / "apps" / "api"
-TITAN = API / "titan"
+TITAN = API / "coldops"
 BROWSER_WORKER = REPO / "apps" / "browser-worker"
 
 
@@ -37,11 +37,11 @@ def parse(path: pathlib.Path) -> ast.Module:
 def imported_modules(tree: ast.Module) -> set[str]:
     """Every module a file imports, by dotted path.
 
-    ``from titan.delivery import suppression`` records BOTH ``titan.delivery``
-    and ``titan.delivery.suppression``. Recording only the former -- which is
+    ``from coldops.delivery import suppression`` records BOTH ``coldops.delivery``
+    and ``coldops.delivery.suppression``. Recording only the former -- which is
     what ``node.module`` gives -- left every import ban below blind to the most
     natural way of writing the import it bans. Found by planting
-    ``from titan.delivery import suppression`` inside the campaign manager and
+    ``from coldops.delivery import suppression`` inside the campaign manager and
     watching the boundary test pass.
     """
     found: set[str] = set()
@@ -59,24 +59,24 @@ def imported_modules(tree: ast.Module) -> set[str]:
 # ==========================================================================
 #: Modules permitted to import a concrete email provider.
 PROVIDER_IMPORT_ALLOWLIST = {
-    "titan/delivery/outbox_worker.py",
-    "titan/delivery/providers/__init__.py",
-    "titan/delivery/providers/base.py",
-    "titan/delivery/providers/mock.py",
-    "titan/delivery/providers/resend.py",
-    "titan/delivery/providers/instantly.py",
-    "titan/delivery/providers/smartlead.py",
-    "titan/delivery/providers/smtp.py",
+    "coldops/delivery/outbox_worker.py",
+    "coldops/delivery/providers/__init__.py",
+    "coldops/delivery/providers/base.py",
+    "coldops/delivery/providers/mock.py",
+    "coldops/delivery/providers/resend.py",
+    "coldops/delivery/providers/instantly.py",
+    "coldops/delivery/providers/smartlead.py",
+    "coldops/delivery/providers/smtp.py",
     # Wraps one SmtpProvider per mailbox; it is a provider itself and is
     # listed in PROVIDER_MODULES below, so the rule still covers it.
-    "titan/delivery/providers/smtp_pool.py",
+    "coldops/delivery/providers/smtp_pool.py",
     # The one path that may send without the outbox, and the exception is kept
     # narrow rather than granted broadly: it takes no recipient argument at
     # all, reading the operator's own address from settings, so it cannot be
     # pointed at a prospect. See its module docstring for why the daily report
     # cannot go through the outbox -- routing it there would make the alarm
     # depend on the thing it is alarming about.
-    "titan/notify/operator_mail.py",
+    "coldops/notify/operator_mail.py",
     # Placement probes, and the exemption is the same shape as the one above:
     # send_round takes no recipient argument. Every address it writes to comes
     # from the seed registry, which is a separate file that refuses any entry
@@ -88,19 +88,19 @@ PROVIDER_IMPORT_ALLOWLIST = {
     # sends a day in every count the estate reports -- the daily report saying
     # sixty-five where sixty reached a prospect, and every deliverability ratio
     # computed over a denominator padded with our own mail to ourselves.
-    "titan/delivery/placement_probe.py",
-    "titan/delivery/webhooks.py",  # verification + normalization only
-    "titan/workers/outbox.py",  # the outbox worker process entrypoint
-    "titan/cli.py",  # health checks and preflight
+    "coldops/delivery/placement_probe.py",
+    "coldops/delivery/webhooks.py",  # verification + normalization only
+    "coldops/workers/outbox.py",  # the outbox worker process entrypoint
+    "coldops/cli.py",  # health checks and preflight
 }
 
 PROVIDER_MODULES = (
-    "titan.delivery.providers.resend",
-    "titan.delivery.providers.mock",
-    "titan.delivery.providers.instantly",
-    "titan.delivery.providers.smartlead",
-    "titan.delivery.providers.smtp",
-    "titan.delivery.providers.smtp_pool",
+    "coldops.delivery.providers.resend",
+    "coldops.delivery.providers.mock",
+    "coldops.delivery.providers.instantly",
+    "coldops.delivery.providers.smartlead",
+    "coldops.delivery.providers.smtp",
+    "coldops.delivery.providers.smtp_pool",
 )
 
 
@@ -121,7 +121,7 @@ def test_only_the_outbox_worker_imports_an_email_provider() -> None:
             offenders.append(rel)
     assert not offenders, (
         "these modules import a concrete email provider but are not the outbox "
-        f"worker: {offenders}. Route the send through titan.delivery.outbox_worker."
+        f"worker: {offenders}. Route the send through coldops.delivery.outbox_worker."
     )
 
 
@@ -197,19 +197,19 @@ def test_browser_worker_holds_no_delivery_or_model_credentials() -> None:
 # Invariant 21: production sending is disabled by default
 # ==========================================================================
 def test_production_sending_defaults_to_false() -> None:
-    from titan.config import Settings
+    from coldops.config import Settings
 
     assert Settings(environment="test").production_sending_enabled is False
 
 
 def test_email_provider_defaults_to_mock() -> None:
-    from titan.config import Settings
+    from coldops.config import Settings
 
     assert Settings(environment="test").email_provider == "mock"
 
 
 def test_default_settings_report_blockers_for_sending() -> None:
-    from titan.config import Settings
+    from coldops.config import Settings
 
     errors = Settings(environment="test").sending_preflight_errors()
     assert errors, "default settings claimed sending was permitted"
@@ -222,7 +222,7 @@ def test_is_deployed_covers_staging_as_well_as_production() -> None:
     the published OpenAPI schema) treated a networked staging host as a
     developer laptop.
     """
-    from titan.config import Settings
+    from coldops.config import Settings
 
     assert Settings(environment="local").is_deployed is False
     assert Settings(environment="test").is_deployed is False
@@ -239,19 +239,19 @@ def test_is_deployed_covers_staging_as_well_as_production() -> None:
 def test_a_deployed_environment_refuses_to_start_without_an_auth_secret(
     environment: str,
 ) -> None:
+    from coldops.config import Settings
     from pydantic import ValidationError
-    from titan.config import Settings
 
-    with pytest.raises(ValidationError, match="TITAN_LOCAL_JWT_SECRET"):
+    with pytest.raises(ValidationError, match="COLDOPS_LOCAL_JWT_SECRET"):
         Settings(environment=environment, auth_mode="local", local_jwt_secret=None)
 
-    with pytest.raises(ValidationError, match="TITAN_CLERK_ISSUER_URL"):
+    with pytest.raises(ValidationError, match="COLDOPS_CLERK_ISSUER_URL"):
         Settings(environment=environment, auth_mode="clerk", clerk_issuer_url=None)
 
 
 def test_operating_mode_defaults_to_the_most_restrictive() -> None:
-    from titan.config import OperatingMode
-    from titan.db.models import Campaign, CampaignPolicy, Workspace
+    from coldops.config import OperatingMode
+    from coldops.db.models import Campaign, CampaignPolicy, Workspace
 
     assert Workspace.__table__.c.operating_mode.default.arg is OperatingMode.RESEARCH_ONLY
     assert (
@@ -267,13 +267,13 @@ def test_operating_mode_defaults_to_the_most_restrictive() -> None:
 # Invariant 6: a guessed address is never eligible
 # ==========================================================================
 def test_pattern_guess_is_absent_from_eligible_sources() -> None:
-    from titan.db.enums import ELIGIBLE_CONTACT_SOURCES, ContactSource
+    from coldops.db.enums import ELIGIBLE_CONTACT_SOURCES, ContactSource
 
     assert ContactSource.PATTERN_GUESS not in ELIGIBLE_CONTACT_SOURCES
 
 
 def test_campaign_policy_default_sources_exclude_guesses() -> None:
-    from titan.db.models import CampaignPolicy
+    from coldops.db.models import CampaignPolicy
 
     default = CampaignPolicy.__table__.c.allowed_contact_sources.default.arg
     # SQLAlchemy wraps a zero-argument default callable so it accepts an
@@ -287,7 +287,7 @@ def test_campaign_policy_default_sources_exclude_guesses() -> None:
 # ==========================================================================
 def test_all_domain_tables_are_workspace_scoped() -> None:
     """Only genuinely global tables may lack workspace_id."""
-    from titan.db.models import Base
+    from coldops.db.models import Base
 
     GLOBAL_TABLES = {"users", "workspaces"}
     # Checks the column, not the mixin: workspace_members declares workspace_id
@@ -317,7 +317,7 @@ def test_all_domain_tables_are_workspace_scoped() -> None:
 #: outbox worker would have inherited the exemption silently. They now name the
 #: workspace explicitly and the entry is gone.
 RAW_SQL_SCOPE_ALLOWLIST = {
-    ("titan/delivery/outbox_worker.py", "outbox_messages"),
+    ("coldops/delivery/outbox_worker.py", "outbox_messages"),
     # The open pixel. Its caller is a mail client fetching an image: there is
     # no session, no principal and no workspace to scope to, by design.
     #
@@ -326,7 +326,7 @@ RAW_SQL_SCOPE_ALLOWLIST = {
     # -- and the write is `coalesce(first_opened_at, now())`, so the worst a
     # cross-workspace id could achieve is setting a timestamp that was already
     # set. Both properties are tested in tests/delivery/test_open_tracking.py.
-    ("titan/delivery/open_tracking.py", "messages"),
+    ("coldops/delivery/open_tracking.py", "messages"),
 }
 
 
@@ -345,7 +345,7 @@ def test_raw_sql_against_a_scoped_table_names_the_workspace() -> None:
     silently downgraded another workspace's lead. Nothing about the call site
     hinted at it.
     """
-    from titan.db.models import Base
+    from coldops.db.models import Base
 
     scoped_tables = {
         mapper.class_.__tablename__
@@ -358,7 +358,7 @@ def test_raw_sql_against_a_scoped_table_names_the_workspace() -> None:
     offenders: list[str] = []
     for path in python_sources():
         rel = path.relative_to(API).as_posix()
-        if rel.startswith("titan/db/migrations/"):
+        if rel.startswith("coldops/db/migrations/"):
             continue
         for sql in blocks.findall(path.read_text(encoding="utf-8")):
             lowered = sql.lower()
@@ -387,36 +387,36 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
     offenders: list[str] = []
     # Only the places that must hand a raw credential to a provider client.
     allowed = {
-        "titan/delivery/providers/resend.py",
-        "titan/models/providers.py",  # build_providers hands keys to clients
-        "titan/providers/browser_client.py",  # bearer token for the worker
-        "titan/providers/instantly.py",  # from_settings() builds the Instantly client
-        "titan/providers/places.py",  # from_settings() builds the Places client
-        "titan/providers/smartlead.py",  # from_settings() builds the Smartlead client
-        "titan/api/security.py",  # signs and verifies session tokens
-        "titan/workers/outbox.py",
+        "coldops/delivery/providers/resend.py",
+        "coldops/models/providers.py",  # build_providers hands keys to clients
+        "coldops/providers/browser_client.py",  # bearer token for the worker
+        "coldops/providers/instantly.py",  # from_settings() builds the Instantly client
+        "coldops/providers/places.py",  # from_settings() builds the Places client
+        "coldops/providers/smartlead.py",  # from_settings() builds the Smartlead client
+        "coldops/api/security.py",  # signs and verifies session tokens
+        "coldops/workers/outbox.py",
         # Hands the mailbox password to the IMAP client, exactly as the outbox
         # worker hands the SMTP password to its provider. Both build a client at
         # startup and neither logs the value.
-        "titan/workers/inbound.py",
-        "titan/cli.py",
+        "coldops/workers/inbound.py",
+        "coldops/cli.py",
         # Signs opt-out links and builds the bearer header for the opt-out list.
         # Every caller passes the SecretStr itself, so this is the only place
         # the value is unwrapped -- the same concentration the provider clients
         # above rely on.
-        "titan/outreach/unsubscribe.py",
+        "coldops/outreach/unsubscribe.py",
         # Compares the voice agent's bearer token, in constant time. The same
         # job api/security.py above does for session tokens, and the same
         # reason it is allowed: verifying a credential is the one thing that
         # cannot be done without the credential.
-        "titan/api/calls.py",
+        "coldops/api/calls.py",
         # Signs and verifies the token in the open-pixel URL. Every caller
         # passes the SecretStr itself, so `_raw` is the only place the value is
         # unwrapped -- the same concentration unsubscribe.py relies on.
-        "titan/delivery/open_tracking.py",
+        "coldops/delivery/open_tracking.py",
         # Signs and verifies the evidence-page token, on the same terms as the
         # pixel above: callers pass the SecretStr, `_raw` unwraps it once.
-        "titan/intelligence/evidence_page.py",
+        "coldops/intelligence/evidence_page.py",
     }
     for path in python_sources():
         rel = path.relative_to(API).as_posix()
@@ -432,7 +432,7 @@ def test_no_secret_is_logged_or_formatted_directly() -> None:
 
 
 def test_redaction_covers_every_provider_key_shape() -> None:
-    from titan.security.redaction import redact
+    from coldops.security.redaction import redact
 
     payload = {
         "api_key": "sk-live-abcdefghijklmnopqrstuvwxyz",
@@ -454,7 +454,7 @@ def test_redaction_covers_every_provider_key_shape() -> None:
 def test_leadpilot_is_not_imported() -> None:
     """Invariant 20.
 
-    Checks imports, not prose: titan/cli.py prints the invariant list, which
+    Checks imports, not prose: coldops/cli.py prints the invariant list, which
     legitimately names LeadPilot. What must not exist is a code dependency.
     """
     offenders: list[str] = []
@@ -475,7 +475,7 @@ def test_configuration_is_read_only_through_settings() -> None:
     how provider settings ended up declared in .env but invisible to the running
     service.
     """
-    allowed = {"titan/config.py", "titan/runtime.py"}
+    allowed = {"coldops/config.py", "coldops/runtime.py"}
     offenders: list[str] = []
     for path in python_sources():
         rel = path.relative_to(API).as_posix()
@@ -491,7 +491,7 @@ def test_configuration_is_read_only_through_settings() -> None:
             ):
                 offenders.append(f"{rel}:{node.lineno}")
     assert not offenders, (
-        f"os.getenv used outside titan.config at {offenders}; add the field to "
+        f"os.getenv used outside coldops.config at {offenders}; add the field to "
         "Settings instead so it is declared, validated, and documented"
     )
 
@@ -523,7 +523,7 @@ def test_no_test_asserts_a_bare_true() -> None:
 def test_loopback_escape_hatch_is_off_by_default() -> None:
     """The fixture hatch must never be enabled in a shipped configuration."""
     guard = (BROWSER_WORKER / "src" / "urlGuard.ts").read_text(encoding="utf-8")
-    assert "TITAN_UNSAFE_ALLOW_LOOPBACK === '1'" in guard, (
+    assert "COLDOPS_UNSAFE_ALLOW_LOOPBACK === '1'" in guard, (
         "the loopback hatch must require an exact opt-in value"
     )
     # And it must not appear in any deployment configuration.
@@ -533,14 +533,14 @@ def test_loopback_escape_hatch_is_off_by_default() -> None:
     ):
         if not candidate.exists():
             continue
-        assert "TITAN_UNSAFE_ALLOW_LOOPBACK" not in candidate.read_text(
+        assert "COLDOPS_UNSAFE_ALLOW_LOOPBACK" not in candidate.read_text(
             encoding="utf-8"
         ), f"{candidate.relative_to(REPO)} enables the loopback escape hatch"
 
 
 #: The only module allowed to read the raw sendable-status set. Everywhere else
 #: must go through ``verification_permits_sending``.
-_SENDABILITY_RULE_OWNER = "titan/db/enums.py"
+_SENDABILITY_RULE_OWNER = "coldops/db/enums.py"
 
 
 def test_the_sendability_rule_has_exactly_one_implementation() -> None:
@@ -568,7 +568,7 @@ def test_the_sendability_rule_has_exactly_one_implementation() -> None:
     assert not offenders, (
         "these modules test membership of SENDABLE_VERIFICATION_STATUSES "
         f"directly: {offenders}. Call "
-        "titan.db.enums.verification_permits_sending(status, source) instead, so "
+        "coldops.db.enums.verification_permits_sending(status, source) instead, so "
         "the catch-all provenance rule cannot be skipped."
     )
 
@@ -576,19 +576,19 @@ def test_the_sendability_rule_has_exactly_one_implementation() -> None:
 #: Everything the campaign manager must not be able to touch. Not "must not
 #: touch" -- must not be *able* to, which is a property of what it imports.
 FORBIDDEN_TO_THE_MANAGER = (
-    "titan.delivery.suppression",
-    "titan.delivery.outbox_worker",
-    "titan.delivery.providers.resend",
-    "titan.delivery.providers.smartlead",
-    "titan.delivery.providers.smtp",
-    "titan.intelligence.composer",
-    "titan.intelligence.message_validator",
+    "coldops.delivery.suppression",
+    "coldops.delivery.outbox_worker",
+    "coldops.delivery.providers.resend",
+    "coldops.delivery.providers.smartlead",
+    "coldops.delivery.providers.smtp",
+    "coldops.intelligence.composer",
+    "coldops.intelligence.message_validator",
     # The send decision itself, and the counters it spends. Absent from this
     # tuple until the boundary was audited line by line against section five:
     # the manager could not *bypass* a gate, but nothing stopped it importing
     # the module that decides one.
-    "titan.policy.engine",
-    "titan.delivery.quotas",
+    "coldops.policy.engine",
+    "coldops.delivery.quotas",
 )
 
 
@@ -600,13 +600,13 @@ def test_the_campaign_manager_cannot_reach_a_delivery_gate() -> None:
     Meant, it is a package that cannot import any of them -- so the refusal is
     not a check that could be forgotten but a capability that does not exist.
 
-    The bounds in ``titan.autonomy.actuator`` stop it exceeding a human's
+    The bounds in ``coldops.autonomy.actuator`` stop it exceeding a human's
     numbers. This stops it reaching anything else at all.
     """
     offenders: list[str] = []
     for path in python_sources():
         rel = path.relative_to(API).as_posix()
-        if not rel.startswith("titan/autonomy/"):
+        if not rel.startswith("coldops/autonomy/"):
             continue
         modules = imported_modules(parse(path))
         for forbidden in FORBIDDEN_TO_THE_MANAGER:
@@ -616,7 +616,7 @@ def test_the_campaign_manager_cannot_reach_a_delivery_gate() -> None:
     assert not offenders, (
         "the campaign manager reached past its actuator: "
         f"{offenders}. Everything it may change goes through "
-        "titan.autonomy.actuator, and everything else is not its to change."
+        "coldops.autonomy.actuator, and everything else is not its to change."
     )
 
 
@@ -625,7 +625,7 @@ def test_the_manager_writes_to_no_column_a_human_owns() -> None:
     human's numbers are the bound it is clamped against -- writing to those
     directly would make next cycle's ceiling the manager's own last answer.
     """
-    from titan.autonomy.apply import _COLUMN_FOR
+    from coldops.autonomy.apply import _COLUMN_FOR
 
     # Every column the manager may write, and the widening is deliberate:
     # adding one here is the change that says "the manager may now decide this
@@ -647,15 +647,15 @@ def test_the_manager_writes_to_no_column_a_human_owns() -> None:
 @pytest.mark.parametrize(
     "module,symbol",
     [
-        ("titan.policy.engine", "evaluate_send"),
-        ("titan.delivery.quotas", "reserve_all"),
-        ("titan.delivery.suppression", "is_suppressed"),
-        ("titan.intelligence.message_validator", "validate_message"),
-        ("titan.intelligence.bounce_risk", "assess"),
-        ("titan.autonomy.actuator", "evaluate"),
-        ("titan.autonomy.apply", "apply_all"),
-        ("titan.db.enums", "verification_permits_sending"),
-        ("titan.security.url_guard", "validate_url"),
+        ("coldops.policy.engine", "evaluate_send"),
+        ("coldops.delivery.quotas", "reserve_all"),
+        ("coldops.delivery.suppression", "is_suppressed"),
+        ("coldops.intelligence.message_validator", "validate_message"),
+        ("coldops.intelligence.bounce_risk", "assess"),
+        ("coldops.autonomy.actuator", "evaluate"),
+        ("coldops.autonomy.apply", "apply_all"),
+        ("coldops.db.enums", "verification_permits_sending"),
+        ("coldops.security.url_guard", "validate_url"),
     ],
 )
 def test_safety_critical_entry_points_exist(module: str, symbol: str) -> None:
@@ -675,7 +675,7 @@ def test_every_required_capability_exists_in_the_role_vocabulary() -> None:
     caller including the owner -- the route looks implemented and is
     unreachable. This scan makes that a build failure instead.
     """
-    from titan.db.enums import ROLE_CAPABILITIES
+    from coldops.db.enums import ROLE_CAPABILITIES
 
     grantable: set[str] = set()
     for capabilities in ROLE_CAPABILITIES.values():
@@ -707,11 +707,11 @@ def test_every_required_capability_exists_in_the_role_vocabulary() -> None:
 # ==========================================================================
 # Deployment: a stack that looks healthy must actually do the work
 # ==========================================================================
-#: Every long-running process a complete Titan needs. The API and dashboard
+#: Every long-running process a complete ColdOps needs. The API and dashboard
 #: alone produce a deployment that serves the CRM and researches nothing.
 REQUIRED_WORKER_COMMANDS = {
-    "titan.workers.outbox",
-    "titan.workers.temporal_worker",
+    "coldops.workers.outbox",
+    "coldops.workers.temporal_worker",
 }
 
 
@@ -795,7 +795,7 @@ def test_every_cron_workflow_is_actually_scheduled() -> None:
     """
     import uuid as _uuid
 
-    from titan.workflows import schedules
+    from coldops.workflows import schedules
 
     sources = {
         path.stem: path.read_text(encoding="utf-8")
@@ -850,7 +850,7 @@ def test_every_terminal_lead_outcome_has_a_writer(member: str) -> None:
     named in a query's exclusion list is not the same as something being able
     to put a lead into that state.
     """
-    root = pathlib.Path(__file__).resolve().parents[2] / "titan"
+    root = pathlib.Path(__file__).resolve().parents[2] / "coldops"
     pattern = re.compile(rf"(status\s*=\s*|status=)LeadStatus\.{member}\b")
 
     writers = [
@@ -874,10 +874,10 @@ def test_the_success_metric_is_reply_quality_not_reply_volume() -> None:
     winning variant becomes whichever phrasing provokes the most answers of any
     kind, and the easiest way to provoke an answer is to annoy somebody.
     """
-    from titan.autonomy.experiments import Arm, Verdict, compare
-    from titan.autonomy.health import CampaignHealth, CampaignWindow, classify
-    from titan.db.enums import CampaignStatus
-    from titan.delivery.deliverability import ReputationWindow
+    from coldops.autonomy.experiments import Arm, Verdict, compare
+    from coldops.autonomy.health import CampaignHealth, CampaignWindow, classify
+    from coldops.db.enums import CampaignStatus
+    from coldops.delivery.deliverability import ReputationWindow
 
     provocative = Arm("loud", sent=800, replied=200, positive_replies=10)
     measured = Arm("measured", sent=800, replied=60, positive_replies=55)
@@ -909,7 +909,7 @@ def test_no_generic_offer_is_substituted_when_evidence_matches_nothing() -> None
     Scans for the string as a *value* rather than anywhere at all, so the
     comments explaining the removal do not re-trip it.
     """
-    root = pathlib.Path(__file__).resolve().parents[2] / "titan"
+    root = pathlib.Path(__file__).resolve().parents[2] / "coldops"
     offender = re.compile(
         r"^(?!\s*#).*[=(]\s*[\"']enquiry capture and follow-up automation[\"']",
         re.MULTILINE,

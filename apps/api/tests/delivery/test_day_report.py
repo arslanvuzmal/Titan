@@ -15,16 +15,16 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import update
-from titan.db.models import (
+from coldops.db.models import (
     Message,
     OutboxMessage,
     SenderHealthSnapshot,
     SenderIdentity,
 )
-from titan.delivery import day_report
-from titan.delivery.day_report import DayReport, Deferral, MailboxDay
-from titan.delivery.deliverability import WARMUP_DAYS
+from coldops.delivery import day_report
+from coldops.delivery.day_report import DayReport, Deferral, MailboxDay
+from coldops.delivery.deliverability import WARMUP_DAYS
+from sqlalchemy import update
 
 from tests.delivery.conftest import build_sendable
 

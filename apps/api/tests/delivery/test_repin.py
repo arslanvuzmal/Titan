@@ -22,18 +22,18 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import text, update
-from titan.db.enums import OutboxStatus
-from titan.db.models import (
+from coldops.db.enums import OutboxStatus
+from coldops.db.models import (
     CampaignPolicy,
     CampaignSender,
     Message,
     OrganizationLocation,
     SenderIdentity,
 )
-from titan.db.session import get_sessionmaker
-from titan.delivery import quotas
-from titan.delivery.providers.mock import MockEmailProvider
+from coldops.db.session import get_sessionmaker
+from coldops.delivery import quotas
+from coldops.delivery.providers.mock import MockEmailProvider
+from sqlalchemy import text, update
 
 from .conftest import NOW, build_sendable, sending_settings
 from .test_outbox_delivery import outbox_row, worker

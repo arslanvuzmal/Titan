@@ -22,8 +22,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from titan.config import Settings
-from titan.providers import browser_client
+from coldops.config import Settings
+from coldops.providers import browser_client
 
 
 @pytest.fixture(autouse=True)

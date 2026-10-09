@@ -13,12 +13,12 @@ import math
 import uuid
 
 import pytest
+from coldops.db.enums import OutboxStatus
+from coldops.db.models import Campaign, CampaignSender, OutboxMessage, SenderIdentity
+from coldops.delivery import deliverability as d
+from coldops.delivery import sender_pool
+from coldops.delivery.sender_pool import MailboxSlot, capacity, choose, describe
 from sqlalchemy import select, text, update
-from titan.db.enums import OutboxStatus
-from titan.db.models import Campaign, CampaignSender, OutboxMessage, SenderIdentity
-from titan.delivery import deliverability as d
-from titan.delivery import sender_pool
-from titan.delivery.sender_pool import MailboxSlot, capacity, choose, describe
 
 from tests.delivery.conftest import build_sendable
 
@@ -364,7 +364,7 @@ async def test_a_mailbox_missing_dkim_is_excluded_with_the_reason(
 async def test_another_workspaces_mailbox_is_not_in_the_pool(
     db_session, workspace
 ) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     fixture = await build_sendable(db_session, workspace, suffix="pf5")
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
@@ -496,7 +496,7 @@ async def test_the_report_query_returns_the_whole_estate(db_session, workspace) 
 
 @pytest.mark.asyncio
 async def test_the_report_query_does_not_cross_workspaces(db_session, workspace) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     fixture = await build_sendable(db_session, workspace, suffix="pf9")
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")

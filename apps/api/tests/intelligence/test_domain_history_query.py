@@ -20,10 +20,10 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from coldops.activities.pipeline import _domain_history
+from coldops.db.models import Message
+from coldops.intelligence.domain_health import DomainHealth, classify
 from sqlalchemy import update
-from titan.activities.pipeline import _domain_history
-from titan.db.models import Message
-from titan.intelligence.domain_health import DomainHealth, classify
 
 from tests.delivery.conftest import build_sendable
 
@@ -137,7 +137,7 @@ async def test_another_workspace_history_is_not_visible(db_session, workspace) -
     """
     import uuid
 
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other WS", slug=f"other-{uuid.uuid4().hex[:12]}")
     db_session.add(other)

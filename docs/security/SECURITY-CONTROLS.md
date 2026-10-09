@@ -31,7 +31,7 @@
 
 ## 3. Network & Egress Security (SSRF Guard)
 
-1. **URL Validation Engine (`titan.security.url_guard`):**
+1. **URL Validation Engine (`coldops.security.url_guard`):**
    - Scheme allowlist: `http`, `https`.
    - Port allowlist: `80`, `443`.
    - Complete DNS address sweep via `socket.getaddrinfo`. Every resolved IP must be public.

@@ -9,8 +9,8 @@ draft is now version 3", on drafts nothing was waiting to review.
 
 from __future__ import annotations
 
-from titan.config import OperatingMode
-from titan.policy.engine import evaluate_send
+from coldops.config import OperatingMode
+from coldops.policy.engine import evaluate_send
 
 from tests.policy.test_send_authorization import sendable_context
 

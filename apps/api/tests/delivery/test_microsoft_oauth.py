@@ -7,10 +7,10 @@ import tempfile
 
 import httpx
 import pytest
-from titan.delivery import microsoft_oauth as mo
-from titan.delivery.mailboxes import MailboxConfigError, _endpoint
+from coldops.delivery import microsoft_oauth as mo
+from coldops.delivery.mailboxes import MailboxConfigError, _endpoint
 
-ADDRESS = "titan.seed@outlook.com"
+ADDRESS = "coldops.seed@outlook.com"
 
 
 def _fake(responses: list[tuple[int, dict]]) -> tuple[httpx.Client, list[dict]]:

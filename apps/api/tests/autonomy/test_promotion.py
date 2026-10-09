@@ -11,9 +11,9 @@ refusal carries a reason for the same reason a promotion does.
 
 from __future__ import annotations
 
-from titan.autonomy.actuator import Actuation, Bounds, evaluate
-from titan.autonomy.experiments import Arm, Comparison, Verdict
-from titan.autonomy.promotion import (
+from coldops.autonomy.actuator import Actuation, Bounds, evaluate
+from coldops.autonomy.experiments import Arm, Comparison, Verdict
+from coldops.autonomy.promotion import (
     PROMOTION_ALPHA,
     decide,
     proposal_for,

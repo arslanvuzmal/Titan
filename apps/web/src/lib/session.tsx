@@ -61,7 +61,7 @@ function read(): StoredSession | null {
  * The token is minted by `/api/v1/auth/token`, which verifies an argon2id
  * hash. That route used to accept an email address and a workspace slug and no
  * secret, so it was refused in every deployed environment; it now answers
- * wherever Titan is configured with `TITAN_AUTH_MODE=local`, and a deployment
+ * wherever ColdOps is configured with `COLDOPS_AUTH_MODE=local`, and a deployment
  * that selects Clerk uses `ClerkSessionProvider` and gets a 501 here.
  */
 export function LocalSessionProvider({ children }: { children: React.ReactNode }) {

@@ -18,8 +18,8 @@ import datetime as dt
 import zoneinfo
 
 import pytest
-from titan.db.enums import Region
-from titan.policy.schedule import (
+from coldops.db.enums import Region
+from coldops.policy.schedule import (
     EARLIEST_SEND_HOUR,
     LEAD_IN_HOURS,
     REGION_SEND_DAYS,

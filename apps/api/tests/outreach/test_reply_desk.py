@@ -6,9 +6,8 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, update
-from titan.db.enums import DraftStatus, OutboxStatus, ReplyClass, SuppressionReason
-from titan.db.models import (
+from coldops.db.enums import DraftStatus, OutboxStatus, ReplyClass, SuppressionReason
+from coldops.db.models import (
     InboundMessage,
     MessageApproval,
     MessageDraft,
@@ -16,12 +15,13 @@ from titan.db.models import (
     ReplyClassification,
     SenderIdentity,
 )
-from titan.db.session import get_sessionmaker
-from titan.delivery.outbox_worker import OutboxWorker
-from titan.delivery.providers.mock import MockEmailProvider
-from titan.delivery.suppression import suppress
-from titan.outreach import reply_desk
-from titan.outreach.reply_desk import DeskError, thread_headers
+from coldops.db.session import get_sessionmaker
+from coldops.delivery.outbox_worker import OutboxWorker
+from coldops.delivery.providers.mock import MockEmailProvider
+from coldops.delivery.suppression import suppress
+from coldops.outreach import reply_desk
+from coldops.outreach.reply_desk import DeskError, thread_headers
+from sqlalchemy import select, update
 
 from tests.delivery.conftest import NOW, build_sendable, sending_settings
 
@@ -268,7 +268,7 @@ async def test_a_reply_not_threaded_to_us_still_finds_a_mailbox_with_the_gate_on
 ) -> None:
     """The bug that shipped: with the cold-mail gate on and no test inbox, the
     pool said no mailbox could send, and an answer was refused outright."""
-    from titan.delivery import sender_pool
+    from coldops.delivery import sender_pool
 
     # Not threaded to one of our messages: the mailbox comes from the pool.
     fixture, draft_id = await _replied(
@@ -302,7 +302,7 @@ async def test_a_mailbox_full_of_held_cold_drafts_still_carries_an_answer(
 ) -> None:
     """The second bug that shipped: arslan@ at 10 of 10, all of it cold drafts
     waiting behind the gate, and the one answer to a real person refused."""
-    from titan.db.models import SenderIdentity
+    from coldops.db.models import SenderIdentity
 
     fixture, draft_id = await _replied(
         db_session, workspace, body="Thanks, Tuesday works.\n", threaded=False
@@ -359,7 +359,7 @@ async def test_a_reply_to_an_unbracketed_message_id_is_sent_not_cancelled(
     """Exactly what happened to the first live reply: the collector's bare
     Message-ID, the cold-mail gate on, and the worker cancelling it under the
     cold rules (lead replied, no evidence, score)."""
-    from titan.db.models import SenderIdentity
+    from coldops.db.models import SenderIdentity
 
     fixture, draft_id = await _replied(
         db_session, workspace, their_id="CAPYiLBo@mail.gmail.com"

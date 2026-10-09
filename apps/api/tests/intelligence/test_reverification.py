@@ -17,18 +17,18 @@ import datetime as dt
 import uuid
 
 import pytest
-from titan.db.enums import (
+from coldops.db.enums import (
     SENDABLE_VERIFICATION_STATUSES,
     ContactSource,
     VerificationStatus,
 )
-from titan.intelligence.reverification import (
+from coldops.intelligence.reverification import (
     RECHECKABLE,
     Candidate,
     ReverifyReport,
     reverify,
 )
-from titan.intelligence.verifier import VerificationResult
+from coldops.intelligence.verifier import VerificationResult
 
 
 class ScriptedVerifier:
@@ -115,7 +115,7 @@ def test_the_report_counts_what_it_learned() -> None:
 @pytest.fixture
 async def channel(db_session, workspace):
     """One first-party address, sendable on provenance and never checked."""
-    from titan.db.models import Contact, ContactChannel, Organization
+    from coldops.db.models import Contact, ContactChannel, Organization
 
     tag = uuid.uuid4().hex[:8]
     org = Organization(
@@ -154,8 +154,8 @@ async def channel(db_session, workspace):
 
 async def test_a_dry_run_records_nothing(db_session, workspace, channel) -> None:
     """The whole point of a dry run on 611 addresses somebody is about to mail."""
+    from coldops.db.models import ContactChannel, ContactVerification
     from sqlalchemy import func, select
-    from titan.db.models import ContactChannel, ContactVerification
 
     verifier = ScriptedVerifier({channel.normalized_value: invalid()})
 
@@ -183,8 +183,8 @@ async def test_a_dry_run_records_nothing(db_session, workspace, channel) -> None
 async def test_applying_downgrades_the_channel_and_appends_the_check(
     db_session, workspace, channel
 ) -> None:
+    from coldops.db.models import ContactVerification
     from sqlalchemy import select
-    from titan.db.models import ContactVerification
 
     verifier = ScriptedVerifier({channel.normalized_value: invalid()})
 
@@ -229,8 +229,8 @@ async def test_every_check_is_recorded_even_when_nothing_moved(
     would have opened 531 more connections to servers that had already
     answered. The row is the record of having asked, not a diff.
     """
+    from coldops.db.models import ContactVerification
     from sqlalchemy import select
-    from titan.db.models import ContactVerification
 
     # UNKNOWN is not conclusive, so the status will not move.
     verifier = ScriptedVerifier({})
@@ -299,7 +299,7 @@ async def test_a_discovery_row_does_not_count_as_having_asked(
     """
     import datetime as dt
 
-    from titan.db.models import ContactVerification
+    from coldops.db.models import ContactVerification
 
     db_session.add(
         ContactVerification(

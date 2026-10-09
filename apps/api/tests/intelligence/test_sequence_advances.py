@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.intelligence.sequencing import (
+from coldops.intelligence.sequencing import (
     FollowUpContext,
     SkipReason,
     Step,

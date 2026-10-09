@@ -13,20 +13,19 @@ from dataclasses import replace
 from unittest import mock
 
 import pytest
-from sqlalchemy import select
-from titan.activities.orchestration import (
+from coldops.activities.orchestration import (
     _read_fuel,
     _select_leads,
     plan_campaign_cycle,
 )
-from titan.db.enums import (
+from coldops.db.enums import (
     CampaignStatus,
     ContactSource,
     LeadStatus,
     MessageState,
     VerificationStatus,
 )
-from titan.db.models import (
+from coldops.db.models import (
     Campaign,
     CampaignPolicy,
     Contact,
@@ -35,9 +34,10 @@ from titan.db.models import (
     Message,
     Organization,
 )
-from titan.db.models.ops import Task
-from titan.db.session import workspace_unit_of_work
-from titan.workflows.types import CampaignCycleInput, CycleVerdict
+from coldops.db.models.ops import Task
+from coldops.db.session import workspace_unit_of_work
+from coldops.workflows.types import CampaignCycleInput, CycleVerdict
+from sqlalchemy import select
 
 from tests.delivery.conftest import build_sendable
 
@@ -102,7 +102,7 @@ async def test_todays_sends_are_subtracted_from_the_send_budget(db_session, work
 
     What changed is what that budget governs. It used to gate research too, so
     intake was capped at the send rate and a reserve could never form -- see
-    ``titan.intelligence.fuel``. ``remaining_budget`` reaching zero is still
+    ``coldops.intelligence.fuel``. ``remaining_budget`` reaching zero is still
     correct and still reported; it simply no longer stops the pipeline from
     filling the tank for tomorrow.
     """
@@ -398,7 +398,7 @@ async def add_reachable_leads(
 ) -> None:
     """Leads holding a published address that nobody has written to yet.
 
-    Exactly what ``titan.intelligence.fuel`` counts as the reserve: an address,
+    Exactly what ``coldops.intelligence.fuel`` counts as the reserve: an address,
     no suppression, no message. Built here rather than in ``build_sendable``
     because that fixture's lead carries a message and so is, by definition, not
     in the reserve at all.
@@ -490,7 +490,7 @@ async def test_a_jammed_crawler_bounds_the_send_side_too(db_session, workspace):
         real = await _read_fuel(session, workspace_id=workspace_id)
         return replace(real, in_flight=real.queue_ceiling + 10)
 
-    with mock.patch("titan.activities.orchestration._read_fuel", saturated):
+    with mock.patch("coldops.activities.orchestration._read_fuel", saturated):
         plan = await plan_campaign_cycle(request_for(workspace, fixture.campaign_id))
 
     assert plan.remaining_budget == 50, "the day's sends are not spent"

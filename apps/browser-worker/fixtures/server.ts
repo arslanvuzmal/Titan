@@ -42,7 +42,7 @@ const sites: Record<string, Record<string, Route>> = {
     '/': {
       body: html(
         'Harborline Legal — Fictional Law Firm',
-        `<meta name="description" content="Harborline Legal, a fictional firm used for Titan-OS test fixtures.">
+        `<meta name="description" content="Harborline Legal, a fictional firm used for ColdOps test fixtures.">
 <h1>Harborline Legal</h1>
 <nav><a href="/lawfirm/services">Services</a> <a href="/lawfirm/contact">Contact</a></nav>
 <a data-testid="consultation-cta" href="/lawfirm/blank">Book a free consultation</a>
@@ -297,5 +297,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  process.stderr.write(`titan fixture sites listening on :${PORT}\n`);
+  process.stderr.write(`coldops fixture sites listening on :${PORT}\n`);
 });

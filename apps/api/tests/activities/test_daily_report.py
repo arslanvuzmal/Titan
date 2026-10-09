@@ -11,10 +11,10 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.activities.daily_report import send_daily_report_for
+from coldops.db.models import Message
+from coldops.db.models.ops import Task
 from sqlalchemy import func, select
-from titan.activities.daily_report import send_daily_report_for
-from titan.db.models import Message
-from titan.db.models.ops import Task
 
 from tests.delivery.conftest import build_sendable
 
@@ -190,8 +190,8 @@ async def test_the_healthcheck_is_pinged_only_after_the_mail_actually_went(
 ):
     """Planted violation: ping regardless of the send's outcome.
 
-    The ping is what tells the external watchdog Titan is alive. Pinging after
-    a failed send would silence the one alarm that still works when Titan
+    The ping is what tells the external watchdog ColdOps is alive. Pinging after
+    a failed send would silence the one alarm that still works when ColdOps
     cannot mail anybody.
     """
     await build_sendable(db_session, workspace)

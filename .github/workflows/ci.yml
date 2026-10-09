@@ -115,11 +115,11 @@ jobs:
       - name: Coverage floor on safety-critical modules
         run: |
           coverage report --fail-under=90 \
-            --include="titan/policy/*,titan/delivery/quotas.py,titan/delivery/suppression.py,titan/security/url_guard.py,titan/intelligence/message_validator.py"
+            --include="coldops/policy/*,coldops/delivery/quotas.py,coldops/delivery/suppression.py,coldops/security/url_guard.py,coldops/intelligence/message_validator.py"
 
       - name: Generated .env.example is current
         run: |
-          python -m titan.cli env-example -o /tmp/env.generated
+          python -m coldops.cli env-example -o /tmp/env.generated
           diff -u ../../.env.example /tmp/env.generated
 
       # Audits the resolved dependency set rather than the installed

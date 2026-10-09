@@ -8,7 +8,7 @@ database fixture.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.reporting import (
+from coldops.intelligence.reporting import (
     MIN_VOLUME_FOR_RATES,
     DeliverabilityHealth,
     Health,
@@ -21,7 +21,7 @@ from titan.intelligence.reporting import (
 
 def report(**overrides) -> WeeklyReport:
     base = {
-        "workspace_name": "Titan",
+        "workspace_name": "ColdOps",
         "period_start": "2026-08-03",
         "period_end": "2026-08-10",
     }

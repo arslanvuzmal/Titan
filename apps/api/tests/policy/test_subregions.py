@@ -11,9 +11,9 @@ from __future__ import annotations
 import zoneinfo
 
 import pytest
-from titan.db.enums import Region, SubRegion
-from titan.policy.schedule import resolve_timezone
-from titan.policy.subregions import (
+from coldops.db.enums import Region, SubRegion
+from coldops.policy.schedule import resolve_timezone
+from coldops.policy.subregions import (
     SPLIT_ADMIN_AREAS,
     SUBREGION_REGIONS,
     SUBREGION_TIMEZONES,

@@ -1,6 +1,6 @@
 """Clerk token verification tests.
 
-The verifier is the front door for a deployed Titan, so these concentrate on
+The verifier is the front door for a deployed ColdOps, so these concentrate on
 what it must *refuse*. A verifier that accepts the right token is easy; one
 that rejects every wrong token is the security property.
 
@@ -18,10 +18,10 @@ import httpx
 import jwt
 import pytest
 import pytest_asyncio
+from coldops.api.clerk import JWKS_PATH, ClerkAuthError, ClerkVerifier
 from cryptography.hazmat.primitives.asymmetric import rsa
 from sqlalchemy import func as sa_func
 from sqlalchemy import select as sa_select
-from titan.api.clerk import JWKS_PATH, ClerkAuthError, ClerkVerifier
 
 ISSUER = "https://clerk.titan-fixture.test"
 
@@ -329,23 +329,23 @@ async def clerk_client(jwks_server, monkeypatch, database_available: bool):
     import os
 
     if not database_available:
-        pytest.skip("integration database unavailable (set TITAN_TEST_DATABASE_URL)")
+        pytest.skip("integration database unavailable (set COLDOPS_TEST_DATABASE_URL)")
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
     # Settings is frozen by design, so the mode is switched through the
     # environment it actually reads rather than by mutating the instance.
-    monkeypatch.setenv("TITAN_AUTH_MODE", "clerk")
-    monkeypatch.setenv("TITAN_CLERK_ISSUER_URL", ISSUER)
+    monkeypatch.setenv("COLDOPS_AUTH_MODE", "clerk")
+    monkeypatch.setenv("COLDOPS_CLERK_ISSUER_URL", ISSUER)
 
-    from titan.config import get_settings
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
 
-    from titan.api import security
+    from coldops.api import security
 
     monkeypatch.setattr(security, "get_clerk_verifier", lambda *_a, **_k: jwks_server[0])
 
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -371,9 +371,9 @@ async def test_a_verified_email_binds_to_an_existing_account_once(
     clerk_client, jwks_server, workspace
 ) -> None:
     """The intended first sign-in: an operator-created account, claimed."""
-    from titan.db.enums import WorkspaceRole
-    from titan.db.models import User
-    from titan.db.session import get_sessionmaker
+    from coldops.db.enums import WorkspaceRole
+    from coldops.db.models import User
+    from coldops.db.session import get_sessionmaker
 
     from tests.api.test_api_security import make_member
 
@@ -409,7 +409,7 @@ async def test_an_unverified_email_cannot_claim_an_account(
     clerk_client, jwks_server, workspace
 ) -> None:
     """Otherwise anyone who can assert an address takes over that account."""
-    from titan.db.enums import WorkspaceRole
+    from coldops.db.enums import WorkspaceRole
 
     from tests.api.test_api_security import make_member
 

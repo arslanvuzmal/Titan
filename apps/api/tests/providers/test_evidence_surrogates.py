@@ -30,7 +30,7 @@ import json
 import re
 
 import pytest
-from titan.contracts.evidence import PageEvidence, scrub_surrogates
+from coldops.contracts.evidence import PageEvidence, scrub_surrogates
 
 #: A lone high surrogate, exactly as a truncated four-byte emoji arrives.
 LONE_HIGH = "\ud83d"

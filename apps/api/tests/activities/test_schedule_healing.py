@@ -12,9 +12,9 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.activities.schedule_healing import heal_schedules_for
+from coldops.db.models.ops import Task
 from sqlalchemy import select
-from titan.activities.schedule_healing import heal_schedules_for
-from titan.db.models.ops import Task
 
 from tests.workflows.test_schedule_health import (
     FakeClient,

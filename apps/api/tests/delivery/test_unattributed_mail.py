@@ -15,8 +15,8 @@ the part that was wrong.
 
 from __future__ import annotations
 
-from titan.delivery.inbound import alerts_the_operator
-from titan.intelligence.replies import ReplyKind
+from coldops.delivery.inbound import alerts_the_operator
+from coldops.intelligence.replies import ReplyKind
 
 
 def test_a_reply_to_something_we_sent_alerts():

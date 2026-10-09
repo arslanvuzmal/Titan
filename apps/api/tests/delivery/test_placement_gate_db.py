@@ -11,13 +11,13 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.db.enums import OutboxStatus
+from coldops.db.models import OutboxMessage, SenderIdentity, Workspace
+from coldops.db.session import get_sessionmaker
+from coldops.delivery import placement_gate, sender_pool
+from coldops.delivery.outbox_worker import OutboxWorker
+from coldops.delivery.providers.mock import MockEmailProvider
 from sqlalchemy import select, text
-from titan.db.enums import OutboxStatus
-from titan.db.models import OutboxMessage, SenderIdentity, Workspace
-from titan.db.session import get_sessionmaker
-from titan.delivery import placement_gate, sender_pool
-from titan.delivery.outbox_worker import OutboxWorker
-from titan.delivery.providers.mock import MockEmailProvider
 
 from .conftest import NOW, build_sendable, sending_settings
 

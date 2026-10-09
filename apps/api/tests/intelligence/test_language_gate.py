@@ -1,6 +1,6 @@
 """Where an English cold email is a reasonable thing to send.
 
-Titan writes English and writes to local small businesses. A message the owner
+ColdOps writes English and writes to local small businesses. A message the owner
 cannot comfortably read is not a weaker message -- it is a spam complaint, and
 the complaint is charged to a mailbox that took three weeks to warm.
 
@@ -11,8 +11,8 @@ deliberate act with a failing test attached rather than a quiet edit.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence import territories as T
-from titan.intelligence.languages import (
+from coldops.intelligence import territories as T
+from coldops.intelligence.languages import (
     EF_EPI_2025,
     VERY_HIGH,
     english_outreach_ok,
@@ -46,7 +46,7 @@ def test_native_english_needs_no_score() -> None:
 
 
 def test_the_gulf_passes_on_its_own_reasoning() -> None:
-    """English is the working language of the private clinics Titan sells to
+    """English is the working language of the private clinics ColdOps sells to
     there. Held apart from the population index rather than folded into it."""
     assert english_outreach_ok("AE")
     assert english_score("AE") is None

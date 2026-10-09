@@ -1,7 +1,7 @@
 """Addresses that are the wrong recipient, whoever published them.
 
 Every one of these was found on a business's own website, is syntactically
-perfect, and would pass every deliverability layer Titan has. What makes them
+perfect, and would pass every deliverability layer ColdOps has. What makes them
 refusals is not that they bounce -- it is that nobody at the other end wanted
 this message, and one of them is how a domain gets reported by the person whose
 job is reporting things.
@@ -10,8 +10,8 @@ job is reporting things.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import ContactSource, VerificationStatus
-from titan.intelligence.contacts import (
+from coldops.db.enums import ContactSource, VerificationStatus
+from coldops.intelligence.contacts import (
     NEVER_CONTACT_LOCAL_PARTS,
     check_contact_eligibility,
     normalize_email,

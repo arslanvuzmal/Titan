@@ -17,13 +17,13 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from coldops.activities.research import requires_human_approval
+from coldops.config import OperatingMode, Settings
+from coldops.db.enums import CampaignStatus, Industry
+from coldops.db.models import Campaign, CampaignPolicy, Workspace
+from coldops.db.session import get_sessionmaker
+from coldops.workflows.types import ResearchLeadInput
 from sqlalchemy import select
-from titan.activities.research import requires_human_approval
-from titan.config import OperatingMode, Settings
-from titan.db.enums import CampaignStatus, Industry
-from titan.db.models import Campaign, CampaignPolicy, Workspace
-from titan.db.session import get_sessionmaker
-from titan.workflows.types import ResearchLeadInput
 
 pytestmark = pytest.mark.asyncio
 
@@ -84,7 +84,7 @@ async def test_autopilot_and_opted_in_needs_no_human(workspace) -> None:
         auto_approve=True,
     )
 
-    with patch("titan.activities.research.get_settings", autopilot_settings):
+    with patch("coldops.activities.research.get_settings", autopilot_settings):
         assert await requires_human_approval(request_for(workspace, campaign_id)) is False
 
 
@@ -98,7 +98,7 @@ async def test_autopilot_without_the_opt_in_still_needs_a_human(workspace) -> No
         auto_approve=False,
     )
 
-    with patch("titan.activities.research.get_settings", autopilot_settings):
+    with patch("coldops.activities.research.get_settings", autopilot_settings):
         assert await requires_human_approval(request_for(workspace, campaign_id)) is True
 
 
@@ -112,7 +112,7 @@ async def test_opting_in_does_not_climb_the_mode_ladder(workspace) -> None:
         auto_approve=True,
     )
 
-    with patch("titan.activities.research.get_settings", autopilot_settings):
+    with patch("coldops.activities.research.get_settings", autopilot_settings):
         assert await requires_human_approval(request_for(workspace, campaign_id)) is True
 
 
@@ -151,5 +151,5 @@ async def test_a_policy_written_without_an_opinion_keeps_the_human_gate(
         ).scalar_one()
         assert stored.auto_approve is False
 
-    with patch("titan.activities.research.get_settings", autopilot_settings):
+    with patch("coldops.activities.research.get_settings", autopilot_settings):
         assert await requires_human_approval(request_for(workspace, campaign_id)) is True

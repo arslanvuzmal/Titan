@@ -10,7 +10,7 @@ This is the single source. A fixture that needs a message that passes today's
 rules asks for one here; when the rules change, this file changes and the
 fixtures follow.
 
-Nothing here is generated from :mod:`titan.intelligence.composer`. A fixture
+Nothing here is generated from :mod:`coldops.intelligence.composer`. A fixture
 built by the code under test cannot catch that code writing something the
 validator refuses -- which is the entire point of the drafting tests.
 """

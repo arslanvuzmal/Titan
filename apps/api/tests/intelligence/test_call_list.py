@@ -10,7 +10,7 @@ database returned.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.call_list import (
+from coldops.intelligence.call_list import (
     MAX_EVIDENCE_AGE_DAYS,
     CallTarget,
     freshness_penalty,

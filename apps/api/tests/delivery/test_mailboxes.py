@@ -2,7 +2,7 @@
 
 Hermetic: nothing opens a socket, and no real credential appears anywhere in
 this file. What is being tested is the refusal behaviour -- a mailbox file is
-the one place in Titan where a quiet, partial success would put mail on the
+the one place in ColdOps where a quiet, partial success would put mail on the
 wire under the wrong authentication.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from titan.delivery.mailboxes import (
+from coldops.delivery.mailboxes import (
     MailboxConfigError,
     load_mailboxes,
     parse_mailboxes,

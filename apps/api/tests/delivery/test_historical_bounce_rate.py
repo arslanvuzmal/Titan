@@ -19,8 +19,8 @@ before address verification existed, the most recent nine days old.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.adaptive_limits import PROBATION_QUIET_DAYS, daily_limit
-from titan.delivery.deliverability import (
+from coldops.delivery.adaptive_limits import PROBATION_QUIET_DAYS, daily_limit
+from coldops.delivery.deliverability import (
     BOUNCE_QUIET_DAYS,
     BOUNCE_RATE_PAUSE,
     MIN_SAMPLE_FOR_RATES,
@@ -28,7 +28,7 @@ from titan.delivery.deliverability import (
     Severity,
     check_reputation,
 )
-from titan.delivery.sender_health import SenderHealth
+from coldops.delivery.sender_health import SenderHealth
 
 #: The live mailbox, to the number: 5 hard bounces over 94 sends = 5.32%.
 LIVE_SENT = 94

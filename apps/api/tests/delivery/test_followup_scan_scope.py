@@ -25,10 +25,10 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from coldops.db.models import Lead
+from coldops.db.session import workspace_unit_of_work
+from coldops.delivery.followup_scheduler import FollowUpScheduler
 from sqlalchemy import select
-from titan.db.models import Lead
-from titan.db.session import workspace_unit_of_work
-from titan.delivery.followup_scheduler import FollowUpScheduler
 
 from tests.delivery.conftest import build_sendable
 

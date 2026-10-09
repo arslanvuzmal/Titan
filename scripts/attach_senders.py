@@ -13,9 +13,9 @@ get" and this cannot drift from it.
 import asyncio
 import sys
 
-from titan.db.session import get_sessionmaker
-from titan.db.models import Workspace
-from titan.provision_senders import _attach_to_campaigns
+from coldops.db.session import get_sessionmaker
+from coldops.db.models import Workspace
+from coldops.provision_senders import _attach_to_campaigns
 from sqlalchemy import select
 
 

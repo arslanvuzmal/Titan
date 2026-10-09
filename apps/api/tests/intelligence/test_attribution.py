@@ -12,7 +12,7 @@ their developer checks, and it makes every other claim in the message worthless.
 
 from __future__ import annotations
 
-from titan.intelligence.attribution import (
+from coldops.intelligence.attribution import (
     attributable_console_errors,
     attributable_requests,
     is_attributable_console_error,

@@ -1,6 +1,6 @@
 """Clinics, private hospitals and insurance.
 
-Three verticals added because the gap Titan sells against is widest there: a
+Three verticals added because the gap ColdOps sells against is widest there: a
 clinic that takes every booking by telephone during office hours is the exact
 shape of the problem, and until now there was no playbook to work one under.
 
@@ -11,8 +11,8 @@ led with booking would be selling the wrong thing to the whole vertical.
 
 from __future__ import annotations
 
-from titan.db.enums import Industry
-from titan.intelligence.playbooks import PLAYBOOKS, get_playbook, select_offers
+from coldops.db.enums import Industry
+from coldops.intelligence.playbooks import PLAYBOOKS, get_playbook, select_offers
 
 
 def test_the_three_new_verticals_have_playbooks() -> None:

@@ -1,6 +1,6 @@
 """Growing a mailbox's volume without a person deciding each step.
 
-Titan warmed its own sender identities and never touched the mailboxes that
+ColdOps warmed its own sender identities and never touched the mailboxes that
 actually send, whose ``max_email_per_day`` was a number somebody typed. The
 intelligence and the sending lived in different systems.
 
@@ -15,8 +15,8 @@ import datetime as dt
 import itertools
 import math
 
-from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES, ReputationWindow
-from titan.delivery.mailbox_ramp import (
+from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES, ReputationWindow
+from coldops.delivery.mailbox_ramp import (
     MIN_DAILY,
     WEEKLY_STEPS,
     decide,

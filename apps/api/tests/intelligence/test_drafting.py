@@ -10,14 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from titan.db.enums import Industry, ReplyClass
-from titan.intelligence.composer import FALLBACK_GREETING, ComposerContext, compose
-from titan.intelligence.message_validator import (
+from coldops.db.enums import Industry, ReplyClass
+from coldops.intelligence.composer import FALLBACK_GREETING, ComposerContext, compose
+from coldops.intelligence.message_validator import (
     MessageContext,
     ViolationCode,
     validate_message,
 )
-from titan.intelligence.reply_drafter import ReplyDraftContext, draft_reply
+from coldops.intelligence.reply_drafter import ReplyDraftContext, draft_reply
 
 OWNER = "Arslan Vuzmal Lone"
 PORTFOLIO = "https://arslanvuzmallone.dev"
@@ -216,7 +216,7 @@ def test_a_rejection_gets_no_draft_at_all():
 def test_a_pricing_draft_cannot_pass_validation():
     """The safety property this whole module rests on.
 
-    Titan has not seen enough to price the job, and a plausible-looking figure
+    ColdOps has not seen enough to price the job, and a plausible-looking figure
     is the most expensive thing it could put in writing. The draft leaves a
     marked blank, the validator refuses it, and queue_message refuses drafts
     that failed validation -- so it is not a convention that a human fills this

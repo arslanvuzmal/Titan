@@ -16,8 +16,8 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from titan.db.enums import LeadStatus
-from titan.intelligence.stale_runs import (
+from coldops.db.enums import LeadStatus
+from coldops.intelligence.stale_runs import (
     DEFAULT_BATCH,
     STALE_AFTER,
     StaleRun,
@@ -35,7 +35,7 @@ def test_researching_is_not_a_status_the_orchestrator_returns_to() -> None:
     Should that ever change, this test fails and the sweeper can be
     reconsidered rather than quietly kept forever.
     """
-    from titan.activities.orchestration import RESEARCHABLE_STATUSES
+    from coldops.activities.orchestration import RESEARCHABLE_STATUSES
 
     assert LeadStatus.RESEARCHING not in RESEARCHABLE_STATUSES
     assert LeadStatus.DISCOVERED in RESEARCHABLE_STATUSES, (
@@ -69,7 +69,7 @@ def test_analysis_records_counters_without_closing_the_run() -> None:
     """
     import inspect
 
-    from titan.activities import pipeline
+    from coldops.activities import pipeline
 
     source = inspect.getsource(pipeline.analyse_evidence)
     research_run_write = source.split("ResearchRun.__table__.update()")[1][:600]
@@ -102,7 +102,7 @@ def test_it_records_abandoned_rather_than_failed() -> None:
     very rates the learning loop exists to measure."""
     import inspect
 
-    from titan.intelligence import stale_runs
+    from coldops.intelligence import stale_runs
 
     source = inspect.getsource(stale_runs.reopen)
 
@@ -123,10 +123,10 @@ def test_a_stale_run_carries_what_the_caller_needs() -> None:
 
 class TestTheQueryShape:
     def _sql(self) -> str:
+        from coldops.db.models import Lead
+        from coldops.db.models.research import ResearchRun
         from sqlalchemy import select
         from sqlalchemy.dialects import postgresql
-        from titan.db.models import Lead
-        from titan.db.models.research import ResearchRun
 
         now = dt.datetime.now(dt.UTC)
         stmt = (

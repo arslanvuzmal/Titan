@@ -12,17 +12,17 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.db.enums import LeadStatus, ReplyClass, SuppressionReason
+from coldops.db.models import Lead, Message
+from coldops.db.models.compliance import SuppressionEntry
+from coldops.db.models.messaging import InboundMessage as InboundMessageRow
+from coldops.db.models.messaging import ReplyClassification as ReplyClassificationRow
+from coldops.db.session import workspace_unit_of_work
+from coldops.delivery.inbound import ingest_inbound, synthetic_inbound_id
+from coldops.delivery.mailbox import RawMessage
+from coldops.delivery.reply_collector import ReplyCollector
+from coldops.intelligence.replies import InboundMessage, ReplyKind
 from sqlalchemy import select
-from titan.db.enums import LeadStatus, ReplyClass, SuppressionReason
-from titan.db.models import Lead, Message
-from titan.db.models.compliance import SuppressionEntry
-from titan.db.models.messaging import InboundMessage as InboundMessageRow
-from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
-from titan.db.session import workspace_unit_of_work
-from titan.delivery.inbound import ingest_inbound, synthetic_inbound_id
-from titan.delivery.mailbox import RawMessage
-from titan.delivery.reply_collector import ReplyCollector
-from titan.intelligence.replies import InboundMessage, ReplyKind
 
 from tests.delivery.conftest import build_sendable
 
@@ -395,7 +395,7 @@ def raw_reply(*, from_email: str, in_reply_to: str, message_id: str) -> bytes:
 async def test_collector_matches_a_reply_by_its_threading_header(db_session, workspace):
     """The primary attribution path.
 
-    Matching on the Message-ID Titan recorded when it sent is exact. The sender
+    Matching on the Message-ID ColdOps recorded when it sent is exact. The sender
     fallback is not: a person may answer from a different address than the one
     written to, and a shared mailbox may answer for several leads.
     """

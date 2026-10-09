@@ -12,20 +12,20 @@ import dataclasses
 import datetime as dt
 
 import pytest
-from titan.config import OperatingMode, Settings
-from titan.db.enums import (
+from coldops.config import OperatingMode, Settings
+from coldops.db.enums import (
     CampaignStatus,
     ContactSource,
     LeadStatus,
     VerificationStatus,
 )
-from titan.policy.engine import (
+from coldops.policy.engine import (
     MAX_EVIDENCE_AGE,
     DenyCode,
     SendContext,
     evaluate_send,
 )
-from titan.policy.modes import Capability, resolve_mode
+from coldops.policy.modes import Capability, resolve_mode
 
 NOW = dt.datetime(2026, 8, 2, 14, 0, tzinfo=dt.UTC)
 

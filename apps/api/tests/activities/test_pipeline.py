@@ -5,7 +5,7 @@ whole chain -- evidence in, outbox row out -- is exercised for real: real
 inserts, real constraints, real immutability triggers, real suppression checks.
 
 The browser worker is stubbed rather than run because the crawl itself is
-covered by the TypeScript suite; what these prove is that Titan correctly turns
+covered by the TypeScript suite; what these prove is that ColdOps correctly turns
 a CrawlResult into findings, a score, a contact, a validated draft, and an
 outbox row -- and refuses at each gate when it should.
 """
@@ -16,21 +16,20 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select
-from titan.config import OperatingMode
-from titan.contracts.evidence import (
+from coldops.config import OperatingMode
+from coldops.contracts.evidence import (
     CrawlResult,
     CtaObservation,
     FormObservation,
     PageEvidence,
 )
-from titan.db.enums import (
+from coldops.db.enums import (
     CampaignStatus,
     Industry,
     LeadStatus,
     SuppressionReason,
 )
-from titan.db.models import (
+from coldops.db.models import (
     AuditFinding,
     Campaign,
     CampaignPolicy,
@@ -42,9 +41,9 @@ from titan.db.models import (
     ResearchRun,
     SenderIdentity,
 )
-from titan.db.session import get_sessionmaker
-from titan.delivery.suppression import suppress
-from titan.workflows.types import (
+from coldops.db.session import get_sessionmaker
+from coldops.delivery.suppression import suppress
+from coldops.workflows.types import (
     AnalyseActivityInput,
     ContactActivityInput,
     CrawlActivityInput,
@@ -53,6 +52,7 @@ from titan.workflows.types import (
     ResearchLeadInput,
     ScoreActivityInput,
 )
+from sqlalchemy import select
 
 pytestmark = pytest.mark.integration
 
@@ -75,7 +75,7 @@ def _mx_present(monkeypatch):
     ``test_a_domain_that_cannot_receive_mail_is_disqualified`` below. This
     fixture keeps the rest of the file testing what it is named for.
     """
-    from titan.intelligence.mx import BulkMxResult, MxCheck, MxStatus
+    from coldops.intelligence.mx import BulkMxResult, MxCheck, MxStatus
 
     def _present(domains, *, resolver=None):
         return BulkMxResult(
@@ -85,7 +85,7 @@ def _mx_present(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("titan.activities.pipeline.check_many", _present)
+    monkeypatch.setattr("coldops.activities.pipeline.check_many", _present)
 
 
 def crawl_payload(*, broken_cta: bool = True, with_email: bool = True) -> CrawlResult:
@@ -137,7 +137,7 @@ def crawl_payload(*, broken_cta: bool = True, with_email: bool = True) -> CrawlR
 
 async def seed_lead(workspace_id: uuid.UUID, *, suffix: str) -> dict:
     """A campaign, organization and lead ready for research."""
-    from titan.db.models import Organization
+    from coldops.db.models import Organization
 
     async with get_sessionmaker()() as session, session.begin():
         sender = SenderIdentity(
@@ -212,7 +212,7 @@ async def run_pipeline(
     """Drive the six activities directly, with the browser worker stubbed."""
     from unittest.mock import AsyncMock, patch
 
-    from titan.activities import pipeline, research
+    from coldops.activities import pipeline, research
 
     request = ResearchLeadInput(
         workspace_id=str(workspace_id),
@@ -231,7 +231,7 @@ async def run_pipeline(
             ra.info.return_value.attempt = 1
             run_id = await research.open_research_run(request)
 
-        with patch("titan.activities.pipeline.BrowserWorkerClient") as ClientCls:
+        with patch("coldops.activities.pipeline.BrowserWorkerClient") as ClientCls:
             instance = ClientCls.return_value
             instance.research = AsyncMock(return_value=payload)
             instance.aclose = AsyncMock()
@@ -351,7 +351,7 @@ async def test_the_message_cites_real_stored_evidence(db_session, workspace) -> 
                 )
             )
         ).scalar_one()
-        from titan.db.models import MessageDraft
+        from coldops.db.models import MessageDraft
 
         draft = await s.get(MessageDraft, draft_row.draft_id)
         assert draft.claim_map, "no claim map"
@@ -463,7 +463,7 @@ async def test_rerunning_the_pipeline_creates_no_duplicates(
 # ==========================================================================
 @pytest.mark.asyncio
 async def test_no_published_address_means_no_draft(db_session, workspace) -> None:
-    """Invariant 6: Titan does not invent an address when none is published."""
+    """Invariant 6: ColdOps does not invent an address when none is published."""
     ids = await seed_lead(workspace, suffix="noaddr")
     out = await run_pipeline(
         workspace,
@@ -505,7 +505,7 @@ async def test_a_domain_that_cannot_receive_mail_is_disqualified(
     verification_status, because MX proves a domain accepts mail and says
     nothing about whether a mailbox exists.
     """
-    from titan.intelligence.mx import BulkMxResult, MxCheck, MxStatus
+    from coldops.intelligence.mx import BulkMxResult, MxCheck, MxStatus
 
     def _absent(domains, *, resolver=None):
         return BulkMxResult(
@@ -515,7 +515,7 @@ async def test_a_domain_that_cannot_receive_mail_is_disqualified(
             }
         )
 
-    monkeypatch.setattr("titan.activities.pipeline.check_many", _absent)
+    monkeypatch.setattr("coldops.activities.pipeline.check_many", _absent)
 
     ids = await seed_lead(workspace, suffix="nomx")
     out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="nomx-1")
@@ -540,7 +540,7 @@ async def test_a_resolver_failure_is_not_a_disqualifier(
     def _explode(domains, *, resolver=None):
         raise OSError("resolver unreachable")
 
-    monkeypatch.setattr("titan.activities.pipeline.check_many", _explode)
+    monkeypatch.setattr("coldops.activities.pipeline.check_many", _explode)
 
     ids = await seed_lead(workspace, suffix="dnsfail")
     out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="dnsfail-1")
@@ -629,7 +629,7 @@ async def test_research_run_records_the_policy_snapshot(db_session, workspace) -
 @pytest.mark.asyncio
 async def test_findings_become_persisted_opportunities(db_session, workspace) -> None:
     """``business_opportunities`` had no writer until this stage existed."""
-    from titan.db.models import BusinessOpportunity, SolutionRecommendation
+    from coldops.db.models import BusinessOpportunity, SolutionRecommendation
 
     ids = await seed_lead(workspace, suffix="opp")
     out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="opp-1")
@@ -682,7 +682,7 @@ async def test_rerunning_analysis_replaces_rather_than_accumulates(
     Re-derivation is cheap and the previous set holds nothing the new one lacks,
     so the run's opportunities are replaced wholesale.
     """
-    from titan.db.models import BusinessOpportunity
+    from coldops.db.models import BusinessOpportunity
 
     ids = await seed_lead(workspace, suffix="oppidem")
     first = await run_pipeline(
@@ -714,7 +714,7 @@ async def test_rerunning_analysis_replaces_rather_than_accumulates(
 @pytest.mark.asyncio
 async def test_a_clean_site_produces_no_opportunity(db_session, workspace) -> None:
     """Nothing evidenced means nothing to sell, which is the correct outcome."""
-    from titan.db.models import BusinessOpportunity
+    from coldops.db.models import BusinessOpportunity
 
     ids = await seed_lead(workspace, suffix="oppclean")
     out = await run_pipeline(
@@ -791,7 +791,7 @@ async def test_an_unverified_sending_domain_cannot_be_used(db_session, workspace
     a domain with no DNS. Expiring the claim is what stops a flag somebody
     typed from authorising mail forever.
     """
-    from titan.db.models import SenderIdentity
+    from coldops.db.models import SenderIdentity
 
     ids = await seed_lead(workspace, suffix="stale-sender")
 
@@ -820,7 +820,7 @@ async def test_the_queued_message_comes_from_the_campaigns_pool(
     the pool were being ignored the message would go out from the campaign's own
     sender, and the assertion below would name it.
     """
-    from titan.db.models import CampaignSender, Message, SenderIdentity
+    from coldops.db.models import CampaignSender, Message, SenderIdentity
 
     ids = await seed_lead(workspace, suffix="pool-wired")
     legacy = uuid.UUID(ids["sender_id"])
@@ -880,7 +880,7 @@ async def test_a_campaign_whose_whole_pool_is_full_queues_nothing(
     """The refusal names the mailboxes rather than saying "no capacity", because
     the fix differs per mailbox: one waits for tomorrow, another for a DNS
     record."""
-    from titan.db.models import SenderIdentity
+    from coldops.db.models import SenderIdentity
 
     ids = await seed_lead(workspace, suffix="pool-full")
 
@@ -916,7 +916,7 @@ async def test_evidence_with_no_matching_offer_produces_no_draft(
     ``select_offers`` already documents an empty result as "there is nothing
     truthful to offer". Refusing is agreeing with it.
     """
-    monkeypatch.setattr("titan.activities.pipeline.select_offers", lambda *a, **k: [])
+    monkeypatch.setattr("coldops.activities.pipeline.select_offers", lambda *a, **k: [])
 
     ids = await seed_lead(workspace, suffix="nooffer")
     out = await run_pipeline(workspace, ids, payload=crawl_payload(), run_key="nooffer-1")
@@ -961,8 +961,8 @@ async def test_each_follow_up_leads_with_evidence_no_earlier_step_used(
     draft cites a finding none before it did, and the moment there is nothing
     new to say the pipeline refuses instead of repeating itself.
     """
-    from titan.activities import pipeline
-    from titan.outreach.sequence import TEMPLATE_KEYS
+    from coldops.activities import pipeline
+    from coldops.outreach.sequence import TEMPLATE_KEYS
 
     ids = await seed_lead(workspace, suffix="followup")
     first = await run_pipeline(
@@ -993,7 +993,7 @@ async def test_each_follow_up_leads_with_evidence_no_earlier_step_used(
         if not result.draft_id:
             refusal = result
             break
-        from titan.db.models import MessageDraft
+        from coldops.db.models import MessageDraft
 
         async with get_sessionmaker()() as session:
             draft = await session.get(MessageDraft, uuid.UUID(result.draft_id))

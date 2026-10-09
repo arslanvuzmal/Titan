@@ -1,6 +1,6 @@
 """A 5xx about *us* must not retire the business it was aimed at.
 
-:mod:`titan.intelligence.smtp_probe` learned this on its first live run. Three
+:mod:`coldops.intelligence.smtp_probe` learned this on its first live run. Three
 real addresses came back INVALID, and all three were refusals of *our* IP -- no
 PTR record, a Barracuda listing -- which apply to every recipient on the
 connection and say nothing about any mailbox. It grew
@@ -8,7 +8,7 @@ connection and say nothing about any mailbox. It grew
 
 The delivery adapter never inherited that. ``554`` sat in
 ``PERMANENT_REPLY_CODES`` as "this recipient will never accept mail", and
-Titan's own SMTP host answers a burst with::
+ColdOps's own SMTP host answers a burst with::
 
     554 5.7.1 <DATA>: Data command rejected:
         Reject: too many messages from sender in last 60 minutes
@@ -28,9 +28,9 @@ from __future__ import annotations
 import smtplib
 
 import pytest
-from titan.delivery.providers.base import PERMANENT_ERROR_KINDS, SendErrorKind
-from titan.delivery.providers.smtp import SmtpProvider
-from titan.intelligence.smtp_probe import is_sender_rejection
+from coldops.delivery.providers.base import PERMANENT_ERROR_KINDS, SendErrorKind
+from coldops.delivery.providers.smtp import SmtpProvider
+from coldops.intelligence.smtp_probe import is_sender_rejection
 
 
 def _provider(monkeypatch: pytest.MonkeyPatch, code: int, text: str) -> SmtpProvider:
@@ -45,7 +45,7 @@ def _provider(monkeypatch: pytest.MonkeyPatch, code: int, text: str) -> SmtpProv
 
 
 def _email():
-    from titan.delivery.providers.base import OutboundEmail
+    from coldops.delivery.providers.base import OutboundEmail
 
     return OutboundEmail(
         to_email="reception@realpractice.example",
@@ -61,7 +61,7 @@ class TestOurFaultDoesNotSuppress:
     @pytest.mark.parametrize(
         "code, text",
         [
-            # The exact reply from Titan's own host, 30 times on the live
+            # The exact reply from ColdOps's own host, 30 times on the live
             # workspace.
             (
                 554,

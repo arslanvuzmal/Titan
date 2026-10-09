@@ -12,7 +12,7 @@ this from being a machine that ranks cookie walls as perfect prospects.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.modernisation import (
+from coldops.intelligence.modernisation import (
     GAP_WEIGHTS,
     MIN_MEASURED_CAPABILITIES,
     VENDORS,
@@ -136,7 +136,7 @@ def test_the_score_is_withheld_below_the_floor() -> None:
     signals = {c: Signal.NOT_MEASURED for c in Capability}
     signals[Capability.CONVERSATIONAL] = Signal.ABSENT
     signals[Capability.ANALYTICS] = Signal.ABSENT
-    from titan.intelligence.modernisation import ModernisationProfile
+    from coldops.intelligence.modernisation import ModernisationProfile
 
     p = ModernisationProfile(signals=signals)
 
@@ -173,7 +173,7 @@ def test_missing_measurements_do_not_penalise_the_business() -> None:
     signals = dict(fully_traditional.signals)
     signals[Capability.ANALYTICS] = Signal.NOT_MEASURED
     signals[Capability.MODERN_SITE] = Signal.NOT_MEASURED
-    from titan.intelligence.modernisation import ModernisationProfile
+    from coldops.intelligence.modernisation import ModernisationProfile
 
     partial = ModernisationProfile(signals=signals)
 

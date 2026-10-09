@@ -8,7 +8,7 @@ not compare equal, somebody who asked not to be rung again gets rung again.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.phone import dial_key, same_line, strip_formatting
+from coldops.delivery.phone import dial_key, same_line, strip_formatting
 
 
 @pytest.mark.parametrize(

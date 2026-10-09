@@ -8,8 +8,8 @@ below are mostly the ones that look like the opposite of what they are.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import ReplyClass
-from titan.intelligence.intent import detect_intent
+from coldops.db.enums import ReplyClass
+from coldops.intelligence.intent import detect_intent
 
 
 def verdict(body: str, subject: str = "Re: your booking page"):
@@ -111,10 +111,10 @@ def test_only_a_clean_rejection_skips_the_human():
 
 
 def test_the_quoted_original_is_not_read_as_the_prospects_words():
-    """Titan's own pitch is written to sound enthusiastic.
+    """ColdOps's own pitch is written to sound enthusiastic.
 
     Left in, every reply carries a glowing case for the offer underneath it, and
-    the classifier reads Titan's enthusiasm as the prospect's. A one-word "No
+    the classifier reads ColdOps's enthusiasm as the prospect's. A one-word "No
     thanks." on top of a quoted pitch would come back as INTERESTED.
     """
     result = verdict(
@@ -248,7 +248,7 @@ def test_an_unmatched_reply_has_no_excerpt():
 
 
 def test_an_excerpt_never_swallows_an_unpunctuated_wall_of_text():
-    from titan.intelligence.intent import MAX_EXCERPT_CHARS
+    from coldops.intelligence.intent import MAX_EXCERPT_CHARS
 
     result = verdict("x " * 900 + "happy to chat " + "y " * 900)
 
@@ -257,7 +257,7 @@ def test_an_excerpt_never_swallows_an_unpunctuated_wall_of_text():
 
 
 def test_the_excerpt_is_drawn_from_the_reply_not_the_quoted_original():
-    """Titan's own pitch is full of the language these rules look for."""
+    """ColdOps's own pitch is full of the language these rules look for."""
     result = verdict(
         "No thanks.\n"
         "\n"

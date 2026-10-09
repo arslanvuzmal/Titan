@@ -23,9 +23,9 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from titan.activities.orchestration import UNMEASURED_PATIENCE, _select_leads
-from titan.db.enums import CampaignStatus, LeadStatus
-from titan.db.models import Campaign, Lead, Organization
+from coldops.activities.orchestration import UNMEASURED_PATIENCE, _select_leads
+from coldops.db.enums import CampaignStatus, LeadStatus
+from coldops.db.models import Campaign, Lead, Organization
 
 NOW = dt.datetime(2026, 9, 17, 12, 0, tzinfo=dt.UTC)
 

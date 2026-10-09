@@ -12,8 +12,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import delete, select, update
-from titan.db.enums import (
+from coldops.db.enums import (
     CampaignStatus,
     ContactSource,
     LeadStatus,
@@ -22,7 +21,7 @@ from titan.db.enums import (
     SuppressionReason,
     VerificationStatus,
 )
-from titan.db.models import (
+from coldops.db.models import (
     Campaign,
     ContactChannel,
     Lead,
@@ -30,12 +29,13 @@ from titan.db.models import (
     OutboxMessage,
     Workspace,
 )
-from titan.db.session import get_sessionmaker
-from titan.delivery import quotas
-from titan.delivery.outbox_worker import OutboxWorker
-from titan.delivery.providers.base import SendErrorKind
-from titan.delivery.providers.mock import MockEmailProvider
-from titan.delivery.suppression import is_suppressed, suppress
+from coldops.db.session import get_sessionmaker
+from coldops.delivery import quotas
+from coldops.delivery.outbox_worker import OutboxWorker
+from coldops.delivery.providers.base import SendErrorKind
+from coldops.delivery.providers.mock import MockEmailProvider
+from coldops.delivery.suppression import is_suppressed, suppress
+from sqlalchemy import delete, select, update
 
 from .conftest import NOW, build_sendable, sending_settings
 
@@ -766,8 +766,8 @@ async def _long_lived(workspace_id: uuid.UUID, *, suffix: str, until: dt.datetim
 
 
 async def _enable_window(campaign_id: uuid.UUID, *, days: list[int]) -> None:
-    from titan.db.enums import Region
-    from titan.db.models import CampaignPolicy
+    from coldops.db.enums import Region
+    from coldops.db.models import CampaignPolicy
 
     async with get_sessionmaker()() as s, s.begin():
         await s.execute(
@@ -829,8 +829,8 @@ async def _place_in(lead_id: uuid.UUID, *, admin_area: str, longitude: float) ->
     Nulling the timezone is the point: with one present, nothing below is
     exercised, because an exact fact about the recipient always wins.
     """
-    from titan.db.models import Lead as LeadRow
-    from titan.db.models.lead import OrganizationLocation
+    from coldops.db.models import Lead as LeadRow
+    from coldops.db.models.lead import OrganizationLocation
 
     async with get_sessionmaker()() as s, s.begin():
         org_id = (
@@ -856,8 +856,8 @@ async def test_a_pacific_business_is_not_scheduled_on_eastern(
     other is three hours before anybody has arrived -- which is exactly what the
     single market clock got wrong for half the country.
     """
-    from titan.db.enums import Region
-    from titan.db.models import CampaignPolicy
+    from coldops.db.enums import Region
+    from coldops.db.models import CampaignPolicy
 
     async with get_sessionmaker()() as s, s.begin():
         await s.execute(
@@ -890,8 +890,8 @@ async def test_an_eastern_business_at_the_same_moment_is_sent(
     db_session, sendable
 ) -> None:
     """The control. Same instant, same campaign, different coast."""
-    from titan.db.enums import Region
-    from titan.db.models import CampaignPolicy
+    from coldops.db.enums import Region
+    from coldops.db.models import CampaignPolicy
 
     async with get_sessionmaker()() as s, s.begin():
         await s.execute(
@@ -940,8 +940,8 @@ async def test_two_coasts_at_one_instant_record_different_hours(
     db_session, workspace
 ) -> None:
     """The whole point of recording it in their frame rather than ours."""
-    from titan.db.enums import Region
-    from titan.db.models.lead import OrganizationLocation
+    from coldops.db.enums import Region
+    from coldops.db.models.lead import OrganizationLocation
 
     async def place(fixture, *, admin_area: str, longitude: float):
         async with get_sessionmaker()() as s, s.begin():

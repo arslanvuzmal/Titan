@@ -10,8 +10,8 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.intelligence.mx import DomainDoesNotExist
-from titan.intelligence.sender_auth import (
+from coldops.intelligence.mx import DomainDoesNotExist
+from coldops.intelligence.sender_auth import (
     MAX_VERIFICATION_AGE,
     check_domain_auth,
     is_stale,

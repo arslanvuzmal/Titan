@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.db.enums import SmartleadEventType
-from titan.delivery.smartlead_events import events_from_row, fingerprint
+from coldops.db.enums import SmartleadEventType
+from coldops.delivery.smartlead_events import events_from_row, fingerprint
 
 CAMPAIGN = "3770052"
 

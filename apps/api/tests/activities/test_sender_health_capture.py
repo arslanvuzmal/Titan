@@ -16,11 +16,11 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
+from coldops.activities.sender_health import capture_sender_health
+from coldops.db.models import SenderHealthSnapshot
+from coldops.db.session import get_sessionmaker
+from coldops.workflows.types import CaptureSenderHealthInput
 from sqlalchemy import func, select
-from titan.activities.sender_health import capture_sender_health
-from titan.db.models import SenderHealthSnapshot
-from titan.db.session import get_sessionmaker
-from titan.workflows.types import CaptureSenderHealthInput
 
 from tests.delivery.conftest import build_sendable
 
@@ -121,9 +121,9 @@ def test_the_snapshot_runs_between_verification_and_the_ramp() -> None:
     yesterday's -- and a mailbox that lost its records overnight is already
     marked before anything decides how much it may send.
     """
-    from titan.workflows.mailbox_ramp import DEFAULT_CRON as ramp_cron
-    from titan.workflows.sender_health import DEFAULT_CRON as health_cron
-    from titan.workflows.verification import DEFAULT_CRON as verify_cron
+    from coldops.workflows.mailbox_ramp import DEFAULT_CRON as ramp_cron
+    from coldops.workflows.sender_health import DEFAULT_CRON as health_cron
+    from coldops.workflows.verification import DEFAULT_CRON as verify_cron
 
     def minutes(cron: str) -> int:
         minute, hour = cron.split()[:2]
@@ -137,7 +137,7 @@ def test_the_snapshot_runs_between_verification_and_the_ramp() -> None:
 
 def test_the_schedule_is_installed_at_all() -> None:
     """Built and never scheduled is indistinguishable from never built."""
-    from titan.workflows.schedules import plan_schedules
+    from coldops.workflows.schedules import plan_schedules
 
     jobs = {j.workflow for j in plan_schedules(uuid.uuid4(), task_queue="q")}
 

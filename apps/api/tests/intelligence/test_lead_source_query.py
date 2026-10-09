@@ -17,11 +17,11 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.activities.reporting import _lead_source_windows
+from coldops.db.models import Lead, LeadSource, Message
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.lead_sources import SourceGrade, classify
 from sqlalchemy import update
-from titan.activities.reporting import _lead_source_windows
-from titan.db.models import Lead, LeadSource, Message
-from titan.db.session import get_sessionmaker
-from titan.intelligence.lead_sources import SourceGrade, classify
 
 from tests.delivery.conftest import build_sendable
 
@@ -174,7 +174,7 @@ async def test_a_source_with_no_leads_is_absent(db_session, workspace) -> None:
 async def test_another_workspace_is_not_included(db_session, workspace) -> None:
     """Raw SQL carries its own workspace predicate; nothing about the session
     supplies one."""
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
     db_session.add(other)

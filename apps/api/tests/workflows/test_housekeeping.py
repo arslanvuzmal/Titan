@@ -21,7 +21,7 @@ def test_every_repair_activity_runs_on_the_maintenance_queue() -> None:
     import re
 
     source = pathlib.Path(
-        "titan/workflows/housekeeping.py"
+        "coldops/workflows/housekeeping.py"
     ).read_text(encoding="utf-8")
 
     starts = re.findall(r"start_to_close_timeout=TIMEOUT,\n(\s*)([a-z_]+)=", source)

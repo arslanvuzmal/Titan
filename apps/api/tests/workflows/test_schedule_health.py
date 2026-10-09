@@ -17,7 +17,7 @@ import datetime as dt
 import uuid
 
 import pytest
-from titan.workflows.schedule_health import (
+from coldops.workflows.schedule_health import (
     ScheduleObservation,
     Verdict,
     assess,
@@ -264,7 +264,7 @@ def estate(workspace: uuid.UUID = WS, **overrides) -> dict[str, FakeDescription]
 
 
 def _jobs(workspace: uuid.UUID = WS):
-    from titan.workflows.schedules import plan_schedules
+    from coldops.workflows.schedules import plan_schedules
 
     return plan_schedules(workspace, task_queue=QUEUE)
 
@@ -364,7 +364,7 @@ def test_the_supervisor_is_started_as_an_always_on_loop() -> None:
     """It belongs with the campaign orchestrators, which is the mechanism that
     demonstrably held: they cycled 232 times through the same window in which
     housekeeping's clock stopped and stayed stopped."""
-    from titan.workflows.schedules import plan_supervisor
+    from coldops.workflows.schedules import plan_supervisor
 
     start = plan_supervisor(WS, task_queue=QUEUE)
 
@@ -375,7 +375,7 @@ def test_the_supervisor_is_started_as_an_always_on_loop() -> None:
 def test_the_supervisors_id_is_stable_so_a_second_one_cannot_start() -> None:
     """Two watchdogs would reinstall the same schedule twice and file the
     notification twice. The id is the guard, exactly as it is for campaigns."""
-    from titan.workflows.schedules import plan_supervisor
+    from coldops.workflows.schedules import plan_supervisor
 
     assert plan_supervisor(WS, task_queue=QUEUE).workflow_id == (
         plan_supervisor(WS, task_queue=QUEUE).workflow_id
@@ -489,7 +489,7 @@ def test_a_result_from_before_the_field_existed_still_deserialises() -> None:
     repository already knew this -- the research workflow guards an added
     activity call behind `workflow.patched()` for the same reason.
     """
-    from titan.workflows.schedule_health import HealResult
+    from coldops.workflows.schedule_health import HealResult
 
     before = {"checked": 7, "healed": [], "unreadable": 0}
 
@@ -597,7 +597,7 @@ class TestTheFakeMatchesTheRealSdk:
     watchdog detected it correctly, tried the in-place update, read back that
     it had not worked, reached the repair of last resort and raised
     AttributeError. It then filed a task telling a human to "delete the
-    schedule and run titan schedules" -- an instruction it could have carried
+    schedule and run coldops schedules" -- an instruction it could have carried
     out itself -- into a CRM the operator reads through the daily report that
     was broken. Two days of silence.
 

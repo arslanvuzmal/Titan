@@ -6,13 +6,13 @@ import { CLERK_ENABLED } from '@/lib/authMode';
 import { LocalSessionProvider } from '@/lib/session';
 
 export const metadata: Metadata = {
-  title: 'Titan-OS CRM',
+  title: 'ColdOps CRM',
   description:
     'Evidence-first lead research, qualification, and controlled outreach.',
 };
 
 // Chosen at build time from the presence of a Clerk publishable key, matching
-// the API's own TITAN_AUTH_MODE. Both providers fill the same context, so no
+// the API's own COLDOPS_AUTH_MODE. Both providers fill the same context, so no
 // screen below here knows which one it is running under.
 //
 // CLERK_ENABLED must come from a module without 'use client': an export of a

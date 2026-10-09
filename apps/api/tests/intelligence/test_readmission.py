@@ -13,8 +13,8 @@ the tests below guard that direction.
 from __future__ import annotations
 
 import pytest
+from coldops.intelligence.readmission import readmit
 from sqlalchemy import text
-from titan.intelligence.readmission import readmit
 
 from tests.delivery.conftest import build_sendable
 

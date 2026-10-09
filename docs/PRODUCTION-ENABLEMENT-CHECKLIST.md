@@ -18,7 +18,7 @@ are. See `docs/audits/FINAL-PRODUCTION-VERIFICATION.md` section 4.
 Blocking, in order:
 
 - [x] **Model gateway** (§9) — implemented, **not live-verified**. Run
-      `titan validate-models` with a real key before relying on it: the
+      `coldops validate-models` with a real key before relying on it: the
       configured model IDs are placeholders.
 - [x] **Google Places adapter** (§6) — implemented, **not live-verified**.
       Confirm billing SKU expectations against the field masks before a large run.
@@ -30,7 +30,7 @@ Blocking, in order:
       currently no authenticated way to create a campaign or approve a draft.
 - [ ] **Inbound webhook route** — the endpoint referenced in section 1 below
       (`/api/v1/delivery/webhooks/resend`) **does not exist yet**. The handler
-      logic (`titan/delivery/webhooks.py`) is written and tested; the HTTP route
+      logic (`coldops/delivery/webhooks.py`) is written and tested; the HTTP route
       that calls it is not.
 - [ ] **Dashboard** (§17) — the shipped UI is still the pre-0.2 demo and renders
       fabricated analytics. Do not show it to anyone as Titan-OS.
@@ -76,9 +76,9 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
   - Set key as `TITAN_AGENT_REACH_API_KEY`.
 - [ ] **Model Gateway Providers:**
   - **NVIDIA:** Obtain a key (`nvapi-...`) → set `TITAN_NVIDIA_API_KEY`. Confirm
-    the exact model ids with `titan validate-models`; the defaults are placeholders.
+    the exact model ids with `coldops validate-models`; the defaults are placeholders.
   - **Google Gemini:** Obtain a key → set `TITAN_GEMINI_API_KEY`. Confirm the
-    exact model id with `titan validate-models`; the default in config is a placeholder.
+    exact model id with `coldops validate-models`; the default in config is a placeholder.
   - **OpenRouter:** Obtain key for fallback model routing → set `TITAN_OPENROUTER_API_KEY`.
   - **Cloudflare AI Gateway:** Obtain Account ID & Gateway Name for Claude routing → set `TITAN_CLOUDFLARE_API_TOKEN` (plus `TITAN_CLOUDFLARE_ACCOUNT_ID` and `TITAN_CLOUDFLARE_GATEWAY_ID`).
 
@@ -113,8 +113,8 @@ delivery path. Titan can safely run in `research_only` or `draft_only` mode.
   - Switch campaign mode to `approval_required`.
   - Verify drafts in approval queue UI. Confirm all claims link to verified evidence.
 - [ ] **Controlled Autopilot Activation:**
-  - Ensure all gates pass. Process level: `python -m titan.cli preflight`.
-    Per message: `titan.policy.engine.evaluate_send()` must return an allowed
+  - Ensure all gates pass. Process level: `python -m coldops.cli preflight`.
+    Per message: `coldops.policy.engine.evaluate_send()` must return an allowed
     decision, which it does only when every workspace, campaign, sender,
     contact, evidence, suppression and quota gate passes.
   - Enable workspace sending flag via owner API call.

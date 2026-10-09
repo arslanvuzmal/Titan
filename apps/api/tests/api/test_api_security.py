@@ -19,11 +19,10 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from titan.api.passwords import hash_passcode
-from titan.config import OperatingMode
-from titan.db.enums import CampaignStatus, DraftStatus, Industry, WorkspaceRole
-from titan.db.models import (
+from coldops.api.passwords import hash_passcode
+from coldops.config import OperatingMode
+from coldops.db.enums import CampaignStatus, DraftStatus, Industry, WorkspaceRole
+from coldops.db.models import (
     AuditLog,
     Campaign,
     CampaignPolicy,
@@ -36,7 +35,8 @@ from titan.db.models import (
     Workspace,
     WorkspaceMember,
 )
-from titan.db.session import get_sessionmaker
+from coldops.db.session import get_sessionmaker
+from sqlalchemy import select
 
 pytestmark = pytest.mark.integration
 
@@ -45,11 +45,11 @@ pytestmark = pytest.mark.integration
 async def client():
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -617,8 +617,8 @@ async def test_selecting_clerk_disables_local_token_issuance(client, monkeypatch
     provider" -- and a deployment that authenticates through Clerk must not
     also accept a second, locally-minted session.
     """
-    from titan.api import routes
-    from titan.config import Settings
+    from coldops.api import routes
+    from coldops.config import Settings
 
     clerk = Settings(
         environment="production",
@@ -676,8 +676,8 @@ async def test_repeated_wrong_passcodes_lock_the_account(
     the handler in `session.begin()`, and the increment was discarded on every
     failed attempt, leaving a lockout that never fired.
     """
-    from titan.api import routes
-    from titan.config import Settings
+    from coldops.api import routes
+    from coldops.config import Settings
 
     limited = Settings(
         auth_mode="local",

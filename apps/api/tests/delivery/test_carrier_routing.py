@@ -12,8 +12,8 @@ rather than substituting a market that happened to be reachable.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import Region
-from titan.delivery.carrier_routing import UNROUTABLE, CarrierMap, route_for_market
+from coldops.db.enums import Region
+from coldops.delivery.carrier_routing import UNROUTABLE, CarrierMap, route_for_market
 
 #: The six markets as they are actually provisioned on the live account.
 CARRIERS = CarrierMap(
@@ -84,7 +84,7 @@ def test_a_dubai_recipient_does_not_ride_the_london_clock() -> None:
 
 
 def test_two_recipients_of_one_campaign_can_ride_different_clocks() -> None:
-    """The property the whole change exists for: one Titan campaign, many
+    """The property the whole change exists for: one ColdOps campaign, many
     markets, each message on its recipient's own working day."""
     london = route("GB", campaign=3770052)
     sydney = route("AU", campaign=3770052)
@@ -205,7 +205,7 @@ def test_a_clock_carrier_is_not_used_for_a_lead_in_another_zone() -> None:
 
 
 def test_a_lead_with_no_stored_clock_still_routes_by_market() -> None:
-    """Every location Titan holds has a zone today, but the column is nullable
+    """Every location ColdOps holds has a zone today, but the column is nullable
     and a nullable column is eventually null."""
     decision = route("US", carriers=WITH_CLOCKS, timezone=None)
 

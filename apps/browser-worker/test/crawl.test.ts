@@ -14,7 +14,7 @@ import { before, describe, test } from 'node:test';
 import { runCrawl } from '../src/crawler.js';
 import type { ResearchRequest } from '../src/contract.js';
 
-const FIXTURE_PORT = Number(process.env.TITAN_FIXTURE_PORT ?? 8899);
+const FIXTURE_PORT = Number(process.env.COLDOPS_FIXTURE_PORT ?? 8899);
 const BASE = `http://localhost:${FIXTURE_PORT}`;
 
 let fixturesUp = false;
@@ -37,7 +37,7 @@ function request(seed: string, overrides: Partial<ResearchRequest> = {}): Resear
     timeout_seconds: 60,
     max_response_bytes: 5_000_000,
     max_redirects: 5,
-    user_agent: 'TitanOS-Research/0.2 (+https://arslanvuzmallone.dev/bot; evidence-only)',
+    user_agent: 'ColdOps-Research/0.2 (+https://arslanvuzmallone.dev/bot; evidence-only)',
     respect_robots: true,
     capture_screenshots: false,
     run_lighthouse: false,
@@ -260,7 +260,7 @@ describe('accessibility and timing collection', { concurrency: 1 }, () => {
     );
     assert.ok(perf!.largest_contentful_paint_ms! >= 0);
 
-    // Lighthouse category scores stay null: Titan does not run Lighthouse, and
+    // Lighthouse category scores stay null: ColdOps does not run Lighthouse, and
     // a derived number here would be a measurement nobody took.
     assert.equal(perf!.performance_score, null);
     assert.equal(perf!.accessibility_score, null);

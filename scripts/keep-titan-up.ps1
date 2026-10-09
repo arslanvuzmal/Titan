@@ -1,10 +1,10 @@
-# Keeps Titan running on a laptop that sleeps.
+# Keeps ColdOps running on a laptop that sleeps.
 #
 # The problem this solves, measured four times between 4 and 16 September 2026:
 # Docker Desktop's own autostart is a Run key under HKCU, and a Run key fires on
 # *login*. Waking from sleep is not a login -- the session resumes, the desktop
 # looks entirely normal, and the one process the whole estate depends on is
-# simply not running. Titan was down for 2 days 22 hours over 14-16 September
+# simply not running. ColdOps was down for 2 days 22 hours over 14-16 September
 # for exactly this, costing three consecutive working days of sending, and
 # nothing noticed because everything that could notice runs inside Docker.
 #
@@ -19,13 +19,13 @@
 #
 # What it deliberately does NOT do: wake the machine. That is genuinely
 # privileged, and nothing running as a normal user can do it. While the laptop
-# is asleep Titan is stopped, and the only fixes for that are not sleeping it or
-# moving Titan to a host that never does.
+# is asleep ColdOps is stopped, and the only fixes for that are not sleeping it or
+# moving ColdOps to a host that never does.
 
 $ErrorActionPreference = "Stop"
 
 $DockerExe   = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-$LogPath     = Join-Path $env:LOCALAPPDATA "Titan\keep-titan-up.log"
+$LogPath     = Join-Path $env:LOCALAPPDATA "ColdOps\keep-titan-up.log"
 $PollSeconds = 120
 
 # After launching Docker, give the engine time to come up before judging it
@@ -56,7 +56,7 @@ function Write-Log([string]$Message) {
     $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
     Add-Content -Path $LogPath -Value $line -Encoding utf8
     # Keep the log from growing without bound. Trimmed rather than rotated: this
-    # is a breadcrumb trail for "why did Titan restart at 3am", not an audit log.
+    # is a breadcrumb trail for "why did ColdOps restart at 3am", not an audit log.
     if ((Get-Item $LogPath).Length -gt 1MB) {
         $keep = Get-Content $LogPath -Tail 2000
         Set-Content -Path $LogPath -Value $keep -Encoding utf8

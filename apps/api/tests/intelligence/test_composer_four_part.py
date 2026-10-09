@@ -25,16 +25,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from titan.intelligence import composer as C
-from titan.intelligence import message_validator as mv
-from titan.intelligence.case_studies import CaseStudy
-from titan.intelligence.composer import (
+from coldops.intelligence import composer as C
+from coldops.intelligence import message_validator as mv
+from coldops.intelligence.case_studies import CaseStudy
+from coldops.intelligence.composer import (
     OPT_OUT_LINE,
     ComposerContext,
     compose,
     family_for,
 )
-from titan.intelligence.references import REFERENCES, all_references, references_for
+from coldops.intelligence.references import REFERENCES, all_references, references_for
 
 ISSUE_TYPES = sorted(REFERENCES)
 
@@ -157,14 +157,14 @@ class TestWhatChangesIfTheyFixIt:
         self, issue_type: str
     ) -> None:
         """Written and kept, against the day the length budget allows it back."""
-        from titan.intelligence.composer import _UPSIDE_DETAIL
+        from coldops.intelligence.composer import _UPSIDE_DETAIL
 
         assert _UPSIDE_DETAIL.get(issue_type, "").strip(), (
             f"{issue_type} lost its upside copy while the paragraph was shelved"
         )
 
     def test_the_shelved_copy_still_reads_as_a_consequence_of_the_repair(self) -> None:
-        from titan.intelligence.composer import _UPSIDE_DETAIL
+        from coldops.intelligence.composer import _UPSIDE_DETAIL
 
         assert (
             "Once the button points somewhere that exists"
@@ -324,7 +324,7 @@ class TestTheOptOut:
 
     def test_the_offer_it_makes_is_one_the_system_keeps(self) -> None:
         """The footer promises suppression on request. Hold the classifier to it."""
-        from titan.intelligence.replies import InboundMessage, classify_reply
+        from coldops.intelligence.replies import InboundMessage, classify_reply
 
         for wording in (
             "Please don't contact me again.",
@@ -343,7 +343,7 @@ class TestTheOptOut:
 
     def test_a_request_to_fix_something_is_not_an_opt_out(self) -> None:
         """The most expensive false positive available: suppressing a hot lead."""
-        from titan.intelligence.replies import InboundMessage, classify_reply
+        from coldops.intelligence.replies import InboundMessage, classify_reply
 
         result = classify_reply(
             InboundMessage(

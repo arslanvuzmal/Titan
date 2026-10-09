@@ -11,10 +11,9 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import text
-from titan.db.enums import CampaignStatus, Industry
-from titan.db.models import Campaign, CampaignPolicy, Workspace
-from titan.outreach.consolidation import (
+from coldops.db.enums import CampaignStatus, Industry
+from coldops.db.models import Campaign, CampaignPolicy, Workspace
+from coldops.outreach.consolidation import (
     KEPT_TABLES,
     MOVED_TABLES,
     Move,
@@ -22,6 +21,7 @@ from titan.outreach.consolidation import (
     build_plan,
     vertical_name,
 )
+from sqlalchemy import text
 
 pytestmark = pytest.mark.asyncio
 
@@ -241,7 +241,7 @@ async def test_another_workspaces_rows_are_never_touched(db_session, workspace) 
 
 
 async def _leads(session, workspace_id, campaign_id, count: int) -> None:
-    from titan.db.models import Lead, Organization
+    from coldops.db.models import Lead, Organization
 
     for index in range(count):
         label = f"Org {uuid.uuid4().hex[:8]}-{index}"

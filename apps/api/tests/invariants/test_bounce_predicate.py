@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 
-from titan.delivery.bounces import COUNTS_AGAINST_REPUTATION
+from coldops.delivery.bounces import COUNTS_AGAINST_REPUTATION
 
 from tests.invariants.test_repository_invariants import API, python_sources
 
@@ -65,7 +65,7 @@ def test_every_reputation_query_excludes_soft_bounces() -> None:
     assert not offenders, (
         "these queries count every bounce as one that damages reputation, "
         f"including soft ones: {sorted(set(offenders))}. Use the predicate in "
-        "titan.delivery.bounces.COUNTS_AGAINST_REPUTATION."
+        "coldops.delivery.bounces.COUNTS_AGAINST_REPUTATION."
     )
 
 

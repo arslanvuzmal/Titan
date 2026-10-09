@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import inspect
 
-from titan.delivery.webhooks import record_reply
-from titan.intelligence.replies import ReplyClassification, ReplyKind
+from coldops.delivery.webhooks import record_reply
+from coldops.intelligence.replies import ReplyClassification, ReplyKind
 
 
 def test_recording_a_reply_can_leave_the_sequence_running() -> None:
@@ -44,7 +44,7 @@ def test_an_unsubscribe_stops_it_and_suppresses() -> None:
 def test_the_timestamp_only_path_asks_for_no_stop() -> None:
     """The delivery poller has a time and no body. Whatever it does must not
     depend on what the message said, because it cannot know."""
-    from titan.activities import delivery_events
+    from coldops.activities import delivery_events
 
     source = inspect.getsource(delivery_events)
 

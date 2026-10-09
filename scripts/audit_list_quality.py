@@ -17,14 +17,14 @@ import sys
 
 from sqlalchemy import select
 
-from titan.db.enums import VerificationStatus, verification_permits_sending
-from titan.db.models import ContactChannel, Workspace
-from titan.db.session import get_sessionmaker
-from titan.intelligence.bounce_risk import assess
-from titan.intelligence.mx import check_mx, system_mx_resolver
+from coldops.db.enums import VerificationStatus, verification_permits_sending
+from coldops.db.models import ContactChannel, Workspace
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.bounce_risk import assess
+from coldops.intelligence.mx import check_mx, system_mx_resolver
 
 try:
-    from titan.intelligence.contacts import is_never_contact
+    from coldops.intelligence.contacts import is_never_contact
 except ImportError:
     is_never_contact = None
 

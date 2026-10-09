@@ -1,0 +1,2254 @@
+"""The six pipeline activities the research workflow drives.
+
+Each is idempotent on a key supplied by the workflow: a retry must find its own
+prior work rather than repeat it. Where an activity writes evidence, the write
+is keyed on a content fingerprint so a re-crawl of an unchanged page produces no
+duplicate rows.
+
+None of these sends anything. ``queue_message`` writes an outbox row; the outbox
+worker re-evaluates the entire authorization chain before any provider call.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import logging
+import uuid
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
+
+from sqlalchemy import func, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from temporalio import activity
+
+from coldops.config import get_settings
+from coldops.contracts.evidence import CrawlResult, fingerprint
+from coldops.db.enums import (
+    ContactSource,
+    DraftStatus,
+    Industry,
+    LeadStatus,
+    MessageState,
+    OutboxStatus,
+    Severity,
+    VerificationStatus,
+    verification_permits_sending,
+)
+from coldops.db.models import (
+    AuditFinding,
+    BrowserArtifact,
+    BusinessOpportunity,
+    Campaign,
+    CampaignPolicy,
+    Contact,
+    ContactChannel,
+    ContactVerification,
+    CrawlRun,
+    EmailSequence,
+    FindingEvidence,
+    Lead,
+    LeadScore,
+    Message,
+    MessageDraft,
+    Organization,
+    OutboxMessage,
+    Page,
+    ResearchRun,
+    SenderIdentity,
+    SequenceStep,
+    SolutionRecommendation,
+    Workspace,
+)
+from coldops.db.session import workspace_session, workspace_unit_of_work
+from coldops.delivery import sender_pool
+from coldops.delivery.suppression import is_suppressed
+from coldops.intelligence import case_studies, evidence_page
+from coldops.intelligence.absence import ABSENCE_ISSUE_TYPES, findings_from_gap
+from coldops.intelligence.address_history import AddressHistory, read_many
+from coldops.intelligence.bounce_risk import BounceRisk, assess
+from coldops.intelligence.composer import ComposerContext, compose, family_for
+from coldops.intelligence.contacts import (
+    DiscoveredContact,
+    check_contact_eligibility,
+    extract_contacts_from_pages,
+    preferred_replacement,
+    rank_contacts,
+)
+from coldops.intelligence.domain_health import WINDOW_DAYS, DomainWindow
+from coldops.intelligence.findings import DetectedFinding, detect_findings
+from coldops.intelligence.message_validator import (
+    MessageContext,
+    pitch_band,
+    pitch_of,
+    validate_message,
+)
+from coldops.intelligence.modernisation import (
+    PageSignals,
+)
+from coldops.intelligence.modernisation import (
+    merge as merge_modernisation,
+)
+from coldops.intelligence.modernisation import (
+    profile as modernisation_profile,
+)
+from coldops.intelligence.mx import MxCheck, check_many
+from coldops.intelligence.opportunities import DerivedOpportunity, derive_opportunities
+from coldops.intelligence.playbooks import get_playbook, select_offers
+from coldops.intelligence.scoring import ScoringInput
+from coldops.intelligence.scoring import score_lead as compute_score
+from coldops.intelligence.verifier import VerificationResult, build_verifier
+from coldops.intelligence.vernacular import Engine, engine_for
+from coldops.models.recording import record_calls
+from coldops.outreach import unsubscribe
+from coldops.providers.browser_client import BrowserWorkerClient
+from coldops.workflows.types import (
+    AnalyseActivityInput,
+    AnalyseActivityResult,
+    ContactActivityInput,
+    ContactActivityResult,
+    CrawlActivityInput,
+    CrawlActivityResult,
+    DraftActivityInput,
+    DraftActivityResult,
+    QueueActivityInput,
+    QueueActivityResult,
+    ScoreActivityInput,
+    ScoreActivityResult,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC)
+
+
+#: Outbox states that still represent a message on its way to somebody. SENT,
+#: CANCELLED and FAILED_PERMANENT are deliberately absent: once the first
+#: message has left (or provably will not), a second one is a follow-up rather
+#: than a duplicate, and blocking it would break the sequence.
+_UNSENT_OUTBOX_STATUSES = (
+    OutboxStatus.PENDING,
+    OutboxStatus.LEASED,
+    OutboxStatus.DEFERRED,
+)
+
+
+# ==========================================================================
+# 1. Crawl
+# ==========================================================================
+#: How often to tell Temporal a crawl is still alive.
+#:
+#: Comfortably inside the workflow's 90s ``heartbeat_timeout`` -- close enough
+#: that several beats can be missed before the activity is declared dead.
+HEARTBEAT_EVERY_SECONDS = 15.0
+
+
+_T = TypeVar("_T")
+
+
+async def _heartbeating(awaitable: Awaitable[_T], *, note: str) -> _T:
+    """Await something slow while telling Temporal it is still alive.
+
+    The crawl used to heartbeat once before dispatch and once after, with
+    nothing in between -- but a crawl may legitimately take longer than the 90s
+    heartbeat timeout (the HTTP client alone allows ``crawl_timeout_seconds +
+    60``, and a crawl also queues for a browser lane). Temporal cannot
+    distinguish a slow crawl from a dead worker without a beat, so it timed
+    them out: sixteen research workflows sat at ``Attempt 8 of 8`` with
+    ``activity Heartbeat timeout``, having crawled nothing.
+
+    Heartbeating on a timer rather than at checkpoints is the point. The wait is
+    inside one ``await`` we do not control, so there is nowhere to put a
+    checkpoint -- the beat has to come from beside the work, not within it.
+    """
+    task = asyncio.ensure_future(awaitable)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_EVERY_SECONDS)
+        if done:
+            return await task
+        # Guarded: this module is also exercised directly by tests and by
+        # operator commands, where there is no activity context and
+        # heartbeating raises.
+        if activity.in_activity():
+            activity.heartbeat(note)
+
+
+@activity.defn(name="crawl_lead_website")
+async def crawl_lead_website(request: CrawlActivityInput) -> CrawlActivityResult:
+    """Crawl the lead's site via the isolated worker and store the evidence."""
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_session(workspace_id) as session:
+        existing = (
+            (
+                await session.execute(
+                    select(CrawlRun).where(
+                        CrawlRun.research_run_id == uuid.UUID(request.research_run_id)
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            pages = await session.scalar(
+                select(func.count())
+                .select_from(Page)
+                .where(Page.crawl_run_id == existing.id)
+            )
+            return CrawlActivityResult(
+                crawl_run_id=str(existing.id),
+                status=existing.status,
+                pages_captured=int(pages or 0),
+                blocked_reason=existing.blocked_reason,
+            )
+
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        org = (
+            await session.get(Organization, lead.organization_id)
+            if lead is not None
+            else None
+        )
+        seed = request.seed_url or (org.website_url if org else "") or ""
+        industry = org.industry if org else None
+
+    if not seed:
+        return CrawlActivityResult(
+            crawl_run_id="",
+            status="failed",
+            pages_captured=0,
+            failure_reason="lead has no website URL",
+        )
+
+    playbook = (
+        get_playbook(industry)
+        if industry
+        else get_playbook(  # type: ignore[arg-type]
+            __import__("coldops.db.enums", fromlist=["Industry"]).Industry.GENERAL
+        )
+    )
+
+    client = BrowserWorkerClient()
+    try:
+        # Heartbeat so a hung crawl is detected long before start_to_close.
+        activity.heartbeat("dispatching to browser worker")
+        result: CrawlResult = await _heartbeating(
+            client.research(
+                request_id=request.idempotency_key,
+                seed_url=seed,
+                priority_paths=playbook.crawl_paths,
+            ),
+            note="crawling",
+        )
+        activity.heartbeat(f"captured {len(result.pages)} pages")
+    finally:
+        await client.aclose()
+
+    return await _persist_crawl(workspace_id, request, result)
+
+
+async def _persist_crawl(
+    workspace_id: uuid.UUID, request: CrawlActivityInput, result: CrawlResult
+) -> CrawlActivityResult:
+    async with workspace_unit_of_work(workspace_id) as session:
+        crawl = CrawlRun(
+            workspace_id=workspace_id,
+            research_run_id=uuid.UUID(request.research_run_id),
+            seed_url=result.seed_url,
+            final_url=result.final_url,
+            redirect_chain=list(result.redirect_chain),
+            status=result.status,
+            blocked_reason=result.blocked_reason,
+            robots_allowed=result.robots_allowed,
+            pages_fetched=result.pages_fetched,
+            bytes_fetched=result.bytes_fetched,
+            duration_ms=result.duration_ms,
+            worker_version=result.worker_version,
+        )
+        session.add(crawl)
+        await session.flush()
+
+        stored = 0
+        for evidence in result.pages:
+            url_fp = fingerprint({"url": evidence.final_url.rstrip("/").lower()})
+            # Immutable, and unique per (crawl_run, url): a retried ingest of
+            # the same page collapses rather than duplicating evidence.
+            inserted = await session.execute(
+                pg_insert(Page.__table__)  # type: ignore[arg-type]
+                .values(
+                    workspace_id=workspace_id,
+                    crawl_run_id=crawl.id,
+                    url=evidence.url,
+                    url_fingerprint=url_fp,
+                    domain=_domain_of(evidence.final_url),
+                    depth=evidence.depth,
+                    http_status=evidence.http_status,
+                    content_type=evidence.content_type,
+                    title=evidence.title,
+                    meta_description=evidence.meta_description,
+                    canonical_url=evidence.canonical_url,
+                    robots_meta=evidence.robots_meta,
+                    lang=evidence.lang,
+                    observations=evidence.model_dump(mode="json"),
+                    content_fingerprint=evidence.content_fingerprint(),
+                    text_excerpt=evidence.text_excerpt,
+                    captured_at=evidence.captured_at,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["crawl_run_id", "url_fingerprint"]
+                )
+                .returning(Page.__table__.c.id)
+            )
+            if inserted.scalar_one_or_none() is not None:
+                stored += 1
+
+        for artifact in result.artifacts:
+            await session.execute(
+                pg_insert(BrowserArtifact.__table__)  # type: ignore[arg-type]
+                .values(
+                    workspace_id=workspace_id,
+                    crawl_run_id=crawl.id,
+                    kind=artifact.kind,
+                    media_type=artifact.media_type,
+                    storage_key=artifact.storage_key,
+                    payload=artifact.payload,
+                    byte_size=artifact.byte_size,
+                    content_fingerprint=artifact.content_fingerprint,
+                    captured_at=_now(),
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["workspace_id", "content_fingerprint", "kind"]
+                )
+            )
+
+        return CrawlActivityResult(
+            crawl_run_id=str(crawl.id),
+            status=result.status,
+            pages_captured=stored,
+            blocked_reason=result.blocked_reason,
+            failure_reason=result.failure_reason,
+        )
+
+
+def _domain_of(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return (urlsplit(url).hostname or "").lower()
+
+
+# ==========================================================================
+# 2. Analyse
+# ==========================================================================
+@activity.defn(name="analyse_evidence")
+async def analyse_evidence(request: AnalyseActivityInput) -> AnalyseActivityResult:
+    """Run the deterministic detectors over stored evidence.
+
+    Findings come from measurement, never from a model. A model may later add
+    narrative, but it cannot create a finding -- a hallucinated one would be a
+    false statement about a real business.
+    """
+    from coldops.contracts.evidence import PageEvidence
+
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_session(workspace_id) as session:
+        pages = (
+            (
+                await session.execute(
+                    select(Page)
+                    .where(Page.crawl_run_id == uuid.UUID(request.crawl_run_id))
+                    .order_by(Page.depth)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        page_ids = {p.url_fingerprint: p.id for p in pages}
+        evidence = [PageEvidence.model_validate(p.observations) for p in pages]
+
+        # Read here rather than in the write transaction below: the playbook
+        # only constrains which offers may be proposed, and holding the unit of
+        # work open for a second lookup buys nothing.
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        org = (
+            await session.get(Organization, lead.organization_id)
+            if lead is not None
+            else None
+        )
+        industry = (org.industry if org else None) or Industry.GENERAL
+
+    if not evidence:
+        return AnalyseActivityResult(findings_created=0, pitchable_findings=0)
+
+    crawl_result = CrawlResult(
+        request_id=request.idempotency_key,
+        status="completed",
+        seed_url=evidence[0].url,
+        final_url=evidence[0].final_url,
+        pages=evidence,
+        pages_fetched=len(evidence),
+        worker_version="stored",
+    )
+    detected = detect_findings(crawl_result)
+
+    created = 0
+    pitchable = 0
+    async with workspace_unit_of_work(workspace_id) as session:
+        for finding in detected:
+            page_id = page_ids.get(
+                fingerprint({"url": (finding.page_url or "").rstrip("/").lower()})
+            )
+            inserted = await session.execute(
+                pg_insert(AuditFinding.__table__)  # type: ignore[arg-type]
+                .values(
+                    workspace_id=workspace_id,
+                    research_run_id=uuid.UUID(request.research_run_id),
+                    lead_id=uuid.UUID(request.lead_id),
+                    page_id=page_id,
+                    category=finding.category.value,
+                    issue_type=finding.issue_type,
+                    title=finding.title,
+                    page_url=finding.page_url,
+                    selector=finding.selector,
+                    observed_value=finding.observed_value,
+                    expected_behavior=finding.expected_behavior,
+                    severity=finding.severity.value,
+                    confidence=finding.confidence,
+                    business_impact=finding.business_impact,
+                    recommended_solution=finding.recommended_solution,
+                    estimated_effort=finding.estimated_effort,
+                    verification_method=finding.verification_method.value,
+                    finding_fingerprint=finding.fingerprint,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["research_run_id", "finding_fingerprint"]
+                )
+                .returning(AuditFinding.__table__.c.id)
+            )
+            finding_id = inserted.scalar_one_or_none()
+            if finding_id is None:
+                continue
+            created += 1
+
+            for excerpt, source_url in finding.evidence:
+                await session.execute(
+                    pg_insert(FindingEvidence.__table__)  # type: ignore[arg-type]
+                    .values(
+                        workspace_id=workspace_id,
+                        finding_id=finding_id,
+                        page_id=page_id,
+                        excerpt=excerpt,
+                        excerpt_fingerprint=fingerprint({"e": excerpt, "u": source_url}),
+                        source_url=source_url,
+                        captured_at=_now(),
+                    )
+                    .on_conflict_do_nothing()
+                )
+            if finding.is_pitchable():
+                pitchable += 1
+
+        # Counters only. The run is *not* closed here, and that is the whole
+        # point of this shape.
+        #
+        # It used to write status="completed" and finished_at at this line,
+        # which is three activities before the workflow reaches its verdict.
+        # ``close_research_run`` then declines to overwrite a run that is no
+        # longer "running", so the outcome the workflow actually reached was
+        # discarded: below_threshold, no_eligible_contact and draft_rejected
+        # had never once been written to this table, on any run, ever.
+        #
+        # What that cost is the reason for the change. Every run that died at
+        # scoring, at contact resolution or at drafting was recorded as a
+        # success with no failure reason, so the estate reported eighty
+        # completed research runs an hour while producing no drafts at all and
+        # nothing anywhere disagreed. Four days of near-zero sending were
+        # invisible in the one table built to explain it.
+        #
+        # A run left open by a workflow that dies is swept by
+        # ``intelligence.stale_runs``, which is what that module is for. "Still
+        # running" is also the truthful state for a run whose outcome nobody
+        # recorded -- unlike "completed", which was a claim the data could not
+        # support.
+        await session.execute(
+            ResearchRun.__table__.update()  # type: ignore[attr-defined]
+            .where(ResearchRun.id == uuid.UUID(request.research_run_id))
+            .values(
+                findings_count=created,
+                pages_crawled=len(evidence),
+            )
+        )
+
+        opportunities = await _persist_opportunities(
+            session,
+            workspace_id=workspace_id,
+            lead_id=uuid.UUID(request.lead_id),
+            research_run_id=uuid.UUID(request.research_run_id),
+            industry=industry,
+            detected=detected,
+        )
+
+    top = detected[0].issue_type if detected else None
+    sellable = [o for o in opportunities if o.deliverable]
+    return AnalyseActivityResult(
+        findings_created=created,
+        pitchable_findings=pitchable,
+        top_issue_type=top,
+        opportunities_created=len(opportunities),
+        deliverable_opportunities=len(sellable),
+        top_offer_key=sellable[0].offer_key if sellable else None,
+    )
+
+
+async def _persist_opportunities(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    lead_id: uuid.UUID,
+    research_run_id: uuid.UUID,
+    industry: Industry,
+    detected: list[DetectedFinding],
+) -> list[DerivedOpportunity]:
+    """Replace this run's opportunities with what the findings now support.
+
+    **Replace, not merge.** Opportunities are a pure function of the run's
+    findings and the playbook, so re-deriving them is cheap and the previous set
+    carries no information the new one lacks. Merging would instead accumulate
+    offers from every retry, including ones a corrected finding no longer
+    justifies -- and an opportunity that outlives its evidence is precisely the
+    unfounded claim the whole pipeline exists to prevent.
+
+    That also removes the need for a unique constraint the table does not have,
+    so this ships without a migration against a schema that is already ahead of
+    the repository.
+
+    ``solution_recommendations`` has ``ON DELETE CASCADE`` on its opportunity, so
+    the delete below takes the outlines with it. Nothing is orphaned.
+    """
+    await session.execute(
+        BusinessOpportunity.__table__.delete().where(  # type: ignore[attr-defined]
+            BusinessOpportunity.__table__.c.research_run_id == research_run_id
+        )
+    )
+
+    opportunities = derive_opportunities(industry, detected)
+    if not opportunities:
+        return []
+
+    # Findings are addressed by fingerprint up to this point, because that is
+    # the only identity a detector can produce. Resolve to ids over the whole
+    # run rather than only what this call inserted: on a retry every finding
+    # already exists, ``created`` is zero, and keying off the insert would link
+    # the opportunities to nothing.
+    rows = await session.execute(
+        select(AuditFinding.finding_fingerprint, AuditFinding.id).where(
+            AuditFinding.research_run_id == research_run_id
+        )
+    )
+    finding_ids = {fp: str(fid) for fp, fid in rows.all()}
+
+    for opportunity in opportunities:
+        row = BusinessOpportunity(
+            workspace_id=workspace_id,
+            lead_id=lead_id,
+            research_run_id=research_run_id,
+            offer_key=opportunity.offer_key[:80],
+            title=opportunity.title[:300],
+            rationale=opportunity.rationale,
+            supporting_finding_ids=[
+                finding_ids[fp]
+                for fp in opportunity.supporting_fingerprints
+                if fp in finding_ids
+            ],
+            estimated_value_usd=opportunity.estimated_value_usd,
+            priority=opportunity.priority,
+            deliverable=opportunity.deliverable,
+        )
+        session.add(row)
+        await session.flush()
+
+        if opportunity.solution is None:
+            continue
+        session.add(
+            SolutionRecommendation(
+                workspace_id=workspace_id,
+                opportunity_id=row.id,
+                summary=opportunity.solution.summary,
+                implementation_outline=list(opportunity.solution.implementation_outline),
+                estimated_effort=opportunity.solution.estimated_effort,
+                prerequisites=list(opportunity.solution.prerequisites),
+                # Null on purpose: nothing here came from a model, and pointing
+                # at a model run would misattribute deterministic work.
+                model_run_id=None,
+            )
+        )
+
+    logger.info(
+        "opportunities derived",
+        extra={
+            "lead_id": str(lead_id),
+            "research_run_id": str(research_run_id),
+            "industry": industry.value,
+            "opportunities": len(opportunities),
+            "deliverable": sum(1 for o in opportunities if o.deliverable),
+        },
+    )
+    return opportunities
+
+
+# ==========================================================================
+# 3. Score
+# ==========================================================================
+@activity.defn(name="score_lead")
+async def score_lead(request: ScoreActivityInput) -> ScoreActivityResult:
+    """Deterministic, explainable score. Persisted immutably."""
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_session(workspace_id) as session:
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
+        org = await session.get(Organization, lead.organization_id)
+        campaign = await session.get(Campaign, uuid.UUID(request.campaign_id))
+        if org is None or campaign is None:
+            raise ValueError("lead references a missing organization or campaign")
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == uuid.UUID(request.campaign_id)
+                )
+            )
+        ).scalar_one()
+        findings = (
+            (
+                await session.execute(
+                    select(AuditFinding).where(
+                        AuditFinding.research_run_id == uuid.UUID(request.research_run_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        channel = (
+            await session.get(ContactChannel, lead.primary_contact_channel_id)
+            if lead.primary_contact_channel_id
+            else None
+        )
+        contact = await session.get(Contact, channel.contact_id) if channel else None
+        # Snapshot every attribute needed after the session closes.
+        org_snapshot: dict[str, Any] = {
+            "industry": org.industry,
+            "review_count": org.review_count,
+            "rating": org.rating,
+            "website_url": org.website_url,
+            "business_status": org.business_status,
+        }
+        campaign_industry = campaign.industry
+        min_score = policy.min_lead_score
+        channel_source = channel.source if channel else None
+        channel_verification = (
+            channel.verification_status if channel else VerificationStatus.UNVERIFIED
+        )
+        is_decision_maker = bool(contact and contact.is_decision_maker)
+        is_generic_role = bool(contact and contact.is_generic_role)
+        page_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT p.url, p.observations
+                      FROM pages p
+                      JOIN crawl_runs c ON c.id = p.crawl_run_id
+                     WHERE c.research_run_id = :run
+                       AND p.workspace_id = :workspace
+                     LIMIT 40
+                    """
+                ),
+                {"run": uuid.UUID(request.research_run_id), "workspace": workspace_id},
+            )
+        ).all()
+
+    # How far behind this business actually is: what it already runs, and what
+    # it does not. Absence is only read from pages that could actually be read
+    # -- see coldops.intelligence.modernisation for why that distinction decides
+    # whether cookie-walled sites rank first or last.
+    profile = merge_modernisation(
+        modernisation_profile(_page_signals(url, obs)) for url, obs in page_rows
+    )
+    gap = profile.gap
+
+    detected = [_to_detected(f) for f in findings]
+
+    # What the business does not run, alongside what is broken about its site.
+    #
+    # Until now this profile was one float in ScoringInput: it moved a lead up
+    # the list and never became a sentence, so a business with a clean site
+    # produced nothing to say and could not be written to at all. See
+    # coldops.intelligence.absence for why the claim is phrased as what was read
+    # rather than as what they have.
+    #
+    # `no_booking_or_enquiry_path` already covers the site with no contact
+    # route whatsoever, and it is the more urgent sentence, so the absence
+    # module is told when it has fired and stands down on booking.
+    detected.extend(
+        findings_from_gap(
+            profile,
+            pages_read=tuple(url for url, _obs in page_rows),
+            has_contact_path=not any(
+                f.issue_type == "no_booking_or_enquiry_path" for f in detected
+            ),
+            # Staged: counted before it is said. See the setting's own note.
+            pitchable=get_settings().absence_pitching_enabled,
+        )
+    )
+
+    # Store what the gap produced. Without this the absence is real, scored,
+    # and unsayable: the composer picks the lead finding from `audit_findings`,
+    # and a finding that exists only in this function's local list cannot be
+    # picked, cited or evidenced. It was the last reason the AI-automation half
+    # of the offer stayed dark after the detector itself was repaired.
+    #
+    # Same insert shape as analyse_evidence, and the same conflict key, so a
+    # re-score of the same research run adds nothing a second time.
+    absences = [f for f in detected if f.issue_type in ABSENCE_ISSUE_TYPES]
+    if absences:
+        async with workspace_unit_of_work(workspace_id) as session:
+            for finding in absences:
+                inserted = await session.execute(
+                    pg_insert(AuditFinding.__table__)  # type: ignore[arg-type]
+                    .values(
+                        workspace_id=workspace_id,
+                        research_run_id=uuid.UUID(request.research_run_id),
+                        lead_id=uuid.UUID(request.lead_id),
+                        # No page_id: an absence is a statement about the pages
+                        # read as a set, not about one of them. page_url below
+                        # carries the page it is cited against.
+                        page_id=None,
+                        category=finding.category.value,
+                        issue_type=finding.issue_type,
+                        title=finding.title,
+                        page_url=finding.page_url,
+                        selector=finding.selector,
+                        observed_value=finding.observed_value,
+                        expected_behavior=finding.expected_behavior,
+                        severity=finding.severity.value,
+                        confidence=finding.confidence,
+                        business_impact=finding.business_impact,
+                        recommended_solution=finding.recommended_solution,
+                        estimated_effort=finding.estimated_effort,
+                        verification_method=finding.verification_method.value,
+                        finding_fingerprint=finding.fingerprint,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["research_run_id", "finding_fingerprint"]
+                    )
+                    .returning(AuditFinding.__table__.c.id)
+                )
+                finding_id = inserted.scalar_one_or_none()
+                if finding_id is None:
+                    continue
+                for excerpt, source_url in finding.evidence:
+                    await session.execute(
+                        pg_insert(FindingEvidence.__table__)  # type: ignore[arg-type]
+                        .values(
+                            workspace_id=workspace_id,
+                            finding_id=finding_id,
+                            page_id=None,
+                            excerpt=excerpt,
+                            excerpt_fingerprint=fingerprint(
+                                {"e": excerpt, "u": source_url}
+                            ),
+                            source_url=source_url,
+                            captured_at=_now(),
+                        )
+                        .on_conflict_do_nothing()
+                    )
+
+    evidenced_types = {f.issue_type for f in detected if f.is_pitchable()}
+    offers = select_offers(org_snapshot["industry"], evidenced_types)
+
+    result = compute_score(
+        ScoringInput(
+            findings=detected,
+            industry_matches_campaign=org_snapshot["industry"] == campaign_industry,
+            geography_matches_campaign=True,
+            services_deliverable=bool(offers),
+            review_count=org_snapshot["review_count"],
+            rating=org_snapshot["rating"],
+            has_website=bool(org_snapshot["website_url"]),
+            website_reachable=True,
+            business_status=org_snapshot["business_status"],
+            contact_source=channel_source,
+            contact_verification=channel_verification,
+            contact_is_decision_maker=is_decision_maker,
+            contact_is_generic_role=is_generic_role,
+            estimated_project_value_usd=(
+                max((o.estimated_value_usd for o in offers), default=0.0)
+            ),
+            modernisation_gap=gap,
+        ),
+        threshold=min_score,
+    )
+
+    async with workspace_unit_of_work(workspace_id) as session:
+        session.add(
+            LeadScore(
+                workspace_id=workspace_id,
+                lead_id=uuid.UUID(request.lead_id),
+                total=result.total,
+                band=result.band.value,
+                components=result.to_json()["components"],
+                reasons=list(result.reasons),
+                policy_version=result.policy_version,
+                threshold_applied=result.threshold_applied,
+                passed_threshold=result.passed_threshold,
+            )
+        )
+        await session.execute(
+            Lead.__table__.update()  # type: ignore[attr-defined]
+            .where(Lead.id == uuid.UUID(request.lead_id))
+            .values(
+                latest_score=result.total,
+                status=(
+                    LeadStatus.QUALIFIED
+                    if result.passed_threshold
+                    else LeadStatus.MANUAL_REVIEW
+                ),
+            )
+        )
+
+    return ScoreActivityResult(
+        total=result.total,
+        band=result.band.value,
+        passed_threshold=result.passed_threshold,
+        threshold=result.threshold_applied,
+    )
+
+
+def _to_detected(row: AuditFinding) -> DetectedFinding:
+    from coldops.intelligence.findings import DetectedFinding
+
+    return DetectedFinding(
+        category=row.category,
+        issue_type=row.issue_type,
+        title=row.title,
+        severity=row.severity,
+        confidence=row.confidence,
+        verification_method=row.verification_method,
+        page_url=row.page_url,
+        selector=row.selector,
+        observed_value=row.observed_value,
+        business_impact=row.business_impact,
+        recommended_solution=row.recommended_solution,
+        estimated_effort=row.estimated_effort,
+        # Evidence rows exist in the database; one marker is enough for the
+        # is_pitchable() check, which only asks whether any evidence exists.
+        evidence=(("stored", row.page_url or ""),) if not row.contradicted else (),
+    )
+
+
+# ==========================================================================
+# 4. Resolve contact
+# ==========================================================================
+@activity.defn(name="resolve_contact")
+async def resolve_contact(request: ContactActivityInput) -> ContactActivityResult:
+    """Find an eligible address, or explain why there is none.
+
+    Invariant 6 in practice: addresses come from what the business published on
+    its own site. Nothing is constructed.
+    """
+    from coldops.contracts.evidence import PageEvidence
+
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_session(workspace_id) as session:
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
+        org = await session.get(Organization, lead.organization_id)
+        if org is None:
+            raise ValueError("lead references a missing organization")
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == uuid.UUID(request.campaign_id)
+                )
+            )
+        ).scalar_one()
+        crawls = (
+            (
+                await session.execute(
+                    select(CrawlRun).where(
+                        CrawlRun.research_run_id == uuid.UUID(request.research_run_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        pages: list[PageEvidence] = []
+        for crawl in crawls:
+            rows = (
+                (await session.execute(select(Page).where(Page.crawl_run_id == crawl.id)))
+                .scalars()
+                .all()
+            )
+            pages.extend(PageEvidence.model_validate(r.observations) for r in rows)
+        contact_row_id = (
+            await session.execute(
+                select(Contact.id).where(Contact.organization_id == org.id).limit(1)
+            )
+        ).scalar_one_or_none()
+        # Snapshot scalars before the session closes: reading an ORM attribute
+        # afterwards raises DetachedInstanceError.
+        org_id = org.id
+        org_domain = org.canonical_domain
+        allowed_sources = list(policy.allowed_contact_sources or [])
+        require_verified = policy.require_verified_email
+
+    # Best address first, not first-crawled first. Iteration order here used
+    # to be page order, and the loop below returns on the first candidate that
+    # passes -- so a site publishing info@ on its contact page and a named
+    # mailbox on its team page was written to at whichever page the crawler
+    # happened to reach first. See contacts.contact_preference for the measured
+    # bounce rates behind the ordering.
+    discovered = rank_contacts(extract_contacts_from_pages(pages, org_domain))
+    allowed = frozenset(ContactSource(s) for s in allowed_sources)
+    rejected: list[str] = []
+
+    # DNS before the write loop, never inside it: check_many blocks on the
+    # resolver, and mission section 25 forbids I/O inside a unit of work. One
+    # lookup per distinct domain, not per address, so a site publishing six
+    # mailboxes costs one query.
+    candidate_domains = [c.domain for c in discovered if c.is_usable and c.domain]
+    mx_checks = await _resolve_mx(candidate_domains)
+    # Delivery history for the same domains, in one grouped query rather than
+    # one per address, and outside the write loop for the same reason.
+    history = await _domain_history(workspace_id, candidate_domains)
+
+    # What each of these addresses did the last time ColdOps wrote to it. Read in
+    # bulk here for the same reason the MX checks and the domain history are:
+    # discovery assesses every address on a site in one pass, and this must not
+    # become two queries per candidate.
+    #
+    # Failure is swallowed to nothing rather than raised. Like domain history
+    # this layer is purely additive -- without it the engine has one fewer
+    # signal -- and a slow database must not abandon contact discovery.
+    try:
+        async with workspace_session(workspace_id) as session:
+            prior_history = await read_many(
+                session,
+                workspace_id=workspace_id,
+                emails=[c.normalized for c in discovered if c.normalized],
+            )
+    except Exception as exc:
+        logger.warning(
+            "address history unavailable; assessing without it",
+            extra={"error_code": type(exc).__name__},
+        )
+        prior_history = {}
+
+    for candidate in discovered:
+        if not candidate.is_usable:
+            rejected.append(f"{candidate.normalized}: {candidate.rejection_reason}")
+            continue
+
+        mx = mx_checks.get(candidate.domain)
+        # The bounce reduction engine, outside the unit of work below because
+        # verification is a network call and mission section 25 forbids I/O
+        # inside one. It replaces what used to be an unconditional
+        # PUBLISHED_FIRST_PARTY: provenance is still the floor, but a
+        # disposable domain, a misspelling of a webmail provider or a
+        # verification service can now say otherwise before the address is ever
+        # stored as sendable.
+        risk = await _assess_bounce_risk(
+            candidate,
+            mx,
+            history.get(candidate.domain),
+            prior_history.get(candidate.normalized),
+        )
+
+        verdict = check_contact_eligibility(
+            source=candidate.source,
+            verification=risk.status,
+            is_active=True,
+            allowed_sources=allowed,
+            require_verified=require_verified,
+            email=candidate.normalized,
+            mx=mx,
+        )
+        if not verdict.eligible:
+            reasons = list(verdict.reasons) + [
+                r for r in risk.reasons if r not in verdict.reasons
+            ]
+            rejected.append(f"{candidate.normalized}: {'; '.join(reasons)}")
+            continue
+
+        async with workspace_unit_of_work(workspace_id) as session:
+            if contact_row_id is None:
+                new_contact = Contact(
+                    workspace_id=workspace_id,
+                    organization_id=org_id,
+                    is_generic_role=candidate.is_generic_role,
+                )
+                session.add(new_contact)
+                await session.flush()
+                contact_row_id = new_contact.id
+
+            suppressed = await is_suppressed(
+                session, workspace_id=workspace_id, email=candidate.normalized
+            )
+            if suppressed is not None:
+                rejected.append(
+                    f"{candidate.normalized}: suppressed ({suppressed.reason.value})"
+                )
+                continue
+
+            inserted = await session.execute(
+                pg_insert(ContactChannel.__table__)  # type: ignore[arg-type]
+                .values(
+                    workspace_id=workspace_id,
+                    contact_id=contact_row_id,
+                    channel_type="email",
+                    value=candidate.email,
+                    normalized_value=candidate.normalized,
+                    value_domain=candidate.domain,
+                    source=candidate.source.value,
+                    source_url=candidate.source_url,
+                    discovered_at=_now(),
+                    verification_status=risk.status.value,
+                    confidence=candidate.confidence,
+                    is_active=True,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[
+                        "workspace_id",
+                        "contact_id",
+                        "channel_type",
+                        "normalized_value",
+                    ]
+                )
+                .returning(ContactChannel.__table__.c.id)
+            )
+            channel_id = inserted.scalar_one_or_none()
+            newly_discovered = channel_id is not None
+            if channel_id is None:
+                channel_id = (
+                    await session.execute(
+                        select(ContactChannel.id).where(
+                            ContactChannel.workspace_id == workspace_id,
+                            ContactChannel.normalized_value == candidate.normalized,
+                        )
+                    )
+                ).scalar_one()
+
+            # Only on first discovery. The table is append-only by design, so a
+            # genuinely new check should add a row -- but an activity retry is
+            # not a new check, and letting one append would turn a retry storm
+            # into a verification history that never happened.
+            if newly_discovered:
+                detail = risk.as_verification_detail()
+                if mx is not None:
+                    detail["mx"] = mx.as_verification_detail()
+                session.add(
+                    ContactVerification(
+                        workspace_id=workspace_id,
+                        channel_id=channel_id,
+                        provider="bounce_risk",
+                        result=risk.status,
+                        mx_present=mx.can_receive_mail if mx is not None else None,
+                        detail=detail,
+                        verified_at=_now(),
+                    )
+                )
+
+            await session.execute(
+                Lead.__table__.update()  # type: ignore[attr-defined]
+                .where(Lead.id == uuid.UUID(request.lead_id))
+                .values(primary_contact_channel_id=channel_id)
+            )
+            return ContactActivityResult(eligible_channel_id=str(channel_id))
+
+    if not discovered:
+        rejected.append("no email address published on the crawled pages")
+    return ContactActivityResult(
+        eligible_channel_id=None, rejected_reasons=tuple(rejected[:8])
+    )
+
+
+async def _resolve_mx(domains: list[str]) -> dict[str, MxCheck]:
+    """MX for each distinct domain, off the event loop.
+
+    ``check_many`` uses a blocking resolver. Calling it directly would stall the
+    whole worker for as long as DNS took, which on an unresponsive nameserver is
+    the full eight-second timeout per domain.
+
+    A resolver failure returns an ERROR check rather than raising: it is not
+    evidence about the domain, and letting it propagate would abandon contact
+    discovery for a lead whose address is probably fine.
+    """
+    if not domains:
+        return {}
+    try:
+        result = await asyncio.to_thread(check_many, domains)
+    except Exception as exc:
+        logger.warning(
+            "mx resolution failed for the whole batch; proceeding without it",
+            extra={"error_code": type(exc).__name__, "domains": len(set(domains))},
+        )
+        return {}
+    return dict(result.checks)
+
+
+async def _domain_history(
+    workspace_id: uuid.UUID, domains: list[str]
+) -> dict[str, DomainWindow]:
+    """Trailing delivery outcomes per recipient domain, in one query.
+
+    Computed rather than read from a counter table: ``messages`` is the record
+    of what happened, and a second copy of these numbers would drift the first
+    time a webhook was processed twice or a backfill ran. The same reasoning and
+    the same window as the sender reputation query in the outbox worker.
+
+    A failure returns nothing rather than raising. History is the one layer that
+    is purely additive -- without it the engine simply has one fewer signal --
+    so a slow or unavailable database must not abandon contact discovery.
+
+    **The workspace predicate is written out, not inherited.** The guard that
+    ``workspace_session`` installs is ``with_loader_criteria``, which rewrites
+    ORM entity queries and does not touch ``text()`` at all; and the row-level
+    security policy is permissive when ``titan.workspace_id`` is unset, which is
+    how migrations and the outbox claim legitimately run unscoped. Raw SQL in a
+    scoped session therefore has no isolation of any kind unless it says so
+    itself. Without this clause one workspace's bounce record would downgrade
+    another workspace's lead, and a test in
+    ``tests/intelligence/test_domain_history_query.py`` fails if it is removed.
+    """
+    if not domains:
+        return {}
+    since = _now() - dt.timedelta(days=WINDOW_DAYS)
+    try:
+        async with workspace_session(workspace_id) as session:
+            rows = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT to_domain,
+                               count(*) FILTER (WHERE sent_at IS NOT NULL)       AS sent,
+                               count(*) FILTER (WHERE delivered_at IS NOT NULL)  AS delivered,
+                               count(*) FILTER (WHERE bounced_at IS NOT NULL)    AS bounced,
+                               count(*) FILTER (WHERE complained_at IS NOT NULL) AS complained
+                          FROM messages
+                         WHERE workspace_id = :workspace
+                           AND to_domain = ANY(:domains)
+                           AND created_at >= :since
+                         GROUP BY to_domain
+                        """
+                    ),
+                    {
+                        "workspace": workspace_id,
+                        "domains": sorted(set(domains)),
+                        "since": since,
+                    },
+                )
+            ).all()
+    except Exception as exc:
+        logger.warning(
+            "recipient domain history unavailable; proceeding without it",
+            extra={"error_code": type(exc).__name__, "domains": len(set(domains))},
+        )
+        return {}
+
+    return {
+        row.to_domain: DomainWindow(
+            domain=row.to_domain,
+            sent=int(row.sent or 0),
+            delivered=int(row.delivered or 0),
+            bounced=int(row.bounced or 0),
+            complained=int(row.complained or 0),
+        )
+        for row in rows
+    }
+
+
+async def _assess_bounce_risk(
+    candidate: DiscoveredContact,
+    mx: MxCheck | None,
+    history: DomainWindow | None,
+    prior: AddressHistory | None = None,
+) -> BounceRisk:
+    """Run the bounce reduction engine over one discovered address.
+
+    Two passes, because the layers differ enormously in cost. The first uses
+    only what is already in hand -- syntax, the domain lists, and the MX check
+    and delivery history resolved in bulk above -- and an address refused there
+    is never sent to a verification service, which is the expensive call and the
+    one that may be metered per address.
+
+    The second pass re-runs the whole assessment with the verification result
+    rather than patching the first one. Resolution then happens in exactly one
+    place, so there is no path by which a verified answer and a local answer
+    get combined differently from how ``assess`` would combine them.
+    """
+    risk = assess(
+        email=candidate.normalized,
+        source=candidate.source,
+        mx=mx,
+        history=history,
+        source_url=candidate.source_url,
+        prior=prior,
+    )
+    if risk.refusals:
+        return risk
+
+    verifier = build_verifier(get_settings().mailbox_verifier)
+
+    if _verification_is_unreachable():
+        # Already established that this host cannot reach a mail server. Asking
+        # again costs the budget below per candidate and learns nothing.
+        return risk
+
+    try:
+        result: VerificationResult = await asyncio.wait_for(
+            verifier.verify(candidate.normalized), timeout=_VERIFY_BUDGET_SECONDS
+        )
+    except TimeoutError:
+        # Not an outage at their end -- a fact about ours. See the note on
+        # _VERIFY_BUDGET_SECONDS: the probe dials port 25, and a host whose
+        # provider drops those packets waits the full socket timeout for every
+        # candidate and every MX host until the activity itself is killed.
+        _record_verification_timeout()
+        logger.warning(
+            "mailbox verification timed out; proceeding on local signals",
+            extra={"verifier": verifier.name, "budget_s": _VERIFY_BUDGET_SECONDS},
+        )
+        return risk
+    except Exception as exc:
+        # A verification outage must not discard a lead whose address is
+        # probably fine. The local layers already ran; their answer stands.
+        logger.warning(
+            "mailbox verification failed; proceeding on local signals",
+            extra={"error_code": type(exc).__name__, "verifier": verifier.name},
+        )
+        return risk
+
+    _record_verification_reached()
+
+    if not result.is_conclusive:
+        return risk
+    return assess(
+        email=candidate.normalized,
+        source=candidate.source,
+        mx=mx,
+        history=history,
+        verification=result,
+        source_url=candidate.source_url,
+        prior=prior,
+    )
+
+
+def _page_signals(url: str, observations: dict[str, Any] | None) -> PageSignals:
+    """One stored page, in the shape the modernisation reader takes.
+
+    Defensive throughout: ``observations`` is a JSON column written by a
+    contract that has changed before and will again, and a scorer that raises
+    on an unexpected shape stops every lead rather than one signal.
+    """
+    obs = observations or {}
+
+    def _strings(key: str) -> tuple[str, ...]:
+        value = obs.get(key)
+        if not isinstance(value, list):
+            return ()
+        return tuple(v for v in value if isinstance(v, str))
+
+    host = ""
+    if "://" in url:
+        host = url.split("://", 1)[1].split("/", 1)[0].split(":")[0].lower()
+
+    return PageSignals(
+        technologies=_strings("technologies"),
+        # The nine named detectors find nine things. The script hosts are what
+        # let a vendor be recognised without somebody having written a detector
+        # for it first -- which is why reputation automation read as 0% of
+        # 2,511 businesses before this was collected.
+        script_urls=_strings("script_hosts"),
+        has_chat_widget=bool(obs.get("has_chat_widget")),
+        booking_links=_strings("booking_links"),
+        site_host=host or None,
+        obstructed=bool(obs.get("has_cookie_obstruction")),
+        # A page row exists, so something was fetched and parsed.
+        readable=True,
+    )
+
+
+#: Highest first. ``Severity`` is a StrEnum, so sorting it directly would sort
+#: alphabetically -- "critical" before "high" by luck, "medium" before both by
+#: accident.
+_SEVERITY_ORDER: dict[Severity, int] = {
+    Severity.CRITICAL: 0,
+    Severity.HIGH: 1,
+    Severity.MEDIUM: 2,
+    Severity.LOW: 3,
+}
+
+
+#: How long all mailbox verification for one candidate may take.
+#:
+#: `resolve_contact` is given 60 seconds by the workflow. The SMTP verifier
+#: dials port 25, and outbound 25 is blocked by most cloud providers -- Hetzner
+#: included, on the host this runs on. A blocked port does not refuse, it
+#: silently drops, so every probe waits its full socket timeout, once per MX
+#: host and once per candidate address. Three candidates with two MX hosts each
+#: is 72 seconds of waiting inside a 60-second activity.
+#:
+#: What happened then is worth naming, because it is why this is a budget and
+#: not a bigger timeout: Temporal cancelled the activity, and
+#: `asyncio.CancelledError` is a BaseException, so the `except Exception`
+#: below never saw it. The failure went past every local handler, failed the
+#: research run, and produced no draft. 109 runs died that way in six hours
+#: while every container reported itself healthy, and sending fell to three
+#: messages a day.
+#:
+#: The budget is well under the activity's own so a slow verifier degrades to
+#: "unknown" -- which the local provenance layers already handle -- instead of
+#: taking the whole run down with it.
+_VERIFY_BUDGET_SECONDS = 20.0
+
+#: Consecutive verification timeouts before this process stops asking.
+#:
+#: A blocked port is not a transient fault: it will still be blocked for the
+#: next lead. Without this, every lead pays the budget above to learn the same
+#: thing.
+_VERIFY_TIMEOUTS_BEFORE_GIVING_UP = 3
+
+#: How long the breaker stays open before one lead is allowed to try again.
+#:
+#: It has to reopen on a timer, not on a success. The first version of this
+#: reset only when a verification completed -- which it never could, because
+#: once the breaker was open nothing asked again. It would have stayed shut
+#: until the worker restarted, so the hour outbound port 25 was unblocked would
+#: have passed unnoticed and every address would still have fallen back to
+#: provenance. A breaker that cannot observe the recovery it is waiting for is
+#: not a breaker, it is an outage with a comment claiming otherwise.
+#:
+#: Ten minutes costs one lead the budget above per interval and is the whole
+#: mechanism by which opening the port restores probing with no deploy.
+_VERIFY_RETRY_AFTER = dt.timedelta(minutes=10)
+
+_verify_timeouts = 0
+_verify_opened_at: dt.datetime | None = None
+
+
+def _verification_is_unreachable() -> bool:
+    """True while the breaker is open and the retry interval has not elapsed."""
+    if _verify_timeouts < _VERIFY_TIMEOUTS_BEFORE_GIVING_UP:
+        return False
+    if _verify_opened_at is None:
+        return True
+    return dt.datetime.now(dt.UTC) - _verify_opened_at < _VERIFY_RETRY_AFTER
+
+
+def _record_verification_timeout() -> None:
+    global _verify_timeouts, _verify_opened_at
+    _verify_timeouts += 1
+    # Stamped on every timeout, including the probe that reopened the breaker:
+    # a retry that also times out must start the interval again rather than
+    # leave it expired and let every subsequent lead pay the budget.
+    _verify_opened_at = dt.datetime.now(dt.UTC)
+    if _verify_timeouts == _VERIFY_TIMEOUTS_BEFORE_GIVING_UP:
+        # Said once, loudly. The quiet version of this cost four days of
+        # sending before anybody asked why the number was three.
+        logger.error(
+            "mailbox verification is unreachable from this host; "
+            "falling back to provenance for every address until one succeeds. "
+            "Outbound port 25 is the usual cause.",
+            extra={"consecutive_timeouts": _verify_timeouts},
+        )
+
+
+def _record_verification_reached() -> None:
+    global _verify_timeouts, _verify_opened_at
+    if _verify_timeouts:
+        logger.info(
+            "mailbox verification is reachable again; resuming probing",
+            extra={"after_timeouts": _verify_timeouts},
+        )
+    _verify_timeouts = 0
+    _verify_opened_at = None
+
+
+#: The worst tier a message may still open with. Tier 0 is a live conversion
+#: defect and tier 1 is "there is no way to book or enquire at all"; both are
+#: things an owner recognises as costing them money. Tier 2 is everything a
+#: developer notices and a proprietor does not.
+#:
+#: Raising this to 2 restores the old behaviour, where any true statement was
+#: considered good enough to open with. It was not: 1,008 messages went out on
+#: that basis and not one produced a genuine reply.
+_WORTH_OPENING_WITH = 1
+
+
+def lead_rank(issue_type: str, page_url: str | None) -> int:
+    """Which findings deserve to be the one thing a message says.
+
+    A message says one thing, so the finding that leads decides what the
+    message *is*. Three tiers, and the middle one is the correction made on
+    10 September:
+
+    0. **Conversion.** Somebody tried to buy and could not -- a dead booking
+       button, a contact form nobody can complete, no phone number on a site
+       that sells by phone, a broken link on a money path.
+    1. **Automation.** ``no_booking_or_enquiry_path``: there is no way to book
+       or enquire at all. Nothing is broken, so it is not a conversion defect,
+       but it is the most legible thing this system can tell a business and the
+       only pitch an owner can act on without a developer.
+    2. **Quality.** Everything else -- alt text, console errors, headers,
+       structured data. True, cheap to detect, and invisible to the person
+       paying the bills.
+
+    The original key was ``0 if CONVERSION else 1``, which put tier 1 and tier 2
+    in the same bucket and then broke the tie on confidence. An absence is
+    inferred and an alt-text check is certain, so the absence lost every time:
+    **912 such findings in the estate led 9 messages out of 413.**
+    """
+    engine = engine_for(issue_type, page_url)
+    if engine is Engine.CONVERSION:
+        return 0
+    if engine is Engine.AUTOMATION:
+        return 1
+    return 2
+
+
+async def _rephrase(
+    composed: Any,
+    *,
+    org_domain: str,
+    finding: Any,
+    campaign_id: str,
+    lead_id: str,
+) -> tuple[Any, dict[str, Any] | None, list[dict[str, Any]]]:
+    """Run the model rewrite, and never let it break drafting.
+
+    Returns the message to use, what to record about the attempt, and the model
+    calls to bill. On any failure the deterministic message comes back
+    unchanged: a rewrite is an improvement to text that is already correct, and
+    nothing about it justifies failing a draft.
+
+    The provider clients are closed here rather than pooled. A draft is a
+    short-lived activity, and a leaked client is a file descriptor the worker
+    keeps until it restarts.
+    """
+    from coldops.intelligence.rewriter import rewrite_message
+    from coldops.models.gateway import ModelGateway
+    from coldops.models.providers import build_providers
+
+    settings = get_settings()
+    providers = build_providers(settings)
+    if not providers:
+        logger.info("model rewrites enabled but no provider is configured")
+        return composed, {"attempted": False, "reason": "no provider configured"}, []
+
+    gateway = ModelGateway(providers, settings)
+    try:
+        outcome = await rewrite_message(
+            composed,
+            gateway=gateway,
+            domain=org_domain,
+            observed_value=getattr(finding, "observed_value", None),
+            source_url=getattr(finding, "page_url", None),
+            campaign_id=campaign_id,
+            lead_id=lead_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "model rewrite failed; sending the deterministic text",
+            extra={"error_code": type(exc).__name__},
+        )
+        return (
+            composed,
+            {"attempted": True, "used": False, "error": type(exc).__name__},
+            list(gateway.calls),
+        )
+    finally:
+        for provider in providers.values():
+            closer = getattr(provider, "aclose", None)
+            if closer is not None:
+                try:
+                    await closer()
+                except Exception:
+                    pass
+
+    # The rewriter checks each sentence on its own and allows it to grow by up
+    # to sixty per cent. Four sentences each taking that allowance clears the
+    # ninety-word ceiling, and the assembled message then fails validation --
+    # which does not degrade the draft, it destroys it: a message that would
+    # have been sendable becomes VALIDATION_FAILED because a rewrite was
+    # attempted at all.
+    #
+    # No sentence-level rule can see this, because the overrun is a property of
+    # the sum. Checked here, where the assembled message exists, and resolved
+    # the way every other rewrite failure is: keep the text that was already
+    # correct.
+    grew_past_the_band = (
+        len(pitch_of(outcome.message.body, get_settings().owner_name).split())
+        > pitch_band(get_settings().message_form)[1]
+    )
+    if outcome.rewritten and grew_past_the_band:
+        logger.info(
+            "model rewrite overran the word band; sending the deterministic text",
+            extra={"lead_id": lead_id},
+        )
+        return (
+            composed,
+            {
+                "attempted": True,
+                "used": False,
+                "refusals": ["pitch_too_long_after_reassembly"],
+            },
+            list(gateway.calls),
+        )
+
+    detail = {
+        "attempted": True,
+        "used": outcome.rewritten,
+        "sentences_rewritten": outcome.sentences_rewritten,
+        "refusals": list(outcome.refusals),
+        "detail": outcome.detail,
+    }
+    return outcome.message, detail, list(gateway.calls)
+
+
+# ==========================================================================
+# 5. Generate draft
+# ==========================================================================
+async def _findings_already_cited(
+    session: AsyncSession, *, lead_id: uuid.UUID
+) -> set[str]:
+    """Finding ids this lead's earlier drafts have already led with.
+
+    Taken from the stored claim maps, which are the record of what each message
+    actually asserted. A separate list of "findings used" would be a second
+    account of the same fact and would drift from it the first time a draft was
+    superseded.
+
+    Every draft counts, whatever its status. A rejected draft still showed the
+    reviewer that observation, and a follow-up that re-raises it is repeating
+    something a person already declined to send.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(MessageDraft.claim_map).where(MessageDraft.lead_id == lead_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cited: set[str] = set()
+    for claim_map in rows:
+        for claim in claim_map or []:
+            finding_id = (claim or {}).get("finding_id")
+            if finding_id:
+                cited.add(str(finding_id))
+    return cited
+
+
+@activity.defn(name="generate_draft")
+async def generate_draft(request: DraftActivityInput) -> DraftActivityResult:
+    """Compose a message from evidence and validate it before it can be approved."""
+    workspace_id = uuid.UUID(request.workspace_id)
+    settings = get_settings()
+
+    async with workspace_session(workspace_id) as session:
+        existing = (
+            await session.execute(
+                select(MessageDraft).where(
+                    MessageDraft.idempotency_key == request.idempotency_key
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return DraftActivityResult(
+                draft_id=str(existing.id),
+                validation_passed=existing.validation_passed,
+                violation_codes=tuple(
+                    v.get("code", "")
+                    for v in (existing.validation_report or {}).get("violations", [])
+                ),
+            )
+
+        lead = await session.get(Lead, uuid.UUID(request.lead_id))
+        if lead is None:
+            raise ValueError(f"lead {request.lead_id} not found")
+        org = await session.get(Organization, lead.organization_id)
+        channel_row = await session.get(
+            ContactChannel, uuid.UUID(request.contact_channel_id)
+        )
+        if org is None or channel_row is None:
+            raise ValueError("draft references a missing organization or channel")
+        org_domain = org.canonical_domain or org.display_name
+        org_industry = org.industry
+        # Snapshotted with the rest, because the session is closed before the
+        # composer runs and the subject line is written from it.
+        org_display_name = org.display_name
+        channel_id = channel_row.id
+        # Snapshotted with the id, because the footer's opt-out link is signed
+        # over this address and the session is closed before the composer runs.
+        recipient_email = channel_row.value
+        # Read here rather than passed in: invariant 18 says a workflow may
+        # reference a campaign but never carry its policy, so the promoted
+        # register is looked up at execution time like every other bound.
+        policy = (
+            await session.execute(
+                select(CampaignPolicy).where(
+                    CampaignPolicy.campaign_id == uuid.UUID(request.campaign_id)
+                )
+            )
+        ).scalar_one_or_none()
+        campaign_row = await session.get(Campaign, uuid.UUID(request.campaign_id))
+        sender_row = (
+            await session.get(SenderIdentity, campaign_row.sender_identity_id)
+            if campaign_row and campaign_row.sender_identity_id
+            else None
+        )
+        # The footer address comes from the sender identity that will actually
+        # send; the process setting is only a deployment-wide default.
+        mailing_address = (
+            sender_row.mailing_address if sender_row else None
+        ) or settings.sender_mailing_address
+        findings = (
+            (
+                await session.execute(
+                    select(AuditFinding)
+                    .where(
+                        AuditFinding.research_run_id
+                        == uuid.UUID(request.research_run_id),
+                        AuditFinding.contradicted.is_(False),
+                    )
+                    .order_by(AuditFinding.confidence.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        evidenced: dict[str, list[str]] = {}
+        for finding in findings:
+            rows = (
+                (
+                    await session.execute(
+                        select(FindingEvidence.id).where(
+                            FindingEvidence.finding_id == finding.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if rows:
+                evidenced[str(finding.id)] = [str(r) for r in rows]
+
+    pitchable = [
+        f
+        for f in findings
+        if str(f.id) in evidenced
+        and f.severity in {Severity.HIGH, Severity.CRITICAL, Severity.MEDIUM}
+    ]
+    # A message says one thing, so which finding leads decides what the message
+    # is. Sorting by detector confidence alone made that decision on the wrong
+    # axis: an alt-text check is certain about 5,672 sites and a broken booking
+    # button is rarer and less certain, so the confident, cheap finding led
+    # almost every message and the expensive one was never mentioned.
+    #
+    # Conversion defects first, because they are the only findings that
+    # describe a person who tried to buy and could not. Severity and confidence
+    # break the tie inside each group, which is what they were always good for.
+    #
+    # **Three tiers, not two.** The original key was ``0 if CONVERSION else 1``,
+    # which put ``no_booking_or_enquiry_path`` -- the single most legible thing
+    # this system can tell a business, that there is no way for anyone to book
+    # or enquire at all -- in the same bucket as a missing alt attribute. It
+    # then lost the tie on confidence, because an alt-text check is certain and
+    # an absence is inferred. Measured over every message ever sent: 912 such
+    # findings in the estate led 9 messages, while the pitch that has no defect
+    # to point at, only a gap, is the one an owner can act on without a
+    # developer. It sits above quality and below conversion because a business
+    # taking bookings by telephone is not broken -- see ``_OPERATIONAL`` in
+    # ``vernacular`` -- and a live conversion defect is still the more urgent
+    # of the two.
+    # The tiers themselves are in ``lead_rank``, at module level so the
+    # ordering can be tested without standing up an activity.
+    pitchable.sort(
+        key=lambda f: (
+            lead_rank(f.issue_type, f.page_url),
+            _SEVERITY_ORDER.get(f.severity, 9),
+            -float(f.confidence or 0.0),
+        )
+    )
+    if not pitchable:
+        return DraftActivityResult(
+            draft_id="",
+            validation_passed=False,
+            violation_codes=("no_evidence_backed_claims",),
+        )
+
+    # A follow-up leads with something the recipient has not been shown yet.
+    # Mission section 13: each step must contribute new evidence rather than
+    # restating the first message, and the cheapest way to violate that is to
+    # compose step 2 from the same headline finding as step 1.
+    #
+    # Read back out of the earlier drafts' claim maps rather than tracked in a
+    # column: the claim map is what the message actually asserted, and a
+    # separate "cited findings" list would be free to disagree with it.
+    if request.step_number > 0:
+        already_cited = await _findings_already_cited(
+            session, lead_id=uuid.UUID(request.lead_id)
+        )
+        unused = [f for f in pitchable if str(f.id) not in already_cited]
+        if not unused:
+            # Refused, not degraded. Sending the same observation twice with a
+            # different opener is exactly what the rule exists to stop, and a
+            # lead with nothing further to say to is a lead to leave alone.
+            return DraftActivityResult(
+                draft_id="",
+                validation_passed=False,
+                violation_codes=("no_unused_evidence_for_a_follow_up",),
+            )
+        pitchable = unused
+
+    # Which finding leads, and which offer answers it, are one decision.
+    #
+    # Two constraints, both of which must hold for the same finding:
+    #
+    # 1. The opener has to be worth opening. Tier 0 is a live conversion defect
+    #    -- somebody tried to buy and could not. Tier 1 is no way to book or
+    #    enquire at all, the most legible thing this system can tell an owner.
+    #    Tier 2 is alt text, console errors, headers, structured data: true,
+    #    checkable, and of no interest to whoever pays the bills. Measured over
+    #    1,008 delivered messages led by tier 2: not one genuine reply.
+    #
+    # 2. This industry's playbook has to contain an offer answering that same
+    #    finding. An offer answering a *different* one is how a message opened
+    #    with a broken navigation link and closed by offering "follow-up for
+    #    enquiries that do not book immediately" -- a capability claim
+    #    unrelated to the evidence beside it, which is the kind of small wrong
+    #    that reads as a template.
+    #
+    # Testing only the first candidate and refusing on a miss threw the lead
+    # away over its best finding: 23% of all research runs ended
+    # `no_offer_matching_the_evidence` with a perfectly answerable second
+    # finding sitting unexamined underneath. Walking the ranked list keeps both
+    # rules exactly as they were -- what leads is still the highest-ranked
+    # finding that can actually be answered -- without discarding the lead for
+    # the first miss.
+    headline = None
+    offers: list = []
+    considered = 0
+    for candidate in pitchable:
+        if lead_rank(candidate.issue_type, candidate.page_url) > _WORTH_OPENING_WITH:
+            # The list is rank-sorted, so everything below here is tier 2 too.
+            break
+        considered += 1
+        matching = select_offers(org_industry, {candidate.issue_type})
+        if matching:
+            headline = candidate
+            offers = matching
+            break
+
+    if headline is None:
+        # The two refusals are acted on differently, so they stay distinct:
+        # nothing worth opening with means wait for the next research pass,
+        # while evidence nothing can answer means the playbook has a gap.
+        return DraftActivityResult(
+            draft_id="",
+            validation_passed=False,
+            violation_codes=(
+                ("no_offer_matching_the_evidence",)
+                if considered
+                else ("no_finding_worth_opening_with",)
+            ),
+        )
+    offer = offers[0]
+
+    portfolio = str(settings.owner_portfolio_url).rstrip("/")
+    # A real previous job to cite, when one matches this reader. None on a
+    # stock install, which keeps the generic credential sentence rather than
+    # inventing a client.
+    case_study = case_studies.select(
+        case_studies.registry(settings.case_studies_path),
+        industry=str(org_industry) if org_industry else None,
+        family=family_for(headline.issue_type),
+        issue_type=headline.issue_type,
+    )
+    # The brief form links the lead's evidence page instead of the portfolio,
+    # once the page can be served: a base URL and a signing secret.
+    lead_evidence_url: str | None = None
+    if (
+        settings.message_form == "brief"
+        and settings.evidence_base_url
+        and settings.evidence_secret is not None
+    ):
+        lead_evidence_url = evidence_page.evidence_url(
+            settings.evidence_base_url,
+            uuid.UUID(request.lead_id),
+            settings.evidence_secret,
+        )
+    composed = compose(
+        ComposerContext(
+            org_domain=org_domain,
+            finding=headline,
+            evidence_ids=evidenced[str(headline.id)],
+            owner_name=settings.owner_name,
+            portfolio_url=portfolio,
+            mailing_address=mailing_address or "",
+            # Signed, so the endpoint can tell a link we issued from an
+            # address somebody typed into the query string. Falls back to the
+            # bare path only when no secret is configured, which the send gate
+            # then refuses -- better than quietly mailing an unverifiable link.
+            unsubscribe_url=(
+                unsubscribe.link(
+                    recipient_email,
+                    base_url=portfolio,
+                    secret=settings.unsubscribe_secret,
+                )
+                if settings.unsubscribe_secret
+                else f"{portfolio}/unsubscribe"
+            ),
+            offer_key=offer.key,
+            # Decides the vocabulary every sentence about their business is
+            # written in.
+            industry=org_industry,
+            business_name=org_display_name,
+            # The lead, so the same lead always composes to the same message.
+            # Seeding on anything that varies between runs would produce a
+            # second, differently worded draft on an activity retry.
+            variant_seed=request.lead_id,
+            # Above zero the composer prefixes a follow-up opener rather than
+            # opening cold, and stamps the step into the variant so the A/B
+            # decision can tell step 2's wording from step 1's.
+            step_number=request.step_number,
+            # The short form for cold domains. A setting rather than a
+            # per-campaign choice: it follows the sending infrastructure, and
+            # the infrastructure is the estate's, not a campaign's.
+            brief=settings.message_form == "brief",
+            evidence_url=lead_evidence_url,
+            # None unless the manager has promoted a register on measured
+            # evidence, in which case every lead gets it instead of the one
+            # their id happened to select.
+            promoted_variant=(
+                policy.managed_promoted_variant if policy is not None else None
+            ),
+            case_study=case_study,
+            one_pager_url=settings.one_pager_url,
+        )
+    )
+    # A model may rephrase what the composer wrote, never what it asserted.
+    # Runs outside any transaction: it makes a network call, and mission
+    # section 25 keeps I/O out of a unit of work.
+    model_calls: list[dict[str, Any]] = []
+    rewrite_detail: dict[str, Any] | None = None
+    if settings.model_rewrites_enabled:
+        composed, rewrite_detail, model_calls = await _rephrase(
+            composed,
+            org_domain=org_domain,
+            finding=headline,
+            campaign_id=request.campaign_id,
+            lead_id=request.lead_id,
+        )
+
+    subject, body, claim_map = composed.subject, composed.body, composed.claim_map
+    body_html = composed.body_html
+
+    report = validate_message(
+        MessageContext(
+            subject=subject,
+            body=body,
+            claim_map=claim_map,
+            evidenced_finding_ids=frozenset(evidenced),
+            sender_name=settings.owner_name,
+            portfolio_url=str(settings.owner_portfolio_url).rstrip("/"),
+            mailing_address=mailing_address,
+            unsubscribe_present=True,
+            form=settings.message_form,
+            evidence_url=lead_evidence_url,
+        )
+    )
+
+    async with workspace_unit_of_work(workspace_id) as session:
+        # The address was chosen when this lead was researched, and a later
+        # crawl may since have found a better one. Re-asked here rather than
+        # trusted, because ranking runs once and the lead keeps whatever was
+        # known that day -- info@parklanedentalcare.ca had been stored for six
+        # days when the estate wrote to the dentist by name and hard-bounced.
+        channel_id = await _best_channel_for(session, channel_id)
+
+        # Which step of the sequence this is. Resolved here rather than passed
+        # in because the step rows belong to the campaign and can be edited
+        # between the workflow starting and the draft landing.
+        sequence_step_id = await _sequence_step_for(
+            session,
+            campaign_id=uuid.UUID(request.campaign_id),
+            step_number=request.step_number,
+        )
+
+        draft = MessageDraft(
+            workspace_id=workspace_id,
+            lead_id=uuid.UUID(request.lead_id),
+            campaign_id=uuid.UUID(request.campaign_id),
+            contact_channel_id=channel_id,
+            sequence_step_id=sequence_step_id,
+            idempotency_key=request.idempotency_key,
+            status=(
+                DraftStatus.AWAITING_APPROVAL
+                if report.passed
+                else DraftStatus.VALIDATION_FAILED
+            ),
+            subject=subject,
+            body_text=body,
+            # The HTML part, where the evidence and portfolio links are anchors
+            # over a phrase instead of raw URLs in the prose. The text part
+            # stays authoritative -- it is what the validator reads.
+            body_html=body_html,
+            claim_map=claim_map,
+            validation_report=(
+                {**report.to_json(), "rewrite": rewrite_detail}
+                if rewrite_detail
+                else report.to_json()
+            ),
+            validation_passed=report.passed,
+            # Which engine wrote it and which offer it implies, rather than
+            # the caller's static label -- every draft ever written carried
+            # "first_observation", so the column recorded nothing.
+            #
+            # An earlier revision of this comment claimed the sequence step was
+            # "not lost with it" because ``variant`` carries ":step2". That was
+            # wrong, and expensively so: the composer only appends ":step2" when
+            # ``step_number`` is non-zero, nothing ever passed a non-zero
+            # ``step_number``, and no variant in the estate has ever contained
+            # the substring. The step is now carried by ``sequence_step_id``
+            # above, which is a foreign key rather than a string somebody has to
+            # remember to parse.
+            template_key=composed.template_key or request.template_key,
+            # The composer picked this from the lead id and has always done so.
+            # Recording it is what turns a real assignment into a measurable one.
+            variant=composed.variant or None,
+        )
+        session.add(draft)
+        await session.flush()
+        # In the same transaction as the draft the calls paid for: a rolled-back
+        # draft must not leave a charge behind for a message never written.
+        await record_calls(session, workspace_id=workspace_id, calls=model_calls)
+        await session.execute(
+            Lead.__table__.update()  # type: ignore[attr-defined]
+            .where(Lead.id == uuid.UUID(request.lead_id))
+            .values(
+                status=(
+                    LeadStatus.AWAITING_APPROVAL if report.passed else LeadStatus.DRAFTED
+                )
+            )
+        )
+        draft_id = str(draft.id)
+
+    return DraftActivityResult(
+        draft_id=draft_id,
+        validation_passed=report.passed,
+        violation_codes=tuple(v.code.value for v in report.violations),
+    )
+
+
+# ==========================================================================
+# 6. Queue
+# ==========================================================================
+
+
+@activity.defn(name="queue_message")
+async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
+    """Write the outbox row. Does NOT send.
+
+    The outbox worker re-evaluates the whole authorization chain immediately
+    before any provider call, so this is a queueing step, not a delivery one.
+    """
+    workspace_id = uuid.UUID(request.workspace_id)
+
+    async with workspace_unit_of_work(workspace_id) as session:
+        draft = await session.get(MessageDraft, uuid.UUID(request.draft_id))
+        if draft is None:
+            return QueueActivityResult(
+                outbox_id=None, queued=False, refused_reasons=("draft not found",)
+            )
+        if not draft.validation_passed:
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=("draft did not pass message validation",),
+            )
+
+        channel = await session.get(ContactChannel, draft.contact_channel_id)
+        campaign = await session.get(Campaign, draft.campaign_id)
+        workspace = await session.get(Workspace, workspace_id)
+        if channel is None or campaign is None:
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=("draft references a missing channel or campaign",),
+            )
+        # Which mailbox, out of the campaign's pool. A pool of one behaves
+        # exactly as the single sender_identity_id did; beyond one, the message
+        # goes to whichever mailbox has the most room left today, so a batch
+        # spreads across the pool instead of filling one mailbox and deferring
+        # the rest.
+        slots = await sender_pool.load_slots(
+            session, workspace_id, campaign.id, now=_now()
+        )
+        selection = sender_pool.choose(slots)
+        sender = (
+            await session.get(SenderIdentity, selection.chosen_id)
+            if selection.chosen_id
+            else None
+        )
+        if sender is None:
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=(
+                    f"no mailbox in the campaign's pool can send: "
+                    f"{sender_pool.describe(selection)}",
+                ),
+            )
+
+        suppressed = await is_suppressed(
+            session, workspace_id=workspace_id, email=channel.normalized_value
+        )
+        if suppressed is not None:
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=(f"recipient suppressed ({suppressed.reason.value})",),
+            )
+
+        dedupe = f"draft-{draft.id}"
+        already = (
+            await session.execute(
+                select(OutboxMessage).where(OutboxMessage.dedupe_key == dedupe)
+            )
+        ).scalar_one_or_none()
+        if already is not None:
+            return QueueActivityResult(outbox_id=str(already.id), queued=True)
+
+        # The dedupe key above is per *draft*, so it collapses a retry of this
+        # activity and nothing else. Two drafts for one lead -- which is what a
+        # re-run of the research pipeline produces -- get two keys and both
+        # queue. Found in a live outbox: seventeen recipients each holding two
+        # pending messages from the same campaign, differing only in which
+        # finding they led with.
+        #
+        # Refused rather than collapsed, because the second message is not a
+        # follow-up. A real follow-up is scheduled by FollowUpScheduler after
+        # the first has *sent* and a spacing interval has passed; two arriving
+        # together is the thing that reads as careless and generates the
+        # complaint.
+        waiting = (
+            await session.execute(
+                select(OutboxMessage.id).where(
+                    OutboxMessage.campaign_id == draft.campaign_id,
+                    OutboxMessage.to_email_normalized == channel.normalized_value,
+                    OutboxMessage.status.in_(_UNSENT_OUTBOX_STATUSES),
+                )
+            )
+        ).scalar_one_or_none()
+        if waiting is not None:
+            logger.info(
+                "refusing a second queued message to a recipient already waiting",
+                extra={
+                    "campaign_id": str(draft.campaign_id),
+                    "outbox_id": str(waiting),
+                },
+            )
+            return QueueActivityResult(
+                outbox_id=None,
+                queued=False,
+                refused_reasons=(
+                    "a message to this recipient is already queued for this "
+                    "campaign and has not been sent",
+                ),
+            )
+
+        message = Message(
+            workspace_id=workspace_id,
+            draft_id=draft.id,
+            lead_id=draft.lead_id,
+            campaign_id=draft.campaign_id,
+            sender_identity_id=sender.id,
+            dedupe_key=dedupe,
+            to_email=channel.value,
+            to_email_normalized=channel.normalized_value,
+            to_domain=channel.value_domain or "",
+            from_email=sender.from_email,
+            subject=draft.subject,
+            state=MessageState.QUEUED,
+            state_rank=0,
+            provider=get_settings().email_provider,
+        )
+        session.add(message)
+        await session.flush()
+
+        outbox = OutboxMessage(
+            workspace_id=workspace_id,
+            message_id=message.id,
+            draft_id=draft.id,
+            approval_id=(uuid.UUID(request.approval_id) if request.approval_id else None),
+            campaign_id=draft.campaign_id,
+            lead_id=draft.lead_id,
+            sender_identity_id=sender.id,
+            dedupe_key=dedupe,
+            # Stored BEFORE the first attempt, so every retry presents the same
+            # key and the provider collapses a duplicate.
+            provider_idempotency_key=f"idem-{dedupe}",
+            status=OutboxStatus.PENDING,
+            to_email_normalized=channel.normalized_value,
+            to_domain=channel.value_domain or "",
+            next_attempt_at=_now(),
+            payload={
+                "to_email": channel.value,
+                "from_email": sender.from_email,
+                "from_name": sender.from_name,
+                "reply_to": sender.reply_to_email,
+                "subject": draft.subject,
+                "text_body": draft.body_text,
+                # Absent rather than empty when there is no HTML part: the
+                # provider treats None as "send text only", and an empty string
+                # would be a valid-looking blank HTML alternative.
+                "html_body": draft.body_html or None,
+                # Both targets. Gmail renders the one-click button from the
+                # https URL; the mailto is the fallback for clients that do not
+                # implement RFC 8058. `list_unsubscribe_post` is what makes the
+                # button appear at all -- without it the header is present and
+                # not one-click, which is exactly what the send gate refuses.
+                **unsubscribe.headers_for(sender, channel.value, get_settings()),
+            },
+        )
+        session.add(outbox)
+        await session.flush()
+        draft.status = DraftStatus.QUEUED
+        _ = workspace
+        return QueueActivityResult(outbox_id=str(outbox.id), queued=True)
+
+
+#: Registered with the Temporal worker. Temporal's decorator returns an
+#: untyped callable, so the element type is widened deliberately.
+ALL_PIPELINE_ACTIVITIES: list[Callable[..., Any]] = [
+    crawl_lead_website,
+    analyse_evidence,
+    score_lead,
+    resolve_contact,
+    generate_draft,
+    queue_message,
+]
+
+__all__ = [
+    "ALL_PIPELINE_ACTIVITIES",
+    "analyse_evidence",
+    "crawl_lead_website",
+    "generate_draft",
+    "queue_message",
+    "resolve_contact",
+    "score_lead",
+]
+
+
+async def _sequence_step_for(
+    session: Any, *, campaign_id: uuid.UUID, step_number: int
+) -> uuid.UUID | None:
+    """Which row of the campaign's sequence this draft is, if any.
+
+    Recording this is what makes the sequence a sequence. Without it
+    :meth:`coldops.delivery.followup_scheduler.FollowUpScheduler._plan_for`
+    computes an empty ``completed`` set for every lead, so
+    :func:`coldops.intelligence.sequencing.plan_followup` picks ``remaining[0]``
+    -- step one, ``delay_days=0`` -- and calls it due, forever. Measured on the
+    live estate before this was written: 6,064 drafts, none carrying a step,
+    5,000 of them superseded, and 344 of 375 contacted leads sitting on exactly
+    one delivered message with steps two through four never once composed.
+
+    **The two numbering schemes are off by one and the mapping is here.**
+    ``DraftActivityInput.step_number`` counts from zero because zero is the
+    opener; ``sequence_steps.step_number`` counts from one because it is a
+    position in a list a human wrote. Everything downstream reads the row, so
+    this is the only place the two have to be reconciled.
+
+    Returns ``None`` -- and must never raise -- when the campaign has no active
+    sequence or has not defined this step. A campaign without a sequence still
+    sends openers, and that is not a reason to lose the draft the model was
+    just paid for.
+    """
+    step_id = (
+        await session.execute(
+            select(SequenceStep.id)
+            .join(EmailSequence, EmailSequence.id == SequenceStep.sequence_id)
+            .where(
+                EmailSequence.campaign_id == campaign_id,
+                EmailSequence.is_active.is_(True),
+                SequenceStep.step_number == step_number + 1,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if step_id is None:
+        logger.info(
+            "no active sequence step for this draft; it will not advance a sequence",
+            extra={"campaign_id": str(campaign_id), "step_number": step_number},
+        )
+    return step_id
+
+
+async def _best_channel_for(session: Any, channel_id: uuid.UUID) -> uuid.UUID:
+    """The chosen channel, or a generic role address at the same contact.
+
+    Only ever an upgrade out of a personal or departmental local part and into
+    the role band; :func:`preferred_replacement` refuses everything else. The
+    alternatives offered to it are already narrowed to addresses that are
+    active and permitted to send, so a "better" address is never one the gate
+    would refuse.
+
+    Falls back to the original channel on anything unexpected. A better address
+    is an improvement, not a requirement, and a lookup that fails must not stop
+    the draft being written.
+    """
+    try:
+        current = await session.get(ContactChannel, channel_id)
+        if current is None:
+            return channel_id
+        rows = (
+            (
+                await session.execute(
+                    select(ContactChannel).where(
+                        ContactChannel.contact_id == current.contact_id,
+                        ContactChannel.is_active.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        eligible = {
+            row.normalized_value: row.id
+            for row in rows
+            if verification_permits_sending(row.verification_status, row.source)
+        }
+        better = preferred_replacement(current.normalized_value, list(eligible))
+        if better is None:
+            return channel_id
+        logger.info(
+            "using a better contact address than the one chosen at research",
+            extra={"from": current.normalized_value, "to": better},
+        )
+        return eligible[better]
+    except Exception:
+        logger.warning(
+            "could not re-rank contact channels; keeping the researched address",
+            exc_info=True,
+        )
+        return channel_id

@@ -5,17 +5,17 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from titan.activities import warmup as warmup_activity
-from titan.delivery.mailboxes import Endpoint
-from titan.delivery.warmup import (
+from coldops.activities import warmup as warmup_activity
+from coldops.delivery.mailboxes import Endpoint
+from coldops.delivery.warmup import (
     Participant,
     PoolConflict,
     involving_ours,
     plan,
     round_pool,
 )
-from titan.workflows.schedules import plan_schedules
-from titan.workflows.types import WarmupRoundInput
+from coldops.workflows.schedules import plan_schedules
+from coldops.workflows.types import WarmupRoundInput
 
 from tests.delivery.conftest import sending_settings
 

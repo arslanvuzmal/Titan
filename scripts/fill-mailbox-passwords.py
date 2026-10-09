@@ -30,7 +30,7 @@ import sys
 
 DEFAULT_PATH = pathlib.Path("secrets/mailboxes.json")
 
-#: The same list titan.delivery.mailboxes refuses. A file still carrying one of
+#: The same list coldops.delivery.mailboxes refuses. A file still carrying one of
 #: these has been created and not filled in.
 PLACEHOLDERS = {
     "",
@@ -169,7 +169,7 @@ def main() -> int:
     print(f"\nWrote {changed} password(s) into {args.path}.")
     print()
     print("Next:")
-    print("  docker compose exec api python -m titan.cli mailbox check")
+    print("  docker compose exec api python -m coldops.cli mailbox check")
     return 0
 
 

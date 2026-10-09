@@ -19,9 +19,9 @@ message.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import Industry
-from titan.intelligence.playbooks import PLAYBOOKS
-from titan.intelligence.verticals import (
+from coldops.db.enums import Industry
+from coldops.intelligence.playbooks import PLAYBOOKS
+from coldops.intelligence.verticals import (
     VERTICALS,
     catalogue_size,
     next_vertical,

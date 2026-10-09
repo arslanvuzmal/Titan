@@ -17,7 +17,7 @@
  *
  * So a search is permitted and an individual place page is not. That boundary
  * is enforced in code below, not left to whoever edits the URL next, because
- * Titan attaches a one-pager to every message saying "robots.txt obeyed" --
+ * ColdOps attaches a one-pager to every message saying "robots.txt obeyed" --
  * and a system whose discipline is never asserting what it cannot evidence
  * cannot afford that sentence to be false.
  *

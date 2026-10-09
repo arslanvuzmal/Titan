@@ -19,7 +19,7 @@ every rule that was there before.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.replies import (
+from coldops.intelligence.replies import (
     InboundMessage,
     ReplyKind,
     classify_reply,
@@ -59,8 +59,8 @@ class TestOurOwnMail:
             _msg(
                 from_email="arslanvuzmallone@gmail.com",
                 subject="Re: delivery test",
-                body_text="Ready ! On Mon, Aug 24, 2026 Titan wrote: > This is a "
-                "delivery test sent by Titan",
+                body_text="Ready ! On Mon, Aug 24, 2026 ColdOps wrote: > This is a "
+                "delivery test sent by ColdOps",
             ),
             own_addresses=OURS,
         )

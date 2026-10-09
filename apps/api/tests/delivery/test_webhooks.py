@@ -2,7 +2,7 @@
 
 The failure modes these defend against are all real and all silent:
 a duplicate delivery marks a message opened twice and skews every metric;
-a delayed `sent` overwrites `bounced` and Titan keeps mailing a dead address;
+a delayed `sent` overwrites `bounced` and ColdOps keeps mailing a dead address;
 a forged `delivered` hides a bounce until the domain is blocklisted.
 """
 
@@ -16,15 +16,15 @@ import json
 import time
 
 import pytest
+from coldops.db.enums import DELIVERY_RANK, LeadStatus, MessageState, SuppressionReason
+from coldops.db.models import Lead, Message, ProviderEvent
+from coldops.db.session import get_sessionmaker
+from coldops.delivery.providers.base import WebhookVerificationError
+from coldops.delivery.providers.mock import MockEmailProvider
+from coldops.delivery.providers.resend import ResendProvider
+from coldops.delivery.suppression import is_suppressed
+from coldops.delivery.webhooks import ingest_event, record_reply
 from sqlalchemy import func, select
-from titan.db.enums import DELIVERY_RANK, LeadStatus, MessageState, SuppressionReason
-from titan.db.models import Lead, Message, ProviderEvent
-from titan.db.session import get_sessionmaker
-from titan.delivery.providers.base import WebhookVerificationError
-from titan.delivery.providers.mock import MockEmailProvider
-from titan.delivery.providers.resend import ResendProvider
-from titan.delivery.suppression import is_suppressed
-from titan.delivery.webhooks import ingest_event, record_reply
 
 from .conftest import NOW
 
@@ -113,12 +113,12 @@ async def test_duplicate_complaint_suppresses_only_once(db_session, sendable) ->
                     select(1)
                     .select_from(
                         __import__(
-                            "titan.db.models", fromlist=["SuppressionEntry"]
+                            "coldops.db.models", fromlist=["SuppressionEntry"]
                         ).SuppressionEntry
                     )
                     .where(
                         __import__(
-                            "titan.db.models", fromlist=["SuppressionEntry"]
+                            "coldops.db.models", fromlist=["SuppressionEntry"]
                         ).SuppressionEntry.normalized_value
                         == sendable.to_email
                     )

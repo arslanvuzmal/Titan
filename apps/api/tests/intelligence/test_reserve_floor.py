@@ -24,7 +24,7 @@ is a set of leads that will be crawled twice and mailed once.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.fuel import RESERVE_DAYS, reserve_target
+from coldops.intelligence.fuel import RESERVE_DAYS, reserve_target
 
 
 def test_unset_floor_leaves_the_derived_target_alone() -> None:
@@ -69,7 +69,7 @@ def test_the_budget_reason_says_when_a_floor_is_doing_the_work() -> None:
     the difference between a healthy pipeline and one propped open by a flag
     left on after a measurement.
     """
-    from titan.intelligence.fuel import FuelState, research_budget
+    from coldops.intelligence.fuel import FuelState, research_budget
 
     state = FuelState(
         reachable_untouched=100,

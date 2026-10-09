@@ -10,8 +10,8 @@ change.
 
 from __future__ import annotations
 
-from titan.db.enums import DraftStatus, OutboxStatus
-from titan.outreach.redraft import LIVE_OUTBOX, REDRAFTABLE, why_stale
+from coldops.db.enums import DraftStatus, OutboxStatus
+from coldops.outreach.redraft import LIVE_OUTBOX, REDRAFTABLE, why_stale
 
 from tests.support import sample_message
 
@@ -110,7 +110,7 @@ def test_the_queued_copy_is_rewritten_with_the_draft() -> None:
     draft. A row repointed without re-rendering is gated on the new words and
     sends the old ones -- the one disagreement here that reaches a stranger.
     """
-    from titan.outreach.redraft import _rendered
+    from coldops.outreach.redraft import _rendered
 
     class Replacement:
         subject = "New subject"
@@ -141,7 +141,7 @@ def test_the_queued_copy_is_rewritten_with_the_draft() -> None:
 
 def test_a_draft_with_no_html_leaves_no_blank_alternative() -> None:
     """None means 'text only'; an empty string is a blank HTML part."""
-    from titan.outreach.redraft import _rendered
+    from coldops.outreach.redraft import _rendered
 
     class Replacement:
         subject = "s"
@@ -168,7 +168,7 @@ def test_replacing_the_words_invalidates_the_approval_that_covered_them() -> Non
     because "the gate will catch it" is exactly the kind of claim that stops
     being true quietly.
     """
-    from titan.policy.engine import DenyCode
+    from coldops.policy.engine import DenyCode
 
     assert DenyCode.APPROVAL_STALE.value == "approval_does_not_match_draft_version"
     assert DenyCode.APPROVAL_MISSING.value == "approval_missing"

@@ -1,6 +1,6 @@
 """Recipient domain health tests.
 
-The classifier's whole difficulty is sample size. Titan sends at most two
+The classifier's whole difficulty is sample size. ColdOps sends at most two
 messages a day to one recipient domain, so almost every window here holds one to
 four messages -- and a rule tuned for the hundreds a sender window sees would
 either condemn a domain on its first wrong address or never fire at all.
@@ -11,9 +11,9 @@ These pin down where the line sits in both directions.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import ContactSource, VerificationStatus
-from titan.intelligence.bounce_risk import Verdict, assess
-from titan.intelligence.domain_health import (
+from coldops.db.enums import ContactSource, VerificationStatus
+from coldops.intelligence.bounce_risk import Verdict, assess
+from coldops.intelligence.domain_health import (
     BOUNCES_TO_BLOCK,
     MIN_SENDS_FOR_RATE,
     DomainHealth,
@@ -21,7 +21,7 @@ from titan.intelligence.domain_health import (
     classify,
     explain,
 )
-from titan.intelligence.mx import MxCheck, MxStatus
+from coldops.intelligence.mx import MxCheck, MxStatus
 
 MX_OK = MxCheck(MxStatus.PRESENT, "harborline-legal.test", hosts=("mx1.test",))
 
@@ -66,7 +66,7 @@ def test_delivered_and_nothing_wrong_is_healthy() -> None:
 
 
 def test_a_healthy_domain_does_not_confirm_the_mailbox() -> None:
-    """The same trap MX presence sets. Titan having delivered to this domain
+    """The same trap MX presence sets. ColdOps having delivered to this domain
     before says the domain accepts mail, not that this mailbox exists."""
     risk = assess(
         email="newperson@harborline-legal.test",
@@ -172,7 +172,7 @@ def test_bounces_do_not_block_once_something_has_been_delivered() -> None:
 def test_a_single_complaint_blocks_the_domain(history: dict[str, int]) -> None:
     """Categorically different from a bounce, and not subject to a sample floor.
 
-    Somebody at this business marked Titan as spam. Writing to their colleague
+    Somebody at this business marked ColdOps as spam. Writing to their colleague
     next is how one complaint becomes a pattern.
     """
     assert classify(window(**history)) is DomainHealth.BLOCKED
@@ -196,7 +196,7 @@ def test_a_complaint_refuses_a_new_address_at_the_same_business() -> None:
 # ==========================================================================
 def test_a_blocked_domain_outranks_a_confirmed_mailbox() -> None:
     """The mailbox existing was never in doubt. Somebody there complained."""
-    from titan.intelligence.verifier import VerificationResult
+    from coldops.intelligence.verifier import VerificationResult
 
     risk = assess(
         email="info@harborline-legal.test",
@@ -249,4 +249,4 @@ def test_every_verdict_explains_itself(history: dict[str, int]) -> None:
 
 def test_the_complaint_explanation_says_what_actually_happened() -> None:
     w = window(sent=3, delivered=2, complained=1)
-    assert "marked Titan as spam" in explain(w, classify(w))
+    assert "marked ColdOps as spam" in explain(w, classify(w))

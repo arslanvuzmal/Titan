@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from titan.db.enums import LeadStatus
-from titan.policy.engine import REPLY_EXEMPT, DenyCode, evaluate_send
+from coldops.db.enums import LeadStatus
+from coldops.policy.engine import REPLY_EXEMPT, DenyCode, evaluate_send
 
 from tests.policy.test_send_authorization import sendable_context
 

@@ -15,8 +15,8 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.delivery.mailboxes import parse_mailboxes
-from titan.delivery.warmup import (
+from coldops.delivery.mailboxes import parse_mailboxes
+from coldops.delivery.warmup import (
     MAX_PER_PARTNER,
     WARMUP_HEADER,
     NotAParticipant,
@@ -96,7 +96,7 @@ def test_the_module_never_reaches_the_lead_tables() -> None:
     import ast
     import pathlib
 
-    source = pathlib.Path("titan/delivery/warmup.py").read_text(encoding="utf-8")
+    source = pathlib.Path("coldops/delivery/warmup.py").read_text(encoding="utf-8")
     imported: set[str] = set()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
@@ -105,7 +105,7 @@ def test_the_module_never_reaches_the_lead_tables() -> None:
             imported.add(node.module)
 
     assert not any(
-        module.startswith(("titan.db", "titan.outreach", "titan.intelligence"))
+        module.startswith(("coldops.db", "coldops.outreach", "coldops.intelligence"))
         for module in imported
     ), sorted(imported)
 
@@ -151,7 +151,7 @@ def test_a_different_day_is_a_different_conversation() -> None:
 def test_nothing_in_the_corpus_reads_as_marketing() -> None:
     """These land in mailboxes a person opens. A warm-up corpus that reads like
     outreach teaches the filter exactly the wrong lesson."""
-    from titan.delivery.warmup import OPENERS, RESPONSES
+    from coldops.delivery.warmup import OPENERS, RESPONSES
 
     banned = ("unsubscribe", "offer", "free", "click here", "buy", "discount")
     for subject, body in OPENERS:
@@ -266,8 +266,8 @@ async def test_a_message_already_delivered_is_not_sent_again(monkeypatch) -> Non
         attempted.append(send.message_id)
         return None
 
-    monkeypatch.setattr("titan.delivery.warmup.already_delivered", already)
-    monkeypatch.setattr("titan.delivery.warmup._smtp_send", never)
+    monkeypatch.setattr("coldops.delivery.warmup.already_delivered", already)
+    monkeypatch.setattr("coldops.delivery.warmup._smtp_send", never)
 
     report = await send_round(sends)
 
@@ -286,8 +286,8 @@ async def test_a_failed_send_is_counted_and_named(monkeypatch) -> None:
     def refuse(send, *, timeout):
         return "SMTPAuthenticationError: 535 bad credentials"
 
-    monkeypatch.setattr("titan.delivery.warmup.already_delivered", none_delivered)
-    monkeypatch.setattr("titan.delivery.warmup._smtp_send", refuse)
+    monkeypatch.setattr("coldops.delivery.warmup.already_delivered", none_delivered)
+    monkeypatch.setattr("coldops.delivery.warmup._smtp_send", refuse)
 
     report = await send_round(sends)
 

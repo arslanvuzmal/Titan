@@ -12,12 +12,12 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.autonomy.actuator import Actuation, Bounds, Proposal
+from coldops.autonomy.apply import apply_all
+from coldops.autonomy.health import CampaignHealth
+from coldops.db.models import AutonomyDecision, CampaignPolicy
+from coldops.db.session import get_sessionmaker, workspace_unit_of_work
 from sqlalchemy import select, update
-from titan.autonomy.actuator import Actuation, Bounds, Proposal
-from titan.autonomy.apply import apply_all
-from titan.autonomy.health import CampaignHealth
-from titan.db.models import AutonomyDecision, CampaignPolicy
-from titan.db.session import get_sessionmaker, workspace_unit_of_work
 
 from tests.delivery.conftest import build_sendable
 
@@ -223,7 +223,7 @@ async def test_a_decision_that_changes_nothing_is_still_recorded(
 
 @pytest.mark.asyncio
 async def test_another_workspace_cannot_see_the_trail(db_session, sendable) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
     db_session.add(other)
@@ -260,7 +260,7 @@ async def test_another_workspace_cannot_see_the_trail(db_session, sendable) -> N
 def test_a_health_reduction_still_keeps_a_trickle() -> None:
     """The floor's original job, unchanged. A campaign cut to nothing on a
     health judgement looks paused and recovers from neither."""
-    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+    from coldops.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
 
     verdict = evaluate(
         Proposal(
@@ -288,7 +288,7 @@ def test_an_allocated_zero_is_left_at_zero() -> None:
     A campaign that got no share has had nothing judged about it. It is behind
     others in a queue, and it is first in line next cycle.
     """
-    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+    from coldops.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
 
     verdict = evaluate(
         Proposal(
@@ -308,7 +308,7 @@ def test_an_allocated_zero_is_left_at_zero() -> None:
 def test_permitting_zero_does_not_lift_the_ceiling() -> None:
     """It relaxes one bound, not both. The human's configured limit is still
     the most any campaign may be given."""
-    from titan.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
+    from coldops.autonomy.actuator import Actuation, Bounds, Proposal, evaluate
 
     verdict = evaluate(
         Proposal(

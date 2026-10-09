@@ -1,7 +1,7 @@
 """The row that joins four written steps to the scheduler that walks them.
 
-``titan.outreach.sequence`` has held the four steps since it was ported and
-``titan.delivery.followup_scheduler`` has known how to walk them, and no code
+``coldops.outreach.sequence`` has held the four steps since it was ported and
+``coldops.delivery.followup_scheduler`` has known how to walk them, and no code
 path had ever created the ``email_sequences`` row between them. The scheduler's
 lookup returned None for every campaign, so every lead was contacted once and
 three quarters of the outreach existed only as tested functions.
@@ -15,14 +15,14 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
-from titan.db.enums import CampaignStatus, Industry
-from titan.db.models import Campaign, EmailSequence, SequenceStep
-from titan.outreach.provisioning import (
+from coldops.db.enums import CampaignStatus, Industry
+from coldops.db.models import Campaign, EmailSequence, SequenceStep
+from coldops.outreach.provisioning import (
     REQUIRES_NEW_EVIDENCE,
     ensure_sequence,
 )
-from titan.outreach.sequence import STEP_DELAYS_IN_DAYS, TEMPLATE_KEYS
+from coldops.outreach.sequence import STEP_DELAYS_IN_DAYS, TEMPLATE_KEYS
+from sqlalchemy import select
 
 pytestmark = pytest.mark.asyncio
 

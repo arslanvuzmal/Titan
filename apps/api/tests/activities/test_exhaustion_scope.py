@@ -29,7 +29,7 @@ different search contributes nothing.
 from __future__ import annotations
 
 import pytest
-from titan.activities.discovery import (
+from coldops.activities.discovery import (
     EXHAUSTION_WINDOW_RUNS,
     MIN_ADMIT_RATE,
     MIN_RETURNED_TO_JUDGE,

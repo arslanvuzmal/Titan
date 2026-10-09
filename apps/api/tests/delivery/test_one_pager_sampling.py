@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from titan.delivery.outbox_worker import carries_one_pager
+from coldops.delivery.outbox_worker import carries_one_pager
 
 # Fixed ids: a seeded sample, so a failure is reproducible rather than a
 # once-in-a-thousand flake somebody re-runs until it passes.

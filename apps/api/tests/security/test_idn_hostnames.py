@@ -3,7 +3,7 @@
 The guard's label pattern is ASCII-only, which is right -- A-labels are what
 DNS carries. What was missing was the conversion *into* that form, so every
 accented domain was refused outright as ``invalid_hostname``. Observed in the
-worker log: ``strafverteidigungmünchen.de: invalid_hostname``. Titan sells into
+worker log: ``strafverteidigungmünchen.de: invalid_hostname``. ColdOps sells into
 Germany, Poland, the Netherlands and the Nordics, so this was not an edge case;
 it was a standing refusal to look at a slice of the target market.
 
@@ -18,7 +18,7 @@ tests below pin that down from both directions.
 from __future__ import annotations
 
 import pytest
-from titan.security.url_guard import BlockReason, to_ascii_hostname, validate_url
+from coldops.security.url_guard import BlockReason, to_ascii_hostname, validate_url
 
 
 def _resolver(addresses: list[str]):

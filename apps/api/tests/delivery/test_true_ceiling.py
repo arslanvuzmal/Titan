@@ -12,7 +12,7 @@ stopped there, permanently.
 
 from __future__ import annotations
 
-from titan.provision_senders import true_ceiling
+from coldops.provision_senders import true_ceiling
 
 ACCOUNT = {"id": 22147662, "from_email": "sales@x.com", "message_per_day": 18}
 

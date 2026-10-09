@@ -341,7 +341,7 @@ export async function readPerformance(page: Page): Promise<PerformanceMetrics | 
     if (measured === null) return null;
     return {
       // Null, and deliberately so: these four are Lighthouse category scores
-      // and Titan does not run Lighthouse. Filling them with something derived
+      // and ColdOps does not run Lighthouse. Filling them with something derived
       // would put a number nobody measured in front of a recipient.
       performance_score: null,
       accessibility_score: null,

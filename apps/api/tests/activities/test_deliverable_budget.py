@@ -19,9 +19,9 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.activities.orchestration import _deliverable_budget
+from coldops.db.models import SenderIdentity, Workspace
 from sqlalchemy import select, update
-from titan.activities.orchestration import _deliverable_budget
-from titan.db.models import SenderIdentity, Workspace
 
 from tests.delivery.conftest import build_sendable
 
@@ -137,7 +137,7 @@ async def test_an_unreadable_pool_leaves_the_configured_limit_standing(
     """Fails soft upward, to the behaviour before this existed. The warm-up
     ceiling is enforced independently at send time, so a budget that is too
     generous costs deferrals and never sends."""
-    from titan.delivery import sender_pool
+    from coldops.delivery import sender_pool
 
     ws = await _set_workspace_limit(db_session, workspace, 150)
     original = sender_pool.load_slots
@@ -160,7 +160,7 @@ async def test_the_allocator_is_handed_the_bounded_figure(
 ) -> None:
     """The wiring, not the arithmetic. A correct bound computed and then not
     used is the same system as no bound at all."""
-    from titan.activities import orchestration
+    from coldops.activities import orchestration
 
     fixture = await _pool_of_three(db_session, workspace, suffix="bud4")
     rated = await db_session.scalar(
@@ -225,7 +225,7 @@ async def test_a_blocked_mailbox_contributes_nothing_to_the_budget(
     """Planted violation: drop the blocked-sender exclusion and this fails."""
     import datetime as _dt
 
-    from titan.db.models import SenderHealthSnapshot
+    from coldops.db.models import SenderHealthSnapshot
 
     fixture = await _pool_of_three(db_session, workspace, suffix="bud-blocked")
     ws = await _set_workspace_limit(db_session, workspace, 1000)

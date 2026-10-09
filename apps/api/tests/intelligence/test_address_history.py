@@ -2,7 +2,7 @@
 
 The layer a paid verification service is actually selling. MillionVerifier does
 not deduce that a mailbox is dead, it remembers watching it bounce; the
-algorithm is cheap and the history is the product. Titan generated the same
+algorithm is cheap and the history is the product. ColdOps generated the same
 evidence on every send and discarded it.
 
 Pure tests over ``assess``: the layer is a signal, and what matters is which
@@ -14,12 +14,12 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.db.enums import ContactSource, VerificationStatus
-from titan.intelligence.address_history import (
+from coldops.db.enums import ContactSource, VerificationStatus
+from coldops.intelligence.address_history import (
     SOFT_BOUNCES_BEFORE_DOUBT,
     AddressHistory,
 )
-from titan.intelligence.bounce_risk import assess
+from coldops.intelligence.bounce_risk import assess
 
 GOOD = "hello@fixture-business.test"
 SOURCE = ContactSource.FIRST_PARTY_WEBSITE
@@ -90,7 +90,7 @@ def test_no_history_changes_nothing() -> None:
     """Asked, and this address has never misbehaved.
 
     A zeroed history must land exactly where passing nothing lands, or every
-    address Titan has never written to would be judged by this layer.
+    address ColdOps has never written to would be judged by this layer.
     """
     asked = risk(AddressHistory(address=GOOD))
     not_asked = risk(None)

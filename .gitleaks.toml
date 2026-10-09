@@ -21,7 +21,7 @@ keywords = ["key", "api", "token", "secret", "password", "auth", "access"]
   [[rules.allowlists]]
   description = """
   Sequence template keys are not credentials. `outreach_v2_followup1` and its
-  siblings are declared in titan/outreach/sequence.py as TEMPLATE_KEYS and name
+  siblings are declared in coldops/outreach/sequence.py as TEMPLATE_KEYS and name
   which step of the outreach cadence a draft belongs to. They match
   generic-api-key only because the rule fires on `key = <high-entropy string>`.
 

@@ -29,7 +29,7 @@ today, distinguishable only by whether their CSS is tidy.
 
 ### What already exists
 
-`titan/intelligence/modernisation.py` was written for exactly this and is
+`coldops/intelligence/modernisation.py` was written for exactly this and is
 careful about the hard part. It reads six capabilities — conversational,
 self-service booking, marketing automation, reputation automation, analytics,
 modern site — by matching vendor tokens against technologies and script URLs

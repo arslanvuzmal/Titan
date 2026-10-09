@@ -11,12 +11,12 @@ import datetime as dt
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from coldops.activities import discovery
+from coldops.activities.discovery import FULL_DEPTH_REST, discover_leads
+from coldops.db.models import LeadSource
+from coldops.db.session import workspace_unit_of_work
+from coldops.intelligence.discovery import MAX_RESULTS_PER_SEARCH
 from sqlalchemy import update
-from titan.activities import discovery
-from titan.activities.discovery import FULL_DEPTH_REST, discover_leads
-from titan.db.models import LeadSource
-from titan.db.session import workspace_unit_of_work
-from titan.intelligence.discovery import MAX_RESULTS_PER_SEARCH
 
 from tests.activities.test_discovery import found, places_result, run_for, seed_campaign
 
@@ -26,9 +26,9 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 async def _search(request, result):
     """As ``run_discovery``, but hands back the query Places was asked."""
     with (
-        patch("titan.activities.discovery.GooglePlacesProvider") as ProviderCls,
-        patch("titan.activities.discovery.get_settings") as get_settings,
-        patch("titan.activities.discovery.activity") as fake_activity,
+        patch("coldops.activities.discovery.GooglePlacesProvider") as ProviderCls,
+        patch("coldops.activities.discovery.get_settings") as get_settings,
+        patch("coldops.activities.discovery.activity") as fake_activity,
     ):
         fake_activity.heartbeat = lambda *a, **k: None
         get_settings.return_value.google_places_api_key = "key"

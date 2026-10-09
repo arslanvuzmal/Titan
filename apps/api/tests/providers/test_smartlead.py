@@ -6,7 +6,7 @@ see docs/audits/FINAL-PRODUCTION-VERIFICATION.md for what has and has not been
 verified against real credentials.
 
 The tests that matter most here are the refusals. Smartlead is a campaign
-platform, so the failure mode this integration has to prevent is Titan handing
+platform, so the failure mode this integration has to prevent is ColdOps handing
 a message to a campaign that then sends *more* messages on its own schedule --
 mail no gate in this repository ever evaluated.
 """
@@ -15,25 +15,25 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from titan.delivery.providers.base import (
+from coldops.delivery.providers.base import (
     OutboundEmail,
     SendErrorKind,
     WebhookVerificationError,
 )
-from titan.delivery.providers.smartlead import (
+from coldops.delivery.providers.smartlead import (
     BODY_FIELD,
     IDEMPOTENCY_FIELD,
     SUBJECT_FIELD,
     SmartleadProvider,
 )
-from titan.providers.smartlead import (
+from coldops.providers.smartlead import (
     MAX_LEADS_PER_IMPORT,
     SmartleadAuthError,
     SmartleadClient,
     SmartleadError,
 )
 
-SINGLE_STEP_CAMPAIGN = {"id": 42, "name": "Titan carrier", "status": "START"}
+SINGLE_STEP_CAMPAIGN = {"id": 42, "name": "ColdOps carrier", "status": "START"}
 
 #: Shaped like the live response. Note that the campaign payload above carries
 #: no sequences: GET /campaigns/{id} does not include them, which is why the
@@ -130,7 +130,7 @@ async def test_an_oversized_lead_import_is_refused_before_the_request() -> None:
 
 @pytest.mark.asyncio
 async def test_titan_never_overrides_smartleads_block_or_unsubscribe_lists() -> None:
-    """Those lists are a second opinion on Titan's own suppression table."""
+    """Those lists are a second opinion on ColdOps's own suppression table."""
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -181,7 +181,7 @@ def provider_with(handler, campaign_id: int = 42) -> SmartleadProvider:
 async def test_a_multi_step_campaign_is_refused() -> None:
     """The failure this integration exists to prevent.
 
-    A carrier campaign with follow-up steps would send messages Titan never
+    A carrier campaign with follow-up steps would send messages ColdOps never
     drafted, never checked against evidence and never authorized.
     """
 
@@ -235,7 +235,7 @@ async def test_a_message_goes_to_the_carrier_its_campaign_names() -> None:
     """One carrier per market, so the recipient is scheduled on their own clock.
 
     Before this, every lead in every market went to the single id in
-    ``TITAN_SMARTLEAD_CAMPAIGN_ID``, which is how a Dubai recipient came to be
+    ``COLDOPS_SMARTLEAD_CAMPAIGN_ID``, which is how a Dubai recipient came to be
     scheduled to London hours.
     """
     seen: list[str] = []
@@ -274,7 +274,7 @@ async def test_each_carrier_is_shape_checked_on_its_own() -> None:
 
     The single-step guarantee is a property of one campaign. A carrier that had
     grown a second step in the Smartlead UI would otherwise ride in on a
-    different campaign's verification and send mail Titan never authorized.
+    different campaign's verification and send mail ColdOps never authorized.
     """
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -317,7 +317,7 @@ async def test_a_verified_carrier_is_not_re_checked() -> None:
 # ==========================================================================
 @pytest.mark.asyncio
 async def test_the_validated_subject_and_body_travel_as_data() -> None:
-    """Titan validated this exact text; Smartlead must not re-render it."""
+    """ColdOps validated this exact text; Smartlead must not re-render it."""
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

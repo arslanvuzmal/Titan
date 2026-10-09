@@ -8,7 +8,7 @@ message to, which is the thing the whole system exists not to send.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.discovery import (
+from coldops.intelligence.discovery import (
     DEFAULT_MIN_RATING,
     DEFAULT_MIN_REVIEWS,
     MAX_RESULTS_PER_SEARCH,
@@ -19,7 +19,7 @@ from titan.intelligence.discovery import (
     is_auditable_host,
     targeting_blockers,
 )
-from titan.providers.places import DiscoveredBusiness
+from coldops.providers.places import DiscoveredBusiness
 
 
 def business(

@@ -21,9 +21,9 @@ import datetime as dt
 import uuid
 
 import pytest_asyncio
+from coldops.db.models import Lead, OutboxMessage
+from coldops.delivery.outbox_worker import OutboxWorker
 from sqlalchemy import select
-from titan.db.models import Lead, OutboxMessage
-from titan.delivery.outbox_worker import OutboxWorker
 
 from tests.delivery.conftest import build_sendable, sending_settings
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import re
 
-from titan.intelligence import rewriter
+from coldops.intelligence import rewriter
 
 #: Below this a reasoning model spends the whole budget before emitting.
 MIN_SENTENCE_BUDGET = 400

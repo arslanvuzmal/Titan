@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs
 
-from titan.outreach.unsubscribe import link, normalize, one_click_url, sign
+from coldops.outreach.unsubscribe import link, normalize, one_click_url, sign
 
 SECRET = "tVPCsDyTLWgZ0JAUbmoaLsIa4VqQ9iX88bR7BtsIh5s"
 BASE = "https://arslanvuzmallone.com"
@@ -20,7 +20,7 @@ def test_the_signature_matches_the_endpoint() -> None:
     """Pinned against a value computed independently of this code.
 
     HMAC-SHA256 over the lower-cased address, base64url, padding stripped. If
-    this ever changes, every link Titan issues starts returning 403 and the
+    this ever changes, every link ColdOps issues starts returning 403 and the
     only symptom is recipients who cannot unsubscribe.
     """
     assert sign("titan-endpoint-check@example.com", SECRET) == (

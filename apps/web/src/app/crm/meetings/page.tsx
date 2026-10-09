@@ -6,7 +6,7 @@
  * Every meeting here opens with no time on it, and that is deliberate rather
  * than unfinished. Replies name times in every form English allows -- "Tuesday
  * afternoon", "after the bank holiday" -- each relative to a timezone and a
- * working week Titan cannot see. A wrong time does not read as a parsing
+ * working week ColdOps cannot see. A wrong time does not read as a parsing
  * failure; it reads as a confirmed appointment, and the cost lands on the
  * operator who misses it and the prospect who was stood up.
  *
@@ -52,7 +52,7 @@ export default function MeetingsPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Meetings</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Opened when a reply asks to talk. Titan does not guess a time out of a
+          Opened when a reply asks to talk. ColdOps does not guess a time out of a
           reply, so each one waits for a person to confirm the slot.
         </p>
       </div>

@@ -23,7 +23,7 @@ directions, because the default must stay exactly as it was.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.discovery import (
+from coldops.intelligence.discovery import (
     Admission,
     LeadKind,
     Refusal,
@@ -31,7 +31,7 @@ from titan.intelligence.discovery import (
     is_auditable_host,
     is_contact_source,
 )
-from titan.providers.places import DiscoveredBusiness
+from coldops.providers.places import DiscoveredBusiness
 
 
 def _business(
@@ -115,7 +115,7 @@ def test_a_host_is_never_both(
 def test_a_business_with_no_page_anywhere_is_refused_even_then() -> None:
     """The trap the original rule avoided, in the opposite direction.
 
-    Titan sends email. A business Places reports with no URL of any kind has
+    ColdOps sends email. A business Places reports with no URL of any kind has
     no page anywhere an address could be read from -- not a site, not a
     profile -- so it could be discovered, stored, scored and never written to.
     Paying to find somebody unreachable is worse than not finding them.
@@ -219,7 +219,7 @@ def test_admit_all_carries_the_flag() -> None:
     The activity calls admit_all, never admit, so this is the only path that
     matters in production.
     """
-    from titan.intelligence.discovery import admit_all
+    from coldops.intelligence.discovery import admit_all
 
     businesses = [_business(domain="facebook.com", place_id="p-social")]
 
@@ -237,7 +237,7 @@ def test_the_places_filter_follows_the_same_switch() -> None:
     Right default, and exactly wrong when those are the businesses being
     looked for -- the local check would never see one to admit.
     """
-    from titan.intelligence.discovery import build_query
+    from coldops.intelligence.discovery import build_query
 
     assert build_query(business_type="dentists", geography="Leeds").require_website
     assert not build_query(

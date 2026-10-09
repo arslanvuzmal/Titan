@@ -29,7 +29,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-from titan.autonomy.apply import _COLUMN_FOR
+from coldops.autonomy.apply import _COLUMN_FOR
 
 # parents[2] is apps/api -- the package root. Derived from this file rather
 # than from the repository root, because an off-by-one there points the scan at
@@ -37,7 +37,7 @@ from titan.autonomy.apply import _COLUMN_FOR
 # hypothetical: it happened on the first run of this file, and
 # test_the_manager_is_a_package_not_a_convention is what caught it.
 API = pathlib.Path(__file__).resolve().parents[2]
-AUTONOMY = API / "titan" / "autonomy"
+AUTONOMY = API / "coldops" / "autonomy"
 
 
 def manager_sources() -> list[pathlib.Path]:
@@ -56,7 +56,7 @@ def manager_imports() -> set[str]:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 # Both the module and each name imported from it. Recording
                 # only the module leaves this blind to
-                # `from titan.delivery import suppression`, which is exactly how
+                # `from coldops.delivery import suppression`, which is exactly how
                 # the import it bans would be written.
                 found.add(node.module)
                 found.update(f"{node.module}.{a.name}" for a in node.names)
@@ -77,7 +77,7 @@ def assert_cannot_import(module: str, why: str) -> None:
 def assert_cannot_write(column: str, why: str) -> None:
     assert column not in written_columns(), (
         f"the manager writes {column!r}, so it can {why}. "
-        "Everything it may change goes through titan.autonomy.actuator, and "
+        "Everything it may change goes through coldops.autonomy.actuator, and "
         "everything else is not its to change."
     )
 
@@ -95,7 +95,7 @@ def test_it_cannot_remove_or_override_a_suppression_entry() -> None:
     reason to.
     """
     assert_cannot_import(
-        "titan.delivery.suppression", "remove or override a suppression entry"
+        "coldops.delivery.suppression", "remove or override a suppression entry"
     )
 
 
@@ -106,10 +106,10 @@ def test_it_cannot_approve_a_message_or_send_an_unapproved_one() -> None:
     route around it, because the outbox worker and every provider are outside
     its import graph too.
     """
-    assert_cannot_import("titan.delivery.outbox_worker", "send without approval")
+    assert_cannot_import("coldops.delivery.outbox_worker", "send without approval")
     for provider in ("resend", "smartlead", "smtp"):
         assert_cannot_import(
-            f"titan.delivery.providers.{provider}", "hand a message to a provider"
+            f"coldops.delivery.providers.{provider}", "hand a message to a provider"
         )
 
 
@@ -120,9 +120,9 @@ def test_it_cannot_relax_an_evidence_requirement_or_a_claim_map() -> None:
     rate by loosening what has to be true, which is the one optimisation that
     must never be available.
     """
-    assert_cannot_import("titan.intelligence.composer", "change what a message claims")
+    assert_cannot_import("coldops.intelligence.composer", "change what a message claims")
     assert_cannot_import(
-        "titan.intelligence.message_validator", "change what the claim must satisfy"
+        "coldops.intelligence.message_validator", "change what the claim must satisfy"
     )
 
 
@@ -143,8 +143,8 @@ def test_it_cannot_set_a_delivery_authorisation_gate() -> None:
     a gate nor consult one to find a way past it.
     """
     assert_cannot_write("sending_authorized", "authorise its own sending")
-    assert_cannot_import("titan.policy.engine", "decide its own send permission")
-    assert_cannot_import("titan.delivery.quotas", "spend or reset its own quota")
+    assert_cannot_import("coldops.policy.engine", "decide its own send permission")
+    assert_cannot_import("coldops.delivery.quotas", "spend or reset its own quota")
 
 
 def test_it_cannot_widen_the_allowed_contact_sources() -> None:
@@ -196,6 +196,6 @@ def test_the_manager_is_a_package_not_a_convention() -> None:
     """
     modules = manager_sources()
 
-    assert modules, "titan/autonomy is empty; the boundary tests prove nothing"
+    assert modules, "coldops/autonomy is empty; the boundary tests prove nothing"
     assert (AUTONOMY / "actuator.py").exists(), "the actuator is the only way in"
     assert (AUTONOMY / "apply.py").exists(), "apply.py is the only writer"

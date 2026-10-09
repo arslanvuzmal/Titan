@@ -12,9 +12,9 @@ not penalise a market for being new.
 
 from __future__ import annotations
 
-from titan.autonomy.allocation import CampaignDemand, allocate
-from titan.autonomy.health import CampaignHealth
-from titan.autonomy.markets import (
+from coldops.autonomy.allocation import CampaignDemand, allocate
+from coldops.autonomy.health import CampaignHealth
+from coldops.autonomy.markets import (
     MAX_MULTIPLIER,
     MIN_MULTIPLIER,
     NEUTRAL,
@@ -22,9 +22,9 @@ from titan.autonomy.markets import (
     multiplier_for,
     weigh,
 )
-from titan.db.enums import Region
-from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
-from titan.intelligence.portfolio import RegionSlice, summarise
+from coldops.db.enums import Region
+from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES
+from coldops.intelligence.portfolio import RegionSlice, summarise
 
 
 def market(region: Region, *, sent: int, replied: int) -> RegionSlice:

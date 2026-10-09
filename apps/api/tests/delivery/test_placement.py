@@ -14,7 +14,7 @@ instrument there is.
 from __future__ import annotations
 
 import pytest
-from titan.delivery import placement
+from coldops.delivery import placement
 
 
 @pytest.mark.parametrize(

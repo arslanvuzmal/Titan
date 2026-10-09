@@ -12,11 +12,10 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import update
-from titan.activities.reporting import _timing_slots
-from titan.db.models import Lead, Message
-from titan.db.session import get_sessionmaker
-from titan.intelligence.timing import (
+from coldops.activities.reporting import _timing_slots
+from coldops.db.models import Lead, Message
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.timing import (
     MATERIAL_DIFFERENCE,
     MIN_SENDS_PER_SLOT,
     MIN_SLOTS_TO_RANK,
@@ -26,6 +25,7 @@ from titan.intelligence.timing import (
     describe,
     learn,
 )
+from sqlalchemy import update
 
 from tests.delivery.conftest import build_sendable
 
@@ -239,7 +239,7 @@ async def test_a_reply_is_credited_to_the_first_send_not_the_last(
 
 @pytest.mark.asyncio
 async def test_another_workspace_is_not_counted(db_session, workspace) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
     db_session.add(other)

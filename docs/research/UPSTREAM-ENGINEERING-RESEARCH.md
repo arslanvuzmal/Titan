@@ -52,7 +52,7 @@ This document records the architectural patterns, safety controls, and design pr
 - **Why Relevant:** Web research must be safe against SSRF attacks, browser escapes, and prompt injection embedded in target pages.
 - **What Titan Adopted:**
   - TypeScript Playwright worker (`apps/browser-worker`) completely isolated from email, model, and database credentials.
-  - Dual-layer SSRF validation (`titan/security/url_guard.py` on control plane, `urlGuard.ts` in browser worker).
+  - Dual-layer SSRF validation (`coldops/security/url_guard.py` on control plane, `urlGuard.ts` in browser worker).
   - Evidence collection capturing static DOM nodes, CTA targets, accessibility violations (axe-core), and console logs.
 - **What Titan Intentionally Did Not Adopt:**
   - Form filling, automated login, or CAPTCHA solving. Titan-OS strictly observes and audits; it never acts on behalf of a user on external websites.

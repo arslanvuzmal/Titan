@@ -15,18 +15,18 @@ import pathlib
 import re
 
 import pytest
-from temporalio import activity
-from temporalio.client import Client
-from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
-from titan.workflows.placement import (
+from coldops.workflows.placement import (
     DEFAULT_CRON,
     PlacementRoundWorkflow,
     placement_round_workflow_id,
 )
-from titan.workflows.types import PlacementRoundInput, PlacementRoundResult
+from coldops.workflows.types import PlacementRoundInput, PlacementRoundResult
+from temporalio import activity
+from temporalio.client import Client
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Worker
 
-SOURCE = pathlib.Path("titan/workflows/placement.py").read_text(encoding="utf-8")
+SOURCE = pathlib.Path("coldops/workflows/placement.py").read_text(encoding="utf-8")
 
 
 def _stubs(sent: PlacementRoundResult, read: PlacementRoundResult):

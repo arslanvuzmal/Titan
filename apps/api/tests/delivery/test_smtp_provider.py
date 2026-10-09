@@ -1,16 +1,16 @@
 """SMTP adapter tests.
 
 Hermetic: the blocking send is replaced, so nothing opens a socket. These
-verify the message Titan hands to SMTP and the mapping from reply codes onto
-Titan's error taxonomy -- the mapping matters because guessing wrong either
+verify the message ColdOps hands to SMTP and the mapping from reply codes onto
+ColdOps's error taxonomy -- the mapping matters because guessing wrong either
 suppresses an innocent recipient or retries a hard bounce.
 """
 
 from __future__ import annotations
 
 import pytest
-from titan.delivery.providers.base import OutboundEmail, SendErrorKind
-from titan.delivery.providers.smtp import SmtpProvider
+from coldops.delivery.providers.base import OutboundEmail, SendErrorKind
+from coldops.delivery.providers.smtp import SmtpProvider
 
 
 def email(**overrides) -> OutboundEmail:
@@ -111,7 +111,7 @@ async def test_a_successful_send_reports_the_message_id(monkeypatch) -> None:
 async def test_status_and_webhooks_refuse_rather_than_guess() -> None:
     """SMTP reports nothing after handoff. Inventing a state would put fiction
     into the message state machine."""
-    from titan.delivery.providers.base import WebhookVerificationError
+    from coldops.delivery.providers.base import WebhookVerificationError
 
     p = provider()
     assert await p.get_status("anything") is None
@@ -122,8 +122,8 @@ async def test_status_and_webhooks_refuse_rather_than_guess() -> None:
 
 def test_cleartext_smtp_is_refused_for_a_remote_host() -> None:
     """A mailbox password in clear on the wire is not a warning-level problem."""
+    from coldops.config import Settings
     from pydantic import ValidationError
-    from titan.config import Settings
 
     # Loopback capture server: allowed, nothing leaves the machine.
     Settings(environment="test", smtp_host="localhost", smtp_security="none")

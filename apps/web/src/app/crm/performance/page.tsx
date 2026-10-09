@@ -3,7 +3,7 @@
 /**
  * Delivery performance, grouped the ways decisions are actually made.
  *
- * Every counter here comes from `messages` -- what Titan handed to a mail
+ * Every counter here comes from `messages` -- what ColdOps handed to a mail
  * server, what bounced back, what somebody answered. There is no estimate and
  * no projection.
  *
@@ -13,7 +13,7 @@
  * and Gmail's image proxy -- so the number is both harmful to collect and
  * wrong once collected. A click is a rewritten link, which puts a different
  * domain in the anchor of a message whose whole argument is that the sender is
- * a real person who looked at your website. Titan sends neither, so it reports
+ * a real person who looked at your website. ColdOps sends neither, so it reports
  * neither. What it reports instead is the thing those metrics are a proxy for:
  * replies, and replies that went somewhere.
  *
@@ -249,7 +249,7 @@ export default function PerformancePage() {
             message whose entire argument is that a real person looked at your website.
           </p>
           <p>
-            Titan sends neither, so it reports neither. What it reports instead is the
+            ColdOps sends neither, so it reports neither. What it reports instead is the
             thing those two are a proxy for: <Badge>replies</Badge> and{' '}
             <Badge>replies that went somewhere</Badge>.
           </p>

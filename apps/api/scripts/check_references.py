@@ -25,7 +25,7 @@ import sys
 import urllib.error
 import urllib.request
 
-from titan.intelligence.references import all_references
+from coldops.intelligence.references import all_references
 
 #: Cloudflare's interstitial, which comes back with a 403 status and an HTML
 #: body. Matched on the body rather than the status: a real 403 from a host

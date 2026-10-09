@@ -10,11 +10,11 @@ a mailbox of its own.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.folder_search import (
+from coldops.delivery.folder_search import (
     GMAIL_PROMOTIONS,
     find_probe_blocking,
 )
-from titan.delivery.mailbox import ImapConfig
+from coldops.delivery.mailbox import ImapConfig
 
 TOKEN = "tkn-abc123"
 CONFIG = ImapConfig(host="imap.gmail.com", username="seed@gmail.com", password="x")
@@ -69,7 +69,7 @@ def connect(monkeypatch):
 
     def _install(server: FakeImap) -> FakeImap:
         monkeypatch.setattr(
-            "titan.delivery.folder_search._ImapConnection.open", lambda self: server
+            "coldops.delivery.folder_search._ImapConnection.open", lambda self: server
         )
         return server
 

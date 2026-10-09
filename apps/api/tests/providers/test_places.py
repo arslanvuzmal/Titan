@@ -1,7 +1,7 @@
 """Google Places adapter tests.
 
 Hermetic: every HTTP call is intercepted, so these run with no API key and no
-network. They verify the request shape Titan sends (field masks are the cost
+network. They verify the request shape ColdOps sends (field masks are the cost
 control), the filtering, the deduplication, and the error taxonomy.
 
 They do NOT prove the adapter works against the live service -- see
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from titan.providers.places import (
+from coldops.providers.places import (
     DETAIL_FIELD_MASK,
     SEARCH_FIELD_MASK,
     DiscoveryQuery,
@@ -276,7 +276,7 @@ async def test_cost_is_estimated_per_page() -> None:
 async def test_pagination_follows_the_next_page_token(monkeypatch) -> None:
     # The adapter sleeps 2s between pages because Places rejects a token used
     # too quickly; that delay is irrelevant to correctness here.
-    import titan.providers.places as places_module
+    import coldops.providers.places as places_module
 
     async def no_sleep(_seconds: float) -> None:
         return None
@@ -321,7 +321,7 @@ async def test_auth_failure_is_not_retried() -> None:
 
     assert excinfo.value.retryable is False
     assert attempts["n"] == 1
-    assert "TITAN_GOOGLE_PLACES_API_KEY" in str(excinfo.value)
+    assert "COLDOPS_GOOGLE_PLACES_API_KEY" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_bad_request_is_not_retried() -> None:
 
 @pytest.mark.asyncio
 async def test_rate_limit_is_retried_then_succeeds(monkeypatch) -> None:
-    import titan.providers.places as places_module
+    import coldops.providers.places as places_module
 
     async def no_sleep(_seconds: float) -> None:
         return None
@@ -361,7 +361,7 @@ async def test_rate_limit_is_retried_then_succeeds(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_server_error_is_retried_then_gives_up(monkeypatch) -> None:
-    import titan.providers.places as places_module
+    import coldops.providers.places as places_module
 
     async def no_sleep(_seconds: float) -> None:
         return None

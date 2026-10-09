@@ -3,7 +3,7 @@
 /**
  * Campaigns and their policy.
  *
- * A campaign's policy is the thing that decides what Titan may do on its
+ * A campaign's policy is the thing that decides what ColdOps may do on its
  * behalf, so this screen shows every field rather than the two or three that
  * fit neatly. Sending authorization is deliberately awkward: a separate
  * control, a typed acknowledgement, and no way to flip it as a side effect of

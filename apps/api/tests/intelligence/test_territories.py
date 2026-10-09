@@ -18,8 +18,8 @@ from __future__ import annotations
 import datetime as dt
 import zoneinfo
 
-from titan.db.enums import Region, SubRegion
-from titan.intelligence.territories import (
+from coldops.db.enums import Region, SubRegion
+from coldops.intelligence.territories import (
     TERRITORIES,
     Territory,
     find,
@@ -27,7 +27,7 @@ from titan.intelligence.territories import (
     next_territory,
     timezone_of,
 )
-from titan.policy.subregions import belongs_to
+from coldops.policy.subregions import belongs_to
 
 # ---------------------------------------------------------------- the catalogue
 

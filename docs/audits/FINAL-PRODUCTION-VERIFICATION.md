@@ -104,7 +104,7 @@ alembic check               # "No new upgrade operations detected."
 cd apps/api && ruff check titan tests     # All checks passed!
 cd apps/api && ruff format --check titan tests
 docker compose config --quiet             # valid
-cd apps/api && python -m titan.cli preflight   # exit 1, 4 blockers listed
+cd apps/api && python -m coldops.cli preflight   # exit 1, 4 blockers listed
 ```
 
 ### 1.5 Secret scan
@@ -123,7 +123,7 @@ Run with the owner's real credentials. **This section is the first live
 verification in the project's history** -- every earlier claim was mock-only.
 
 ```bash
-cd apps/api && python -m titan.cli validate-models
+cd apps/api && python -m coldops.cli validate-models
 ```
 
 | Route | Model actually called | Result |
@@ -194,7 +194,7 @@ Honest status. "Enforced + tested" means a test executed and passed.
 | # | Invariant | Status | Evidence |
 |---|---|---|---|
 | 1 | A model cannot send email | **Enforced + tested** | `test_only_the_outbox_worker_imports_an_email_provider`, `test_the_deleted_sendgrid_tool_has_not_returned`. The direct-send tool was deleted. |
-| 2 | Browser content cannot alter policy | **Enforced + tested** | `titan.policy` takes no page text. Untrusted content is nonce-fenced, invisible characters stripped, fence-closing defanged (`test_fence_closing_attempt_is_defanged`, `test_untrusted_content_never_enters_the_system_channel`). A model that obeys an injection still has no tool that can act. |
+| 2 | Browser content cannot alter policy | **Enforced + tested** | `coldops.policy` takes no page text. Untrusted content is nonce-fenced, invisible characters stripped, fence-closing defanged (`test_fence_closing_attempt_is_defanged`, `test_untrusted_content_never_enters_the_system_channel`). A model that obeys an injection still has no tool that can act. |
 | 3 | Arbitrary crawling only in the isolated worker | **Enforced + tested** | `test_no_credentialled_module_fetches_arbitrary_urls`, `test_browser_worker_holds_no_delivery_or_model_credentials` |
 | 4 | No send without an outbox row | **Enforced + tested** | Only `outbox_worker.py` holds a provider client; 24 delivery tests |
 | 5 | No send to a suppressed recipient | **Enforced + tested** | `test_suppressed_recipient_is_never_sent_to`, `test_suppression_added_after_queueing_still_blocks` |
@@ -365,7 +365,7 @@ rather than silently absorbed.
   locally generated Svix signatures, which validates the algorithm, not
   Resend's exact header format in production.
 - **Email deliverability**: no seed test, no inbox-placement measurement, and
-  no SPF/DKIM/DMARC check against a real sending domain. `titan.delivery.dns_auth`
+  no SPF/DKIM/DMARC check against a real sending domain. `coldops.delivery.dns_auth`
   performs real DNS lookups and is unit-tested against synthetic records, but
   no domain has been through it.
 - **Gemini and Agent Reach**: unverified; no credential was supplied.

@@ -26,20 +26,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from titan.db.enums import Industry
-from titan.intelligence.composer import (
+from coldops.db.enums import Industry
+from coldops.intelligence.composer import (
     PITCH_MAX_WORDS,
     PITCH_MIN_WORDS,
     ComposerContext,
     compose,
 )
-from titan.intelligence.message_validator import (
+from coldops.intelligence.message_validator import (
     MessageContext,
     ViolationCode,
     validate_message,
 )
-from titan.intelligence.playbooks import select_offers
-from titan.intelligence.vernacular import (
+from coldops.intelligence.playbooks import select_offers
+from coldops.intelligence.vernacular import (
     VERNACULARS,
     Engine,
     engine_for,
@@ -479,7 +479,7 @@ def test_a_stale_draft_is_re_checked_at_send_time() -> None:
     Planted violation: return ``draft.validation_passed`` from
     ``_still_passes_todays_rules`` and every one of them sends.
     """
-    from titan.delivery.outbox_worker import _still_passes_todays_rules
+    from coldops.delivery.outbox_worker import _still_passes_todays_rules
 
     class Draft:
         id = "draft-1"
@@ -498,7 +498,7 @@ def test_a_stale_draft_is_re_checked_at_send_time() -> None:
 
 def test_a_draft_that_still_reads_well_is_not_blocked() -> None:
     """The re-check must not become a reason nothing sends."""
-    from titan.delivery.outbox_worker import _still_passes_todays_rules
+    from coldops.delivery.outbox_worker import _still_passes_todays_rules
 
     composed = message(
         "broken_internal_link", "1 internal page(s) return an error", "/book", "HTTP 404"
@@ -513,7 +513,7 @@ def test_a_draft_that_still_reads_well_is_not_blocked() -> None:
 
 
 def test_a_draft_that_never_passed_is_not_resurrected_by_the_re_check() -> None:
-    from titan.delivery.outbox_worker import _still_passes_todays_rules
+    from coldops.delivery.outbox_worker import _still_passes_todays_rules
 
     composed = message(
         "broken_internal_link", "1 internal page(s) return an error", "/book", "HTTP 404"

@@ -19,8 +19,8 @@ import datetime as dt
 import zoneinfo
 
 import pytest
-from titan.delivery.outbox_worker import with_local_greeting
-from titan.delivery.providers.base import OutboundEmail
+from coldops.delivery.outbox_worker import with_local_greeting
+from coldops.delivery.providers.base import OutboundEmail
 
 SYDNEY = zoneinfo.ZoneInfo("Australia/Sydney")
 

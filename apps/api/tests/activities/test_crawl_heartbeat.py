@@ -19,9 +19,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from titan.activities.pipeline import HEARTBEAT_EVERY_SECONDS, _heartbeating
+from coldops.activities.pipeline import HEARTBEAT_EVERY_SECONDS, _heartbeating
 
-#: The value in titan/workflows/research.py. Duplicated deliberately: if that
+#: The value in coldops/workflows/research.py. Duplicated deliberately: if that
 #: one moves, the test below should fail rather than silently follow it.
 WORKFLOW_HEARTBEAT_TIMEOUT_SECONDS = 90.0
 
@@ -30,9 +30,9 @@ WORKFLOW_HEARTBEAT_TIMEOUT_SECONDS = 90.0
 def beats(monkeypatch):
     """Capture heartbeats without a Temporal activity context."""
     recorded: list[str] = []
-    monkeypatch.setattr("titan.activities.pipeline.activity.in_activity", lambda: True)
+    monkeypatch.setattr("coldops.activities.pipeline.activity.in_activity", lambda: True)
     monkeypatch.setattr(
-        "titan.activities.pipeline.activity.heartbeat",
+        "coldops.activities.pipeline.activity.heartbeat",
         lambda note: recorded.append(note),
     )
     return recorded
@@ -46,7 +46,7 @@ async def test_the_interval_leaves_room_to_miss_several_beats() -> None:
 async def test_a_slow_call_is_heartbeated_while_it_runs(monkeypatch, beats) -> None:
     """The property the change exists for: beats arrive *during* the await, not
     only either side of it."""
-    monkeypatch.setattr("titan.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
+    monkeypatch.setattr("coldops.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
 
     async def slow() -> str:
         await asyncio.sleep(0.1)
@@ -96,7 +96,7 @@ async def test_an_exception_after_several_beats_still_propagates(
 ) -> None:
     """The failing path and the slow path together -- the combination the live
     saturation case actually produced."""
-    monkeypatch.setattr("titan.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
+    monkeypatch.setattr("coldops.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
 
     async def slow_boom() -> None:
         await asyncio.sleep(0.05)
@@ -112,8 +112,8 @@ async def test_no_activity_context_is_not_an_error(monkeypatch) -> None:
     """This module is exercised by tests and by operator commands, where
     ``activity.heartbeat`` raises. Losing the beat outside Temporal costs
     nothing; raising would break the command."""
-    monkeypatch.setattr("titan.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
-    monkeypatch.setattr("titan.activities.pipeline.activity.in_activity", lambda: False)
+    monkeypatch.setattr("coldops.activities.pipeline.HEARTBEAT_EVERY_SECONDS", 0.01)
+    monkeypatch.setattr("coldops.activities.pipeline.activity.in_activity", lambda: False)
 
     async def slow() -> str:
         await asyncio.sleep(0.05)

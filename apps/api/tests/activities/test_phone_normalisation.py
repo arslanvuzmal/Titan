@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import pytest
 
-# The implementation moved to titan.delivery.phone when titan/seed.py turned
+# The implementation moved to coldops.delivery.phone when coldops/seed.py turned
 # out to be writing the Places string down a second, unnormalised path.
-from titan.delivery.phone import COLUMN_LIMIT as PHONE_COLUMN_LIMIT
-from titan.delivery.phone import strip_formatting as _to_e164
+from coldops.delivery.phone import COLUMN_LIMIT as PHONE_COLUMN_LIMIT
+from coldops.delivery.phone import strip_formatting as _to_e164
 
 
 class TestNormalisation:

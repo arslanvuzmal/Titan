@@ -12,8 +12,8 @@ nothing reported it because every component had done its own job correctly.
 
 from __future__ import annotations
 
-from titan.db.enums import DraftStatus
-from titan.delivery.stranded import (
+from coldops.db.enums import DraftStatus
+from coldops.delivery.stranded import (
     DEFAULT_BATCH,
     STRANDABLE_STATUSES,
     Stranded,
@@ -50,9 +50,9 @@ class TestTheQueryShape:
     def _sql(self) -> str:
         import uuid
 
+        from coldops.db.models import Message, MessageDraft, OutboxMessage
         from sqlalchemy import select
         from sqlalchemy.dialects import postgresql
-        from titan.db.models import Message, MessageDraft, OutboxMessage
 
         outbox_exists = (
             select(OutboxMessage.id)
@@ -145,12 +145,12 @@ def test_the_sweeper_asks_the_gate_rather_than_deciding() -> None:
 
     ``requires_human_approval`` reads the workspace and campaign policy at
     execution time. Using it here means a campaign that genuinely requires a
-    person keeps its drafts, and the sweeper cannot widen what Titan is
+    person keeps its drafts, and the sweeper cannot widen what ColdOps is
     permitted to do -- which is the whole of invariant 18.
     """
     import inspect
 
-    from titan.activities import stranded as activity
+    from coldops.activities import stranded as activity
 
     source = inspect.getsource(activity.sweep_stranded_drafts)
 
@@ -164,7 +164,7 @@ def test_the_gate_is_asked_once_per_campaign_not_once_per_draft() -> None:
     campaigns."""
     import inspect
 
-    from titan.activities import stranded as activity
+    from coldops.activities import stranded as activity
 
     source = inspect.getsource(activity.sweep_stranded_drafts)
 

@@ -17,7 +17,7 @@ cost the guarantee against a thundering herd.
 from __future__ import annotations
 
 import pytest
-from titan.workflows.schedules import (
+from coldops.workflows.schedules import (
     CATCHUP_WINDOW,
     DAILY_CATCHUP_WINDOW,
     catchup_for,

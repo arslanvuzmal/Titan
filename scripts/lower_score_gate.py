@@ -16,8 +16,8 @@ import sys
 
 from sqlalchemy import select
 
-from titan.db.models import Campaign, CampaignPolicy, Workspace
-from titan.db.session import get_sessionmaker
+from coldops.db.models import Campaign, CampaignPolicy, Workspace
+from coldops.db.session import get_sessionmaker
 
 NEW_FLOOR = 55
 

@@ -1,7 +1,7 @@
 /**
- * Wire contract with the Titan control plane.
+ * Wire contract with the ColdOps control plane.
  *
- * The Python side is `apps/api/titan/contracts/evidence.py`. Both declare
+ * The Python side is `apps/api/coldops/contracts/evidence.py`. Both declare
  * CONTRACT_VERSION and a drift test compares the field sets, so a change on one
  * side that is not mirrored on the other fails CI rather than silently dropping
  * evidence.

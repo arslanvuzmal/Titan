@@ -23,15 +23,15 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from titan.db.enums import Region, SubRegion, WorkspaceRole
-from titan.db.models import AuditLog, Campaign, CampaignPolicy
-from titan.db.session import get_sessionmaker
-from titan.policy.schedule import (
+from coldops.db.enums import Region, SubRegion, WorkspaceRole
+from coldops.db.models import AuditLog, Campaign, CampaignPolicy
+from coldops.db.session import get_sessionmaker
+from coldops.policy.schedule import (
     SUNDAY_TO_THURSDAY,
     default_window_for,
     resolve_timezone,
 )
+from sqlalchemy import select
 
 from .test_api_security import auth, make_member, slug_of, token_for
 
@@ -42,11 +42,11 @@ pytestmark = pytest.mark.integration
 async def client():
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(

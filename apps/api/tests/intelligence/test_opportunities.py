@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import FindingCategory, Industry, Severity, VerificationMethod
-from titan.intelligence.findings import DetectedFinding
-from titan.intelligence.opportunities import (
+from coldops.db.enums import FindingCategory, Industry, Severity, VerificationMethod
+from coldops.intelligence.findings import DetectedFinding
+from coldops.intelligence.opportunities import (
     DELIVERABLE_PRIORITY_FLOOR,
     UNSERVED_PREFIX,
     derive_opportunities,

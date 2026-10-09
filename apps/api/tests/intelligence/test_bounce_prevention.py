@@ -21,7 +21,7 @@ The numbers behind the ordering, measured on this workspace's own sending:
     everything else     6 bounces /  74 sends   8.11%
 
 So these tests hold three things that only work together: that a front desk is
-recognised in the languages Titan actually sends in, that the best address wins
+recognised in the languages ColdOps actually sends in, that the best address wins
 rather than the earliest, and that the scorer stops rewarding the shape that
 bounces six times more often.
 """
@@ -29,8 +29,8 @@ bounces six times more often.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import ContactSource, VerificationStatus
-from titan.intelligence.contacts import (
+from coldops.db.enums import ContactSource, VerificationStatus
+from coldops.intelligence.contacts import (
     DiscoveredContact,
     extract_contacts_from_pages,
     is_never_contact,
@@ -38,7 +38,7 @@ from titan.intelligence.contacts import (
     name_is_in_local_part,
     rank_contacts,
 )
-from titan.intelligence.scoring import ScoringInput, score_lead
+from coldops.intelligence.scoring import ScoringInput, score_lead
 
 
 def _contact(email: str, *, role: bool | None = None) -> DiscoveredContact:
@@ -298,7 +298,7 @@ class TestTheExceptionIsNarrow:
     def _extract(email: str, org_domain: str):
         import datetime as dt
 
-        from titan.contracts.evidence import PageEvidence
+        from coldops.contracts.evidence import PageEvidence
 
         page = PageEvidence(
             url=f"https://{org_domain}/contact",

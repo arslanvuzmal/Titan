@@ -1,10 +1,10 @@
 """Take our own mailbox off our own bounce list.
 
 arslan@ was suppressed on 25 August as a hard bounce, which was true then --
-the mailbox did not exist. It exists now: it is one of the five Titan sends
+the mailbox did not exist. It exists now: it is one of the five ColdOps sends
 as, renamed from contact@ on 31 August.
 
-This matters beyond tidiness. `titan warmup` gives a new mailbox a history by
+This matters beyond tidiness. `coldops warmup` gives a new mailbox a history by
 sending real mail between the pool's own mailboxes, and a suppressed address
 is refused like any other -- so the newest mailbox would be the one unable to
 warm up.
@@ -19,8 +19,8 @@ import sys
 
 from sqlalchemy import delete, select
 
-from titan.db.models import SenderIdentity, SuppressionEntry, Workspace
-from titan.db.session import get_sessionmaker, workspace_unit_of_work
+from coldops.db.models import SenderIdentity, SuppressionEntry, Workspace
+from coldops.db.session import get_sessionmaker, workspace_unit_of_work
 
 
 async def main() -> int:

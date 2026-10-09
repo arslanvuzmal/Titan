@@ -12,12 +12,11 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import update
-from titan.activities.reporting import _portfolio_slices
-from titan.db.enums import SCHEDULABLE_REGIONS, CampaignStatus, Region
-from titan.db.models import Campaign, Message
-from titan.db.session import get_sessionmaker
-from titan.intelligence.portfolio import (
+from coldops.activities.reporting import _portfolio_slices
+from coldops.db.enums import SCHEDULABLE_REGIONS, CampaignStatus, Region
+from coldops.db.models import Campaign, Message
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.portfolio import (
     Portfolio,
     RegionSlice,
     describe,
@@ -25,6 +24,7 @@ from titan.intelligence.portfolio import (
     region_for_country,
     summarise,
 )
+from sqlalchemy import update
 
 from tests.delivery.conftest import build_sendable
 
@@ -280,7 +280,7 @@ async def test_a_lead_with_several_messages_is_still_one_contacted_lead(
 
 @pytest.mark.asyncio
 async def test_another_workspace_is_not_in_the_portfolio(db_session, workspace) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
     db_session.add(other)

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 
-from titan.delivery.outbox_worker import _payload_is_the_gated_draft
+from coldops.delivery.outbox_worker import _payload_is_the_gated_draft
 
 
 class Row:

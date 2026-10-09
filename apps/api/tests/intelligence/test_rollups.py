@@ -16,11 +16,10 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import update
-from titan.db.models import Message, Workspace
-from titan.db.session import workspace_session
-from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
-from titan.intelligence.rollups import (
+from coldops.db.models import Message, Workspace
+from coldops.db.session import workspace_session
+from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES
+from coldops.intelligence.rollups import (
     Dimension,
     Slice,
     all_dimensions,
@@ -28,6 +27,7 @@ from titan.intelligence.rollups import (
     outcomes_by,
     worst_by_bounce,
 )
+from sqlalchemy import update
 
 from tests.delivery.conftest import build_sendable
 

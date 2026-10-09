@@ -16,8 +16,8 @@ import datetime as dt
 import uuid
 
 import pytest
-from titan.notify import operator as op
-from titan.notify.operator import (
+from coldops.notify import operator as op
+from coldops.notify.operator import (
     MAILED_INSTANTLY,
     NotificationKind,
     OperatorNotification,
@@ -61,7 +61,7 @@ class _Mailer:
 @pytest.fixture
 def mailer(monkeypatch) -> _Mailer:
     sent = _Mailer()
-    monkeypatch.setattr("titan.notify.operator_mail.mail_the_operator", sent)
+    monkeypatch.setattr("coldops.notify.operator_mail.mail_the_operator", sent)
     return sent
 
 
@@ -146,7 +146,7 @@ async def test_an_unreachable_mail_server_never_fails_the_ingest(monkeypatch) ->
     is the durable guarantee; an SMTP problem must not turn a successful ingest
     into a failed poll that retries the whole batch.
     """
-    monkeypatch.setattr("titan.notify.operator_mail.mail_the_operator", _Mailer(fails=True))
+    monkeypatch.setattr("coldops.notify.operator_mail.mail_the_operator", _Mailer(fails=True))
 
     assert await mail_notification(notification(NotificationKind.CLIENT_AGREED)) is False
 

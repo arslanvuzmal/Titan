@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring Titan up on a fresh Ubuntu server, from the backup tarball.
+# Bring ColdOps up on a fresh Ubuntu server, from the backup tarball.
 #
 # Runs steps 3 to 6 of the migration: Docker, the repo, the secrets, the
 # database, and the stack -- with campaigns paused, because two hosts that can
@@ -65,7 +65,7 @@ step "secrets"
 WORK="$(mktemp -d)"
 tar -xzf "${TARBALL}" -C "${WORK}"
 SRC="$(find "${WORK}" -maxdepth 1 -type d -name 'titan-migrate-*' | head -1)"
-[ -n "${SRC}" ] || die "the tarball does not look like a Titan migration backup"
+[ -n "${SRC}" ] || die "the tarball does not look like a ColdOps migration backup"
 
 [ -d "${SRC}/secrets" ] && cp -R "${SRC}/secrets" "${INSTALL_DIR}/secrets"
 [ -f "${SRC}/.env" ] && cp "${SRC}/.env" "${INSTALL_DIR}/.env"

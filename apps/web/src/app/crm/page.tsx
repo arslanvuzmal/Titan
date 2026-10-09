@@ -5,7 +5,7 @@
  *
  * Every number here is a live COUNT from /api/v1/stats. There is no derived
  * "pipeline value", no projected revenue, and no conversion estimate, because
- * Titan measures page facts and delivery outcomes -- it does not measure
+ * ColdOps measures page facts and delivery outcomes -- it does not measure
  * business results, and a dashboard that displays one it did not measure is
  * the exact failure the pre-0.2 build shipped.
  *

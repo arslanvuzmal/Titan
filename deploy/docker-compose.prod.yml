@@ -78,7 +78,7 @@ services:
       - ../secrets:/run/secrets:ro
       # Read-only: the API serves screenshots on evidence pages, never writes them.
       - artifacts:/data/artifacts:ro
-      # Writable: `titan oauth-microsoft` runs here and keeps the token.
+      # Writable: `coldops oauth-microsoft` runs here and keeps the token.
       - oauth_tokens:/data/oauth
     environment:
       TITAN_ARTIFACT_DIR: /data/artifacts
@@ -114,7 +114,7 @@ services:
     environment:
       TITAN_SENDER_HOST_ID: ${TITAN_SENDER_HOST_ID:?set TITAN_SENDER_HOST_ID, e.g. vps-hetzner-cx33}
       TITAN_SENDER_HOST_LABEL: ${TITAN_SENDER_HOST_LABEL:-}
-    command: ["python", "-m", "titan.workers.outbox"]
+    command: ["python", "-m", "coldops.workers.outbox"]
     # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
     # fails to authenticate -- on a host nobody is watching.
@@ -170,7 +170,7 @@ services:
     # that makes the whole stack look unhealthy.
     restart: on-failure
     env_file: [../.env]
-    command: ["python", "-m", "titan.workers.inbound"]
+    command: ["python", "-m", "coldops.workers.inbound"]
     # The mailbox passwords. `.env` sets TITAN_MAILBOX_FILE to a path inside
     # this mount, so without it the file simply is not there and every send
     # fails to authenticate -- on a host nobody is watching.
@@ -194,7 +194,7 @@ services:
     image: ${TITAN_API_IMAGE:?set TITAN_API_IMAGE}
     restart: unless-stopped
     env_file: [../.env]
-    command: ["python", "-m", "titan.workers.temporal_worker"]
+    command: ["python", "-m", "coldops.workers.temporal_worker"]
     # DailyReportWorkflow and the other operator mail run here, and
     # mail_the_operator() reads TITAN_MAILBOX_FILE. Without this mount the
     # worker came up healthy and threw MailboxConfigError once an hour

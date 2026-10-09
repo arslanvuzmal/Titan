@@ -14,8 +14,8 @@ sat configured, in credit, and unconsulted.
 from __future__ import annotations
 
 import pytest
-from titan.config import Settings
-from titan.models.gateway import ModelGateway, Route
+from coldops.config import Settings
+from coldops.models.gateway import ModelGateway, Route
 
 
 class _Stub:

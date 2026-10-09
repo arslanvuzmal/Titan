@@ -14,14 +14,14 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import text
-from titan.notify.operator import NotificationKind, record_notification
-from titan.notify.task_expiry import (
+from coldops.notify.operator import NotificationKind, record_notification
+from coldops.notify.task_expiry import (
     EXPIRABLE,
     EXPIRED,
     STALE_AFTER_DAYS,
     expire_stale_alarms,
 )
+from sqlalchemy import text
 
 pytestmark = pytest.mark.asyncio
 
@@ -166,7 +166,7 @@ async def test_another_workspace_is_not_touched(db_session, workspace) -> None:
     """Raw SQL carries none of the ORM's workspace guard, so the predicate has
     to be written by hand -- and a sweep that crossed workspaces would close
     somebody else's alarms."""
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = uuid.uuid4()
     db_session.add(

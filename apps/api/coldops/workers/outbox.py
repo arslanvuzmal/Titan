@@ -1,0 +1,186 @@
+"""Outbox worker entrypoint.
+
+Run as: ``python -m coldops.workers.outbox``
+
+This is the only process in the system that holds an email provider client.
+It shuts down gracefully: on SIGTERM it stops claiming new rows and lets the
+in-flight one finish, so a deploy cannot orphan a message between "provider
+accepted" and "recorded as sent".
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import signal
+
+from coldops.config import get_settings
+from coldops.db.session import dispose_engine
+from coldops.delivery.outbox_worker import OutboxWorker, worker_identity
+from coldops.delivery.providers.base import EmailProvider
+from coldops.observability.logging import configure_logging
+from coldops.runtime import configure_event_loop
+
+logger = logging.getLogger("coldops.workers.outbox")
+
+
+def build_provider() -> EmailProvider:
+    """Resolve the configured provider.
+
+    Defaults to the mock. Selecting a real provider requires both an explicit
+    ``COLDOPS_EMAIL_PROVIDER`` and its credential -- a missing key is a startup
+    failure rather than a silent downgrade, because a worker that quietly runs
+    on the mock while the operator believes it is live is worse than one that
+    refuses to start.
+    """
+    settings = get_settings()
+
+    if settings.email_provider == "resend":
+        if settings.resend_api_key is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=resend but COLDOPS_RESEND_API_KEY is not set"
+            )
+        from coldops.delivery.providers.resend import ResendProvider
+
+        return ResendProvider(
+            api_key=settings.resend_api_key.get_secret_value(),
+            webhook_secret=(
+                settings.resend_webhook_secret.get_secret_value()
+                if settings.resend_webhook_secret
+                else None
+            ),
+        )
+
+    if settings.email_provider == "smtp":
+        if settings.smtp_host is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=smtp but COLDOPS_SMTP_HOST is not set"
+            )
+        from coldops.delivery.providers.smtp import SmtpProvider
+
+        return SmtpProvider(
+            settings.smtp_host,
+            settings.smtp_port,
+            username=settings.smtp_username,
+            password=(
+                settings.smtp_password.get_secret_value()
+                if settings.smtp_password
+                else None
+            ),
+            security=settings.smtp_security,
+            timeout_seconds=float(settings.smtp_timeout_seconds),
+        )
+
+    if settings.email_provider == "smtp_pool":
+        # The pool is the only provider whose credentials are not in
+        # settings, so the failure mode is different: not "the key is
+        # missing" but "this file does not describe mailboxes I can send
+        # as". Either way it is a startup failure, for the same reason.
+        from coldops.delivery.mailboxes import load_mailboxes
+        from coldops.delivery.providers.smtp_pool import SmtpPoolProvider
+
+        if not settings.mailbox_file:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=smtp_pool but COLDOPS_MAILBOX_FILE is not set"
+            )
+        return SmtpPoolProvider(
+            load_mailboxes(settings.mailbox_file),
+            timeout_seconds=float(settings.smtp_timeout_seconds),
+        )
+
+    if settings.email_provider == "instantly":
+        if settings.instantly_api_key is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=instantly but COLDOPS_INSTANTLY_API_KEY is not set"
+            )
+        if settings.instantly_campaign_id is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=instantly but COLDOPS_INSTANTLY_CAMPAIGN_ID is "
+                "not set. ColdOps will not create a sending campaign implicitly: the "
+                "carrier campaign must be a single-step one an operator has seen."
+            )
+        from coldops.delivery.providers.instantly import InstantlyProvider
+        from coldops.providers.instantly import InstantlyClient
+
+        return InstantlyProvider(
+            InstantlyClient(settings.instantly_api_key.get_secret_value()),
+            campaign_id=settings.instantly_campaign_id,
+            webhook_secret=(
+                settings.instantly_webhook_secret.get_secret_value()
+                if settings.instantly_webhook_secret
+                else None
+            ),
+        )
+
+    if settings.email_provider == "smartlead":
+        if settings.smartlead_api_key is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=smartlead but COLDOPS_SMARTLEAD_API_KEY is not set"
+            )
+        if settings.smartlead_campaign_id is None:
+            raise RuntimeError(
+                "COLDOPS_EMAIL_PROVIDER=smartlead but COLDOPS_SMARTLEAD_CAMPAIGN_ID is "
+                "not set. ColdOps will not create a sending campaign implicitly: the "
+                "carrier campaign must be a single-step one an operator has seen."
+            )
+        from coldops.delivery.providers.smartlead import SmartleadProvider
+
+        return SmartleadProvider(
+            settings.smartlead_api_key.get_secret_value(),
+            settings.smartlead_campaign_id,
+            base_url=str(settings.smartlead_base_url),
+            timeout_seconds=float(settings.smartlead_timeout_seconds),
+        )
+
+    from coldops.delivery.providers.mock import MockEmailProvider
+
+    return MockEmailProvider()
+
+
+async def main() -> None:
+    settings = get_settings()
+    configure_logging(
+        level=settings.log_level,
+        service="titan-outbox-worker",
+        environment=settings.environment.value,
+    )
+
+    owner = worker_identity()
+    blockers = settings.sending_preflight_errors()
+    logger.info(
+        "outbox worker starting",
+        extra={
+            "owner": owner,
+            "provider": settings.email_provider,
+            "process_sending_enabled": settings.production_sending_enabled,
+            # Logged at startup so an operator can see immediately why nothing
+            # is being delivered, instead of inferring it from an empty queue.
+            "preflight_blockers": blockers,
+        },
+    )
+
+    provider = build_provider()
+    worker = OutboxWorker(provider, settings, owner=owner)
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            # Windows does not support add_signal_handler for these.
+            signal.signal(sig, lambda *_: stop.set())
+
+    try:
+        await worker.run_forever(stop)
+    finally:
+        aclose = getattr(provider, "aclose", None)
+        if aclose is not None:
+            await aclose()
+        await dispose_engine()
+        logger.info("outbox worker stopped cleanly", extra={"owner": owner})
+
+
+if __name__ == "__main__":
+    configure_event_loop()
+    asyncio.run(main())

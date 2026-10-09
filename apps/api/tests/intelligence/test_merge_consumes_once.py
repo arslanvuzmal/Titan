@@ -29,7 +29,7 @@ stays true whatever the argument type becomes.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.modernisation import (
+from coldops.intelligence.modernisation import (
     MIN_MEASURED_CAPABILITIES,
     VENDORS,
     Capability,

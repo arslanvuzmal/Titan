@@ -8,7 +8,7 @@ than a meeting demand, and follow-ups that never restate the pitch.
 from __future__ import annotations
 
 import pytest
-from titan.outreach.sequence import (
+from coldops.outreach.sequence import (
     MAX_WORDS,
     MIN_WORDS,
     STEP_DELAYS_IN_DAYS,
@@ -24,7 +24,7 @@ from titan.outreach.sequence import (
     salutation,
     with_footer,
 )
-from titan.outreach.variables import _CONSEQUENCE, _INSIGHT, _SHORT, FindingVariables
+from coldops.outreach.variables import _CONSEQUENCE, _INSIGHT, _SHORT, FindingVariables
 
 MAPPED = sorted(_CONSEQUENCE)
 

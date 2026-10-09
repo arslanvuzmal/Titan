@@ -13,8 +13,8 @@ row, because one is a dump of the other.
 from __future__ import annotations
 
 import pytest
+from coldops.delivery import sending_claim
 from sqlalchemy import text
-from titan.delivery import sending_claim
 
 SERVER = "vps-hetzner-cx33"
 LAPTOP = "laptop-2"
@@ -82,13 +82,13 @@ async def test_the_refused_host_does_not_quietly_steal_it_later(db_session) -> N
 async def test_an_empty_identity_may_not_send(db_session) -> None:
     """Fails closed.
 
-    An unset TITAN_SENDER_HOST_ID makes every host look like every other, so
+    An unset COLDOPS_SENDER_HOST_ID makes every host look like every other, so
     treating it as "probably fine" would restore the original defect while
     appearing to guard against it.
     """
     verdict = await sending_claim.hold(db_session, host_id="")
     assert not verdict.may_send
-    assert "TITAN_SENDER_HOST_ID" in verdict.reason
+    assert "COLDOPS_SENDER_HOST_ID" in verdict.reason
 
 
 @pytest.mark.asyncio

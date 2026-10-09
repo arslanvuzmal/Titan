@@ -1,4 +1,4 @@
-"""Titan's own mailbox verification.
+"""ColdOps's own mailbox verification.
 
 Hermetic: DNS is injected and :mod:`smtplib` is replaced, so nothing here
 resolves a name or opens a socket.
@@ -14,9 +14,9 @@ from __future__ import annotations
 from typing import ClassVar
 
 import pytest
-from titan.db.enums import SENDABLE_VERIFICATION_STATUSES, VerificationStatus
-from titan.intelligence.mx import DomainDoesNotExist
-from titan.intelligence.smtp_probe import (
+from coldops.db.enums import SENDABLE_VERIFICATION_STATUSES, VerificationStatus
+from coldops.intelligence.mx import DomainDoesNotExist
+from coldops.intelligence.smtp_probe import (
     ProbeConfigError,
     SmtpProbeVerifier,
 )
@@ -78,7 +78,7 @@ class FakeSmtp:
 @pytest.fixture(autouse=True)
 def fake_smtp(monkeypatch):
     FakeSmtp.reset()
-    monkeypatch.setattr("titan.intelligence.smtp_probe.smtplib.SMTP", FakeSmtp)
+    monkeypatch.setattr("coldops.intelligence.smtp_probe.smtplib.SMTP", FakeSmtp)
     return FakeSmtp
 
 
@@ -229,7 +229,7 @@ async def test_the_decoy_is_asked_about_first() -> None:
     await probe(["mx.small-dental.test"]).verify("sam@small-dental.test")
 
     rcpts = [c[1] for c in FakeSmtp.opened[0].calls if c[0] == "rcpt"]
-    assert rcpts[0].startswith("titan-verify-probe-")
+    assert rcpts[0].startswith("verify-probe-")
     assert rcpts[1] == "sam@small-dental.test"
 
 
@@ -436,7 +436,7 @@ def test_an_unconfigured_probe_falls_back_to_verifying_nothing() -> None:
     """A missing hostname must not take the discovery pipeline down, and the
     null verifier is safe in the direction that matters: it can never mark an
     address sendable."""
-    from titan.intelligence.verifier import build_verifier, reset_verifier_cache
+    from coldops.intelligence.verifier import build_verifier, reset_verifier_cache
 
     reset_verifier_cache()
 
@@ -454,7 +454,7 @@ def test_the_probe_is_built_once_rather_than_once_per_address() -> None:
     """Its catch-all cache and its per-domain spacing are the whole of what
     stops it opening fifty connections to one small mail server. A fresh
     instance per address has none of them."""
-    from titan.intelligence.verifier import build_verifier, reset_verifier_cache
+    from coldops.intelligence.verifier import build_verifier, reset_verifier_cache
 
     reset_verifier_cache()
 

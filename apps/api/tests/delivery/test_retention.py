@@ -14,13 +14,13 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import text
-from titan.delivery.retention import (
+from coldops.delivery.retention import (
     FOREIGN_RETENTION_DAYS,
     RETENTION_DAYS,
     ErasureReport,
     erase_expired,
 )
+from sqlalchemy import text
 
 from tests.delivery.conftest import build_sendable
 

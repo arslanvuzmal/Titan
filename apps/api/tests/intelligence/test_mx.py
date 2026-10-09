@@ -10,13 +10,13 @@ whether a particular mailbox exists.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import (
+from coldops.db.enums import (
     ELIGIBLE_CONTACT_SOURCES,
     ContactSource,
     VerificationStatus,
 )
-from titan.intelligence.contacts import check_contact_eligibility
-from titan.intelligence.mx import (
+from coldops.intelligence.contacts import check_contact_eligibility
+from coldops.intelligence.mx import (
     DomainDoesNotExist,
     MxStatus,
     check_many,
@@ -52,7 +52,7 @@ def test_a_domain_with_mx_records_can_receive_mail() -> None:
 
 def test_an_address_record_is_a_valid_implicit_destination() -> None:
     """RFC 5321 5.1. Treating this as undeliverable would discard legitimate
-    small-business domains -- exactly the population Titan targets."""
+    small-business domains -- exactly the population ColdOps targets."""
     check = check_mx("small.test", resolver=resolver_returning([], has_address=True))
 
     assert check.status is MxStatus.IMPLICIT_A
@@ -206,7 +206,7 @@ def test_a_single_nxdomain_is_not_believed(monkeypatch) -> None:
     that condemns every address at a domain permanently, so it has to say so
     twice.
     """
-    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    monkeypatch.setattr("coldops.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
     calls: list[str] = []
 
     def flaky(domain: str):
@@ -223,7 +223,7 @@ def test_a_single_nxdomain_is_not_believed(monkeypatch) -> None:
 
 
 def test_a_domain_that_says_nxdomain_twice_is_believed(monkeypatch) -> None:
-    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    monkeypatch.setattr("coldops.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
     calls: list[str] = []
 
     def gone(domain: str):
@@ -239,7 +239,7 @@ def test_a_domain_that_says_nxdomain_twice_is_believed(monkeypatch) -> None:
 
 def test_a_resolving_domain_is_asked_once(monkeypatch) -> None:
     """The retry costs nothing on the path that matters."""
-    monkeypatch.setattr("titan.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
+    monkeypatch.setattr("coldops.intelligence.mx.NXDOMAIN_CONFIRM_DELAY", 0)
     calls: list[str] = []
 
     def fine(domain: str):

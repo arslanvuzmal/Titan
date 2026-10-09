@@ -15,11 +15,11 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.db.enums import OutboxStatus
+from coldops.db.session import workspace_unit_of_work
+from coldops.outreach.provisioning import ensure_sequence
+from coldops.outreach.sequence_backfill import apply, survey
 from sqlalchemy import text
-from titan.db.enums import OutboxStatus
-from titan.db.session import workspace_unit_of_work
-from titan.outreach.provisioning import ensure_sequence
-from titan.outreach.sequence_backfill import apply, survey
 
 from tests.delivery.conftest import build_sendable
 

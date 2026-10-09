@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.db.enums import DraftStatus, LeadStatus
-from titan.intelligence.staleness import (
+from coldops.db.enums import DraftStatus, LeadStatus
+from coldops.intelligence.staleness import (
     _LIVE_DRAFTS,
     _REOPENABLE,
     CALL_MAX_PER_PASS,
@@ -25,7 +25,7 @@ from titan.intelligence.staleness import (
     STALE_AFTER,
     StalenessReport,
 )
-from titan.policy.engine import MAX_EVIDENCE_AGE
+from coldops.policy.engine import MAX_EVIDENCE_AGE
 
 
 # ------------------------------------------------ the timing, which is the point
@@ -80,7 +80,7 @@ def test_a_decided_lead_is_never_reopened() -> None:
 def test_reopening_lands_on_a_researchable_status() -> None:
     """A lead put back in a status the planner does not select is a lead that
     stops moving entirely -- worse than the stale draft it replaced."""
-    from titan.activities.orchestration import RESEARCHABLE_STATUSES
+    from coldops.activities.orchestration import RESEARCHABLE_STATUSES
 
     researchable = {s.value for s in RESEARCHABLE_STATUSES}
 
@@ -132,7 +132,7 @@ def test_the_call_sweep_acts_well_before_the_phone_gate() -> None:
 
     The sweep has to act inside that or it is not a sweep, it is an autopsy.
     """
-    from titan.intelligence.call_list import MAX_EVIDENCE_AGE_DAYS
+    from coldops.intelligence.call_list import MAX_EVIDENCE_AGE_DAYS
 
     assert CALL_STALE_AFTER.days < MAX_EVIDENCE_AGE_DAYS
     # And not so early that healthy evidence is churned for nothing.
@@ -153,7 +153,7 @@ def test_the_phone_is_swept_sooner_than_the_inbox() -> None:
 def test_the_call_sweep_spends_its_crawls_only_where_a_call_could_happen() -> None:
     """A crawl is the scarce thing here, shared with discovery and the draft
     sweep. Refreshing a lead the phone can never reach buys nothing."""
-    from titan.intelligence.staleness import _CALL_STALE
+    from coldops.intelligence.staleness import _CALL_STALE
 
     sql = str(_CALL_STALE)
     assert "phone_e164 IS NOT NULL" in sql, "no number, no call"
@@ -166,7 +166,7 @@ def test_the_call_sweep_spends_its_crawls_only_where_a_call_could_happen() -> No
 def test_a_suppressed_number_is_matched_however_it_was_written() -> None:
     """Same rule as the call list itself: the stored number has spaces and no
     country code, and a suppression arrives from a dialler in E.164."""
-    from titan.intelligence.staleness import _CALL_STALE
+    from coldops.intelligence.staleness import _CALL_STALE
 
     assert "regexp_replace" in str(_CALL_STALE)
 

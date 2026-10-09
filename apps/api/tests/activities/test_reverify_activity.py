@@ -9,8 +9,8 @@ damage quietly rather than fail loudly.
 from __future__ import annotations
 
 import pytest
-from titan.activities.reverification import HOURLY_BATCH, reverify_contacts
-from titan.workflows.types import ReverifyContactsInput
+from coldops.activities.reverification import HOURLY_BATCH, reverify_contacts
+from coldops.workflows.types import ReverifyContactsInput
 
 
 class _Verifier:
@@ -34,7 +34,7 @@ async def test_a_null_verifier_is_declined_rather_than_run(monkeypatch) -> None:
     it is strictly worse than not running it, and it fails silently.
     """
     monkeypatch.setattr(
-        "titan.activities.reverification.build_verifier",
+        "coldops.activities.reverification.build_verifier",
         lambda *_a, **_k: _Verifier("null"),
     )
 
@@ -50,7 +50,7 @@ async def test_a_null_verifier_is_declined_rather_than_run(monkeypatch) -> None:
 async def test_an_unhealthy_verifier_is_not_asked_for_answers(monkeypatch) -> None:
     """An outage must not be recorded as a batch of answers."""
     monkeypatch.setattr(
-        "titan.activities.reverification.build_verifier",
+        "coldops.activities.reverification.build_verifier",
         lambda *_a, **_k: _Verifier("smtp_probe", healthy=False),
     )
 

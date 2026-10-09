@@ -7,7 +7,7 @@ inbox, and one domain-wide average hiding the one mailbox worth stopping.
 
 from __future__ import annotations
 
-from titan.delivery.placement_report import Placement, placements, render, worst_first
+from coldops.delivery.placement_report import Placement, placements, render, worst_first
 
 
 def p(**kw) -> Placement:

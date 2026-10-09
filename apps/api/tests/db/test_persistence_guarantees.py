@@ -12,23 +12,23 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from titan.db.base import ImmutableMixin, WorkspaceScoped
-from titan.db.models import (
+from coldops.db.base import ImmutableMixin, WorkspaceScoped
+from coldops.db.models import (
     Base,
     Campaign,
     Lead,
     Organization,
     SuppressionEntry,
 )
-from titan.db.session import (
+from coldops.db.session import (
     ImmutableRowError,
     get_sessionmaker,
     workspace_session,
     workspace_unit_of_work,
 )
-from titan.delivery import quotas
+from coldops.delivery import quotas
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 pytestmark = pytest.mark.integration
 
@@ -460,7 +460,7 @@ def test_the_migration_chain_has_exactly_one_head() -> None:
 
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "titan" / "db" / "migrations"))
+    config.set_main_option("script_location", str(root / "coldops" / "db" / "migrations"))
 
     heads = ScriptDirectory.from_config(config).get_heads()
 
@@ -502,8 +502,8 @@ async def test_model_calls_are_written_to_both_ledgers(db_session, workspace) ->
     ledger writer to persist"; nothing persisted them, so model spend was
     invisible per lead and per campaign.
     """
-    from titan.db.models import ModelRun, UsageLedger
-    from titan.models.recording import record_calls
+    from coldops.db.models import ModelRun, UsageLedger
+    from coldops.models.recording import record_calls
 
     calls = [
         {
@@ -545,8 +545,8 @@ async def test_model_calls_are_written_to_both_ledgers(db_session, workspace) ->
 
 async def test_a_retried_model_call_is_not_billed_twice(db_session, workspace) -> None:
     """A ledger that double-counts a retry reports spend nobody was charged."""
-    from titan.db.models import UsageLedger
-    from titan.models.recording import record_calls
+    from coldops.db.models import UsageLedger
+    from coldops.models.recording import record_calls
 
     def call() -> dict:
         return {

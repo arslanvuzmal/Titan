@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.intelligence.sequencing import (
+from coldops.intelligence.sequencing import (
     FollowUpContext,
     SkipReason,
     Step,

@@ -11,13 +11,12 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import select, update
-from titan.db.models import OutboxMessage, SenderHealthSnapshot, SenderIdentity
-from titan.db.session import get_sessionmaker
-from titan.delivery import deliverability, sender_health
-from titan.delivery.deliverability import ReputationWindow
-from titan.delivery.providers.mock import MockEmailProvider
-from titan.delivery.sender_health import (
+from coldops.db.models import OutboxMessage, SenderHealthSnapshot, SenderIdentity
+from coldops.db.session import get_sessionmaker
+from coldops.delivery import deliverability, sender_health
+from coldops.delivery.deliverability import ReputationWindow
+from coldops.delivery.providers.mock import MockEmailProvider
+from coldops.delivery.sender_health import (
     SenderHealth,
     SenderSnapshot,
     Trend,
@@ -27,7 +26,8 @@ from titan.delivery.sender_health import (
     should_alert,
     trend,
 )
-from titan.intelligence.sender_auth import MAX_VERIFICATION_AGE
+from coldops.intelligence.sender_auth import MAX_VERIFICATION_AGE
+from sqlalchemy import select, update
 
 from .conftest import NOW, sending_settings
 
@@ -267,7 +267,7 @@ def test_worsening_within_the_alerting_band_alerts() -> None:
 # Persistence -- the part that could not exist before
 # ==========================================================================
 async def _run(provider: MockEmailProvider, **overrides):
-    from titan.delivery.outbox_worker import OutboxWorker
+    from coldops.delivery.outbox_worker import OutboxWorker
 
     # now_fn matters: the fixture's approval expiry is relative to NOW, so a
     # worker running on the real clock refuses every message as stale.
@@ -329,7 +329,7 @@ async def test_a_second_capture_the_same_day_updates_rather_than_appends(
     senders and land in two rows -- correctly, which is why that would not test
     this at all.
     """
-    from titan.delivery.outbox_worker import OutboxWorker
+    from coldops.delivery.outbox_worker import OutboxWorker
 
     provider = MockEmailProvider()
     await _run(provider)
@@ -374,7 +374,7 @@ async def test_failing_to_record_health_never_stops_a_send(
     db_session, sendable, monkeypatch
 ) -> None:
     """History is a by-product. A message every gate cleared must still go."""
-    from titan.delivery.outbox_worker import OutboxWorker
+    from coldops.delivery.outbox_worker import OutboxWorker
 
     def boom(*args, **kwargs):
         raise RuntimeError("classifier is on fire")

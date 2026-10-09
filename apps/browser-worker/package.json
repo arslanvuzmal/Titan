@@ -1,9 +1,9 @@
 {
-  "name": "titan-browser-worker",
+  "name": "coldops-browser-worker",
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Isolated, credential-free Playwright evidence worker for Titan-OS",
+  "description": "Isolated, credential-free Playwright evidence worker for ColdOps",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

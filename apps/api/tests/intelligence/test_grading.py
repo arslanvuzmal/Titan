@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from titan.intelligence import grading as g
-from titan.intelligence.scoring import WEIGHTS
+from coldops.intelligence import grading as g
+from coldops.intelligence.scoring import WEIGHTS
 
 
 def test_every_scoring_dimension_belongs_to_exactly_one_part() -> None:

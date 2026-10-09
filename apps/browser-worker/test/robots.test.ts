@@ -2,7 +2,7 @@
  * robots.txt compliance.
  *
  * Every case here failed against the hand-rolled parser these tests were
- * written for. Two of them let Titan fetch a path the site had explicitly
+ * written for. Two of them let ColdOps fetch a path the site had explicitly
  * refused, which is the failure that matters: robots is the entire consent
  * mechanism available to a site that never asked to be crawled.
  *

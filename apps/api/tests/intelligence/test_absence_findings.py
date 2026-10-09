@@ -1,4 +1,4 @@
-"""Turning "they do not run this" into something Titan may actually say.
+"""Turning "they do not run this" into something ColdOps may actually say.
 
 Every one of the fourteen existing finding types is a website defect, so a
 business with a clean site produces nothing to write about and cannot be
@@ -15,8 +15,8 @@ claim.
 
 from __future__ import annotations
 
-from titan.intelligence.absence import findings_from_gap
-from titan.intelligence.modernisation import (
+from coldops.intelligence.absence import findings_from_gap
+from coldops.intelligence.modernisation import (
     Capability,
     ModernisationProfile,
     Signal,
@@ -37,7 +37,7 @@ def profile(**overrides) -> ModernisationProfile:
 # ==========================================================================
 def test_a_measured_absence_becomes_a_pitchable_finding() -> None:
     """The point of the whole exercise: a clean site that runs nothing is now
-    a business Titan has something true to say to."""
+    a business ColdOps has something true to say to."""
     found = findings_from_gap(profile(), pages_read=PAGES, pitchable=True)
 
     assert {f.issue_type for f in found} >= {
@@ -160,7 +160,7 @@ def test_absences_are_scored_but_not_pitched_until_switched_on() -> None:
     """Planted violation: pitch them the moment they are detected.
 
     The design stages this deliberately. An absence finding changes what
-    Titan says to real businesses, and the honest question -- how many leads
+    ColdOps says to real businesses, and the honest question -- how many leads
     does this actually make sendable? -- has a number that should be known
     before the message changes. Detected and scored answers it; pitched acts
     on it.

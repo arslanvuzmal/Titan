@@ -10,8 +10,8 @@ from __future__ import annotations
 import re
 
 import pytest
-from titan.intelligence import message_validator as mv
-from titan.intelligence.composer import ComposerContext, compose
+from coldops.intelligence import message_validator as mv
+from coldops.intelligence.composer import ComposerContext, compose
 
 from tests.intelligence.test_composer_four_part import ISSUE_TYPES, STUDY, Finding
 

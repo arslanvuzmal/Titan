@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.delivery.mailbox import parse_email, strip_html
-from titan.intelligence.replies import InboundMessage, ReplyKind, classify_reply
+from coldops.delivery.mailbox import parse_email, strip_html
+from coldops.intelligence.replies import InboundMessage, ReplyKind, classify_reply
 
 
 def build(raw: str) -> bytes:

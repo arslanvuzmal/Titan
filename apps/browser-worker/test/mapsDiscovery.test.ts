@@ -2,7 +2,7 @@
  * The boundary this module is held inside.
  *
  * Google's robots.txt allows `/maps/search/` and disallows `/maps/` place
- * pages. Titan attaches a one-pager to every message saying "robots.txt
+ * pages. ColdOps attaches a one-pager to every message saying "robots.txt
  * obeyed", so that boundary is not a preference -- it is what keeps a document
  * this system sends to strangers true.
  *

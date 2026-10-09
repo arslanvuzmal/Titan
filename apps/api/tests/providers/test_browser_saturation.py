@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from titan.providers.browser_client import (
+from coldops.providers.browser_client import (
     SATURATION_ATTEMPTS,
     BrowserWorkerError,
 )
@@ -53,14 +53,14 @@ def no_real_waiting(monkeypatch):
     async def instant(_seconds: float) -> None:
         return None
 
-    monkeypatch.setattr("titan.providers.browser_client.asyncio.sleep", instant)
+    monkeypatch.setattr("coldops.providers.browser_client.asyncio.sleep", instant)
 
 
 def test_the_wait_is_longer_than_a_crawl_takes() -> None:
     """Six attempts on a rising gap spans about two minutes, which is longer
     than any single crawl -- so a lane must free up inside the window unless
     the worker is genuinely stuck."""
-    from titan.providers.browser_client import SATURATION_WAIT_SECONDS
+    from coldops.providers.browser_client import SATURATION_WAIT_SECONDS
 
     total = sum(SATURATION_WAIT_SECONDS * (i + 1) for i in range(SATURATION_ATTEMPTS - 1))
     assert total >= 90

@@ -8,9 +8,9 @@ a message was routed to.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.mailboxes import parse_mailboxes
-from titan.delivery.providers.base import OutboundEmail, SendErrorKind
-from titan.delivery.providers.smtp_pool import SmtpPoolProvider
+from coldops.delivery.mailboxes import parse_mailboxes
+from coldops.delivery.providers.base import OutboundEmail, SendErrorKind
+from coldops.delivery.providers.smtp_pool import SmtpPoolProvider
 
 OUTREACH = "outreach@arslanvuzmallone.com"
 SALES = "sales@arslanvuzmallone.com"
@@ -61,7 +61,7 @@ def recorder(monkeypatch):
         return True, None, None
 
     monkeypatch.setattr(
-        "titan.delivery.providers.smtp.SmtpProvider._send_blocking", fake_send
+        "coldops.delivery.providers.smtp.SmtpProvider._send_blocking", fake_send
     )
     return calls
 
@@ -164,7 +164,7 @@ async def test_health_names_each_mailbox_separately(monkeypatch) -> None:
         return ok, "authenticated" if ok else "535 bad credentials"
 
     monkeypatch.setattr(
-        "titan.delivery.providers.smtp.SmtpProvider.health_check", fake_health
+        "coldops.delivery.providers.smtp.SmtpProvider.health_check", fake_health
     )
     provider = pool((OUTREACH, "smtp-a.test"), (SALES, "smtp-b.test"))
 
@@ -183,7 +183,7 @@ async def test_a_pool_with_no_working_mailbox_reports_unhealthy(monkeypatch) -> 
         return False, "535 bad credentials"
 
     monkeypatch.setattr(
-        "titan.delivery.providers.smtp.SmtpProvider.health_check", fake_health
+        "coldops.delivery.providers.smtp.SmtpProvider.health_check", fake_health
     )
     provider = pool((OUTREACH, "smtp-a.test"), (SALES, "smtp-b.test"))
 

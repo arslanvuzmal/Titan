@@ -3,7 +3,7 @@
 /**
  * The approval queue.
  *
- * This is the human gate. It exists so that no message leaves Titan without a
+ * This is the human gate. It exists so that no message leaves ColdOps without a
  * named person having read the claim, seen the evidence behind it, and said
  * yes to that exact version.
  *

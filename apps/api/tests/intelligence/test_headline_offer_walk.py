@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import inspect
 
-from titan.activities import pipeline
-from titan.db.enums import Industry
-from titan.intelligence.playbooks import select_offers
+from coldops.activities import pipeline
+from coldops.db.enums import Industry
+from coldops.intelligence.playbooks import select_offers
 
 
 def test_the_walk_stops_at_the_first_answerable_finding() -> None:

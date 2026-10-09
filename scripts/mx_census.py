@@ -13,10 +13,10 @@ import sys
 
 from sqlalchemy import select
 
-from titan.db.models import ContactChannel, Workspace
-from titan.db.session import get_sessionmaker
-from titan.intelligence.mx import system_mx_resolver, check_mx
-from titan.intelligence.smtp_probe import UNINFORMATIVE_MX_SUFFIXES
+from coldops.db.models import ContactChannel, Workspace
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.mx import system_mx_resolver, check_mx
+from coldops.intelligence.smtp_probe import UNINFORMATIVE_MX_SUFFIXES
 
 
 def operator(hosts: tuple[str, ...]) -> str:

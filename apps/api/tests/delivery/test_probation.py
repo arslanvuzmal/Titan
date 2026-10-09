@@ -14,12 +14,12 @@ a bug in it, however right the entry condition was.
 from __future__ import annotations
 
 import pytest
-from titan.delivery.adaptive_limits import (
+from coldops.delivery.adaptive_limits import (
     PROBATION_QUIET_DAYS,
     PROBATION_VOLUME,
     daily_limit,
 )
-from titan.delivery.sender_health import SenderHealth
+from coldops.delivery.sender_health import SenderHealth
 
 BLOCKED = (SenderHealth.BLOCKED,)
 

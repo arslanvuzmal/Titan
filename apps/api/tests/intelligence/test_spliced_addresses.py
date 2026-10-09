@@ -16,9 +16,9 @@ bounces behind a 6.2% rate, which halved every mailbox's daily volume.
 
 from __future__ import annotations
 
-from titan.db.enums import ContactSource, verification_permits_sending
-from titan.intelligence.bounce_risk import assess
-from titan.intelligence.contacts import DIGIT_RUN_PREFIX
+from coldops.db.enums import ContactSource, verification_permits_sending
+from coldops.intelligence.bounce_risk import assess
+from coldops.intelligence.contacts import DIGIT_RUN_PREFIX
 
 WEBSITE = ContactSource.FIRST_PARTY_WEBSITE
 

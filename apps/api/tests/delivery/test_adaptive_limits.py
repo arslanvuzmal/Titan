@@ -12,24 +12,24 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import delete, select, update
-from titan.db.models import (
+from coldops.db.models import (
     Message,
     OutboxMessage,
     QuotaCounter,
     SenderHealthSnapshot,
     SenderIdentity,
 )
-from titan.db.session import get_sessionmaker
-from titan.delivery.adaptive_limits import (
+from coldops.db.session import get_sessionmaker
+from coldops.delivery.adaptive_limits import (
     HEALTH_FACTORS,
     MIN_ACTIVE_LIMIT,
     RECOVERY_LOOKBACK_DAYS,
     daily_limit,
     recovery_factor,
 )
-from titan.delivery.providers.mock import MockEmailProvider
-from titan.delivery.sender_health import SenderHealth
+from coldops.delivery.providers.mock import MockEmailProvider
+from coldops.delivery.sender_health import SenderHealth
+from sqlalchemy import delete, select, update
 
 from .conftest import NOW, build_sendable, sending_settings
 
@@ -194,7 +194,7 @@ def test_volume_falls_faster_than_it_returns() -> None:
 # Applied by the worker
 # ==========================================================================
 async def _run(provider: MockEmailProvider, **overrides):
-    from titan.delivery.outbox_worker import OutboxWorker
+    from coldops.delivery.outbox_worker import OutboxWorker
 
     return await OutboxWorker(
         provider, sending_settings(**overrides), now_fn=lambda: NOW

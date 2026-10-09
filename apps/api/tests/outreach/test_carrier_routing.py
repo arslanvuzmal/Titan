@@ -1,9 +1,9 @@
 """Recording which carrier campaign each market's leads leave through.
 
 Creating the per-market campaigns in Smartlead is only half the job. Until the
-ids are written onto Titan's own campaigns, ``campaigns.smartlead_campaign_id``
+ids are written onto ColdOps's own campaigns, ``campaigns.smartlead_campaign_id``
 is null everywhere and the delivery path falls back to the single carrier in
-``TITAN_SMARTLEAD_CAMPAIGN_ID`` -- so the markets exist, nothing uses them, and
+``COLDOPS_SMARTLEAD_CAMPAIGN_ID`` -- so the markets exist, nothing uses them, and
 a Dubai recipient is still scheduled to London hours.
 
 Against a real PostgreSQL, because the writeback goes through the workspace
@@ -15,11 +15,11 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from coldops.db.enums import CampaignStatus, Industry, Region
+from coldops.db.models import Campaign, CampaignPolicy
+from coldops.db.session import get_sessionmaker
+from coldops.provision_smartlead import record_carriers
 from sqlalchemy import select
-from titan.db.enums import CampaignStatus, Industry, Region
-from titan.db.models import Campaign, CampaignPolicy
-from titan.db.session import get_sessionmaker
-from titan.provision_smartlead import record_carriers
 
 pytestmark = pytest.mark.asyncio
 

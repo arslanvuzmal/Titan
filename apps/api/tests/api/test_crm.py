@@ -21,8 +21,8 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
-from titan.config import OperatingMode
-from titan.db.enums import (
+from coldops.config import OperatingMode
+from coldops.db.enums import (
     CampaignStatus,
     ContactSource,
     DraftStatus,
@@ -33,7 +33,7 @@ from titan.db.enums import (
     VerificationMethod,
     WorkspaceRole,
 )
-from titan.db.models import (
+from coldops.db.models import (
     AuditFinding,
     Campaign,
     CampaignPolicy,
@@ -51,7 +51,7 @@ from titan.db.models import (
     SenderIdentity,
     Workspace,
 )
-from titan.db.session import get_sessionmaker
+from coldops.db.session import get_sessionmaker
 
 from tests.api.test_api_security import auth, make_member, slug_of, token_for
 
@@ -62,11 +62,11 @@ pytestmark = pytest.mark.integration
 async def client():
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -376,8 +376,8 @@ async def test_pattern_guessed_address_is_visible_but_not_contactable(
 async def test_a_suppressed_address_is_reported_as_suppressed(
     client, crm, workspace
 ) -> None:
-    from titan.db.enums import SuppressionReason
-    from titan.delivery.suppression import suppress
+    from coldops.db.enums import SuppressionReason
+    from coldops.delivery.suppression import suppress
 
     async with get_sessionmaker()() as session, session.begin():
         await suppress(
@@ -589,11 +589,11 @@ async def test_a_viewer_can_read_the_crm_but_not_act_on_it(
 #
 # Both tables were filled by the pipeline and had no reader. These check the
 # two rules that make them safe to display: a gap is never priced, and a
-# meeting never arrives with a time Titan invented.
+# meeting never arrives with a time ColdOps invented.
 # ==========================================================================
 async def seed_outcomes(workspace_id: uuid.UUID, crm: dict) -> None:
-    from titan.db.models import BusinessOpportunity, ResearchRun
-    from titan.db.models.ops import Meeting
+    from coldops.db.models import BusinessOpportunity, ResearchRun
+    from coldops.db.models.ops import Meeting
 
     async with get_sessionmaker()() as session, session.begin():
         run = ResearchRun(
@@ -713,7 +713,7 @@ async def test_unscheduled_meetings_can_be_isolated(client, crm, workspace):
 
 async def test_outcomes_are_workspace_scoped(client, crm, workspace, db_session):
     """The isolation every read surface must hold to."""
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     await seed_outcomes(workspace, crm)
 

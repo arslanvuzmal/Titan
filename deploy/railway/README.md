@@ -46,7 +46,7 @@ Titan's own identity provider. Two fields, argon2id, no external dependency.
 Suited to a system with a handful of operators, which is what this is.
 
 ```
-railway run --service api titan set-passcode \
+railway run --service api coldops set-passcode \
   --email you@example.com --username you
 ```
 
@@ -105,9 +105,9 @@ same image with different start commands.
 |---|---|---|
 | `postgres` | Railway Postgres plugin | — |
 | `redis` | Railway Redis plugin | — (optional, see below) |
-| `api` | `apps/api` | `uvicorn titan.api.main:app --host 0.0.0.0 --port $PORT` |
-| `outbox-worker` | `apps/api` | `python -m titan.workers.outbox` |
-| `temporal-worker` | `apps/api` | `python -m titan.workers.temporal_worker` |
+| `api` | `apps/api` | `uvicorn coldops.api.main:app --host 0.0.0.0 --port $PORT` |
+| `outbox-worker` | `apps/api` | `python -m coldops.workers.outbox` |
+| `temporal-worker` | `apps/api` | `python -m coldops.workers.temporal_worker` |
 | `browser-worker` | `apps/browser-worker` | `node dist/src/server.js` |
 
 Only `api` gets a public domain. The workers and the browser worker are
@@ -157,7 +157,7 @@ the schema contains.
 
 ## 3. Environment variables
 
-`.env.example` at the repository root is generated from `titan/config.py` and
+`.env.example` at the repository root is generated from `coldops/config.py` and
 lists all of them. The ones that matter for a deployment:
 
 **Every `apps/api` service** (api and both workers — a worker missing one of
@@ -311,12 +311,12 @@ Then sign in to the Vercel URL and confirm:
 - **Nothing sends.** `TITAN_PRODUCTION_SENDING_ENABLED` is false, and turning
   it on requires the deliverability work in
   `docs/PRODUCTION-ENABLEMENT-CHECKLIST.md` first.
-- **Follow-ups are scheduled, not composed.** `titan.intelligence.sequencing`
+- **Follow-ups are scheduled, not composed.** `coldops.intelligence.sequencing`
   decides which step is owed and when, and the scanner writes `next_action_at`.
   Composing the follow-up is still the research pipeline's job, so a scheduled
   step does not become a message until that runs.
 - **Replies are classified, but nothing collects them yet.**
-  `titan.delivery.inbound.ingest_inbound` classifies a message and stops the
+  `coldops.delivery.inbound.ingest_inbound` classifies a message and stops the
   sequence or suppresses accordingly. No webhook route and no IMAP poller feeds
   it, so the caller is still whoever hands it an `InboundMessage`.
 - **No mailbox has been verified end to end.** SMTP auth is confirmed against

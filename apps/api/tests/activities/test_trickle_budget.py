@@ -22,8 +22,8 @@ pinning and it is pure.
 from __future__ import annotations
 
 import pytest
-from titan.activities.trickle import DAILY_RELEASE_BUDGET
-from titan.intelligence.contacts import is_never_contact, is_role_address
+from coldops.activities.trickle import DAILY_RELEASE_BUDGET
+from coldops.intelligence.contacts import is_never_contact, is_role_address
 
 SAFE = [
     "info@practice.co.uk",

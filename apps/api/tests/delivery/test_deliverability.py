@@ -1,7 +1,7 @@
 """Deliverability tests.
 
 The framing throughout: these do not prove mail reaches the inbox -- nothing
-can. They prove Titan refuses to send mail that carries a known reason to be
+can. They prove ColdOps refuses to send mail that carries a known reason to be
 filtered, and stops before reputation damage compounds.
 
 DNS is injected, so these run with no network.
@@ -12,8 +12,8 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.delivery import deliverability as d
-from titan.delivery.dns_auth import (
+from coldops.delivery import deliverability as d
+from coldops.delivery.dns_auth import (
     AuthResult,
     check_alignment,
     check_dkim,
@@ -342,7 +342,7 @@ def test_complaint_rate_above_threshold_blocks() -> None:
 
 
 def test_complaint_threshold_is_stricter_than_gmails_ceiling() -> None:
-    """0.3% is where Gmail acts; damage starts earlier, so Titan stops earlier."""
+    """0.3% is where Gmail acts; damage starts earlier, so ColdOps stops earlier."""
     assert d.COMPLAINT_RATE_PAUSE < 0.003
 
 

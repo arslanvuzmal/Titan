@@ -9,7 +9,7 @@ not be graded as though those were the same failure.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.lead_sources import (
+from coldops.intelligence.lead_sources import (
     BOUNCE_RATE_POOR,
     BOUNCE_RATE_WATCH,
     CONTACTABILITY_POOR,
@@ -106,12 +106,12 @@ def test_a_mildly_bouncing_batch_is_watched() -> None:
 
 
 def test_one_complaint_is_poor_whatever_else_happened() -> None:
-    """Somebody this search found reported Titan as spam. No rate applies, and
+    """Somebody this search found reported ColdOps as spam. No rate applies, and
     a reply from someone else does not offset it."""
     complained = window(complained=1, replied=9)
 
     assert classify(complained) is SourceGrade.POOR
-    assert "reported Titan as spam" in explain(complained, classify(complained))
+    assert "reported ColdOps as spam" in explain(complained, classify(complained))
 
 
 def test_bouncing_outranks_replying() -> None:

@@ -18,10 +18,10 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
+from coldops.db.enums import LeadStatus, WorkspaceRole
+from coldops.db.models import AuditLog, Lead
+from coldops.db.session import get_sessionmaker
 from sqlalchemy import select
-from titan.db.enums import LeadStatus, WorkspaceRole
-from titan.db.models import AuditLog, Lead
-from titan.db.session import get_sessionmaker
 
 from tests.delivery.conftest import build_sendable
 
@@ -34,11 +34,11 @@ pytestmark = pytest.mark.integration
 async def client():
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -112,7 +112,7 @@ async def test_the_meeting_is_audited_with_what_it_replaced(
     client, db_session, workspace
 ) -> None:
     """A lead that jumps to booked from ``discovered`` was probably marked by
-    somebody working from a calendar rather than from Titan, and that is worth
+    somebody working from a calendar rather than from ColdOps, and that is worth
     being able to see later."""
     lead_id = await _lead(db_session, workspace, suffix="mb3")
     before = await _status(lead_id)

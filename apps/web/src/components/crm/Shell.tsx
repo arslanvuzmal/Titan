@@ -3,7 +3,7 @@
 /**
  * The CRM shell: sign-in gate, navigation, and the mode banner.
  *
- * The banner is not decoration. Titan refuses to send unless the process kill
+ * The banner is not decoration. ColdOps refuses to send unless the process kill
  * switch and the workspace authorization are both on, and an operator working
  * a lead needs to know which of those is holding delivery -- otherwise
  * "approved" looks like "sent" and the queue silently accumulates.
@@ -62,7 +62,7 @@ function SignIn() {
         }}
         className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
       >
-        <h1 className="text-lg font-semibold text-slate-900">Titan-OS</h1>
+        <h1 className="text-lg font-semibold text-slate-900">ColdOps</h1>
         <p className="mt-1 text-sm text-slate-500">Sign in to continue.</p>
 
         <label className="mt-5 block text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -81,7 +81,7 @@ function SignIn() {
         <label className="mt-3 block text-xs font-medium uppercase tracking-wide text-slate-500">
           Passcode
           {/* Not trimmed on submit: a passcode that legitimately ends in a
-              space would silently stop working. `titan set-passcode` refuses
+              space would silently stop working. `coldops set-passcode` refuses
               to create one, so the two ends agree. */}
           <input
             type="password"
@@ -105,7 +105,7 @@ function SignIn() {
 
         <p className="mt-4 text-xs text-slate-400">
           Five failed attempts locks the account for fifteen minutes. There is no
-          self-service reset — an operator runs <code>titan set-passcode</code>.
+          self-service reset — an operator runs <code>coldops set-passcode</code>.
         </p>
       </form>
     </main>
@@ -167,7 +167,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center gap-6 px-6 py-3">
           <Link href="/crm" className="text-sm font-semibold text-slate-900">
-            Titan-OS
+            ColdOps
           </Link>
           <nav className="flex flex-1 flex-wrap items-center gap-1">
             {NAV.map((item) => {

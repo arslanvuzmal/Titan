@@ -18,8 +18,8 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.models.backfill import UNIT, reprice, survey
 from sqlalchemy import func, select
-from titan.models.backfill import UNIT, reprice, survey
 
 pytestmark = pytest.mark.asyncio
 
@@ -35,7 +35,7 @@ async def _call(
     category: str = "model",
 ) -> str:
     """One recorded model call, in both tables, exactly as the gateway writes it."""
-    from titan.db.models import ModelRun, UsageLedger
+    from coldops.db.models import ModelRun, UsageLedger
 
     key = f"k-{uuid.uuid4().hex[:16]}"
     session.add(
@@ -78,7 +78,7 @@ async def _call(
 
 
 async def _entries(session, workspace_id: uuid.UUID) -> dict:
-    from titan.db.models import UsageLedger
+    from coldops.db.models import UsageLedger
 
     session.expire_all()
     rows = (
@@ -91,7 +91,7 @@ async def _entries(session, workspace_id: uuid.UUID) -> dict:
 
 async def _spend(session, workspace_id: uuid.UUID) -> float:
     """What the /usage route reports: the sum over the whole ledger."""
-    from titan.db.models import UsageLedger
+    from coldops.db.models import UsageLedger
 
     session.expire_all()
     total = await session.scalar(
@@ -194,7 +194,7 @@ async def test_an_adjustment_is_dated_to_the_call_not_the_repair(
     db_session, workspace
 ) -> None:
     """Otherwise a spend query over last month stops reporting last month."""
-    from titan.db.models import UsageLedger
+    from coldops.db.models import UsageLedger
 
     key = await _call(
         db_session,
@@ -334,7 +334,7 @@ async def test_model_runs_is_not_touched(db_session, workspace) -> None:
     """It is append-only too, and it is the record of invocations rather than
     the authoritative cost record. Leaving it is the honest option; the docs
     and the CLI both say where spend is read from."""
-    from titan.db.models import ModelRun
+    from coldops.db.models import ModelRun
 
     key = await _call(
         db_session,
@@ -364,6 +364,6 @@ async def test_model_runs_is_not_touched(db_session, workspace) -> None:
 async def test_the_backfill_and_the_gateway_share_one_rate_card() -> None:
     """Two rate cards would drift, and the ledger would stop agreeing with
     itself across the date the fix shipped."""
-    from titan.models import backfill, gateway
+    from coldops.models import backfill, gateway
 
     assert backfill._PRICE_HINTS is gateway._PRICE_HINTS

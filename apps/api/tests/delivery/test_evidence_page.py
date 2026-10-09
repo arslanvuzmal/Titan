@@ -7,12 +7,12 @@ import hashlib
 import uuid
 
 import pytest
+from coldops.api import evidence as evidence_api
+from coldops.db.enums import Severity, VerificationMethod
+from coldops.db.models import AuditFinding, FindingEvidence, ResearchRun
+from coldops.intelligence import evidence_page as ep
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from titan.api import evidence as evidence_api
-from titan.db.enums import Severity, VerificationMethod
-from titan.db.models import AuditFinding, FindingEvidence, ResearchRun
-from titan.intelligence import evidence_page as ep
 
 from .conftest import NOW, build_sendable, sending_settings
 
@@ -170,7 +170,7 @@ def routed(monkeypatch):
     monkeypatch.setattr(
         evidence_api, "get_settings", lambda: sending_settings(evidence_secret=SECRET)
     )
-    from titan.api.main import app
+    from coldops.api.main import app
 
     return TestClient(app)
 
@@ -214,7 +214,7 @@ def test_a_forged_token_gets_the_same_page_as_a_missing_lead(routed) -> None:
 
 def test_the_feature_off_serves_nothing(monkeypatch) -> None:
     monkeypatch.setattr(evidence_api, "get_settings", lambda: sending_settings())
-    from titan.api.main import app
+    from coldops.api.main import app
 
     token = ep.evidence_token(uuid.uuid4(), SECRET)
     assert TestClient(app).get(f"/e/{token}").status_code == 404
@@ -232,9 +232,9 @@ def test_a_dated_measurement_shows_its_date() -> None:
 async def test_apples_proxy_records_delivery_and_does_not_stamp_an_open(
     db_session, workspace, monkeypatch
 ) -> None:
-    from titan.api import placement as placement_api
-    from titan.api.main import app
-    from titan.delivery.open_tracking import open_token
+    from coldops.api import placement as placement_api
+    from coldops.api.main import app
+    from coldops.delivery.open_tracking import open_token
 
     fixture = await build_sendable(db_session, workspace, suffix=uuid.uuid4().hex[:6])
     await db_session.execute(
@@ -321,7 +321,7 @@ async def test_the_latest_screenshot_is_served_behind_the_token(
     import pathlib
     import tempfile
 
-    from titan.db.models import BrowserArtifact, CrawlRun
+    from coldops.db.models import BrowserArtifact, CrawlRun
 
     # Not pytest's tmp_path: its base directory is refused on the dev laptop.
     tmp_path = pathlib.Path(tempfile.mkdtemp(prefix="titan-shots-"))
@@ -361,7 +361,7 @@ async def test_the_latest_screenshot_is_served_behind_the_token(
         "get_settings",
         lambda: sending_settings(evidence_secret=SECRET, artifact_dir=str(tmp_path)),
     )
-    from titan.api.main import app
+    from coldops.api.main import app
 
     client = TestClient(app)
     token = ep.evidence_token(lead_id, SECRET)

@@ -14,15 +14,15 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from coldops.db.enums import ReplyClass, SuppressionReason
+from coldops.db.models.compliance import SuppressionEntry
+from coldops.db.models.messaging import ReplyClassification as ReplyClassificationRow
+from coldops.db.models.ops import Task
+from coldops.db.session import workspace_unit_of_work
+from coldops.delivery.inbound import ingest_inbound
+from coldops.intelligence.replies import InboundMessage, ReplyKind
+from coldops.notify.operator import NotificationKind
 from sqlalchemy import select
-from titan.db.enums import ReplyClass, SuppressionReason
-from titan.db.models.compliance import SuppressionEntry
-from titan.db.models.messaging import ReplyClassification as ReplyClassificationRow
-from titan.db.models.ops import Task
-from titan.db.session import workspace_unit_of_work
-from titan.delivery.inbound import ingest_inbound
-from titan.intelligence.replies import InboundMessage, ReplyKind
-from titan.notify.operator import NotificationKind
 
 from tests.delivery.conftest import build_sendable
 
@@ -257,7 +257,7 @@ async def test_the_notification_rolls_back_with_a_failed_ingest(db_session, work
 # ==========================================================================
 async def test_a_request_for_a_call_opens_a_proposed_meeting(db_session, workspace):
     """``meetings`` was the last table in the schema with no writer."""
-    from titan.db.models.ops import Meeting
+    from coldops.db.models.ops import Meeting
 
     fixture = await build_sendable(db_session, workspace)
 
@@ -282,7 +282,7 @@ async def test_a_proposed_meeting_carries_no_invented_time(db_session, workspace
     The cost lands on the operator who misses it and the prospect who was stood
     up, so the reply is quoted and a person fills the time in.
     """
-    from titan.db.models.ops import Meeting
+    from coldops.db.models.ops import Meeting
 
     fixture = await build_sendable(db_session, workspace)
 
@@ -304,7 +304,7 @@ async def test_a_proposed_meeting_carries_no_invented_time(db_session, workspace
 
 async def test_only_a_request_for_a_call_opens_a_meeting(db_session, workspace):
     """Interest is not a meeting. Pricing questions are not a meeting."""
-    from titan.db.models.ops import Meeting
+    from coldops.db.models.ops import Meeting
 
     fixture = await build_sendable(db_session, workspace)
 
@@ -328,7 +328,7 @@ async def test_a_re_read_message_does_not_open_a_second_meeting(db_session, work
 
     A poller that re-reads a folder must not double-book the operator.
     """
-    from titan.db.models.ops import Meeting
+    from coldops.db.models.ops import Meeting
 
     fixture = await build_sendable(db_session, workspace)
     body = "Keen to talk - can we set up a call?"
@@ -347,7 +347,7 @@ async def test_a_re_read_message_does_not_open_a_second_meeting(db_session, work
 
 async def test_an_unmatched_reply_opens_no_meeting(db_session, workspace):
     """Without a lead there is nothing to attach the meeting to."""
-    from titan.db.models.ops import Meeting
+    from coldops.db.models.ops import Meeting
 
     fixture = await build_sendable(db_session, workspace)
 

@@ -18,10 +18,10 @@ import datetime as dt
 import httpx
 import pytest
 import pytest_asyncio
+from coldops.db.enums import WorkspaceRole
+from coldops.db.models import Message
+from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 from sqlalchemy import update
-from titan.db.enums import WorkspaceRole
-from titan.db.models import Message
-from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES
 
 from tests.delivery.conftest import build_sendable
 
@@ -34,11 +34,11 @@ pytestmark = pytest.mark.integration
 async def client():
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -112,8 +112,8 @@ async def test_a_thin_slice_reports_a_null_rate_not_zero(
 
     Collapsing the two is how an unmeasured mailbox reads as a healthy one.
     """
+    from coldops.db.models import Message
     from sqlalchemy import update
-    from titan.db.models import Message
 
     built = await build_sendable(db_session, workspace, suffix="thinslice")
     await db_session.execute(

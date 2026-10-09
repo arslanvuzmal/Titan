@@ -11,17 +11,17 @@ were asked for, and derives each campaign's clock rather than typing it in.
 
 from __future__ import annotations
 
-from titan.config import OperatingMode
-from titan.db.enums import Industry, Region
-from titan.intelligence.playbooks import PLAYBOOKS
-from titan.intelligence.vernacular import VERNACULARS
-from titan.policy.schedule import (
+from coldops.config import OperatingMode
+from coldops.db.enums import Industry, Region
+from coldops.intelligence.playbooks import PLAYBOOKS
+from coldops.intelligence.vernacular import VERNACULARS
+from coldops.policy.schedule import (
     LEAD_IN_HOURS,
     REGION_WORKING_HOURS,
     SUNDAY_TO_THURSDAY,
     default_window_for,
 )
-from titan.provision_markets import (
+from coldops.provision_markets import (
     DEFAULT_DAILY_SEND_LIMIT,
     DEFAULT_MIN_LEAD_SCORE,
     PLAN,
@@ -148,7 +148,7 @@ def test_provisioning_a_market_does_not_authorise_sending_to_it() -> None:
 def test_a_planned_campaign_carries_its_bands_market() -> None:
     """A US campaign holding an Australian band would schedule against the wrong
     continent while looking correctly configured."""
-    from titan.policy.subregions import belongs_to
+    from coldops.policy.subregions import belongs_to
 
     for _, territory in plan_rows():
         assert belongs_to(territory.sub_region, territory.region), territory.query_name

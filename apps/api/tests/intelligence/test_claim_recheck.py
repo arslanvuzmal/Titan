@@ -14,14 +14,14 @@ must never be read as a fix.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.claim_recheck import (
+from coldops.intelligence.claim_recheck import (
     OK_BELOW,
     URL_STATUS_CLAIMS,
     Verdict,
     is_recheckable,
     judge,
 )
-from titan.providers.browser_client import RecheckResult
+from coldops.providers.browser_client import RecheckResult
 
 URL = "https://example.test/book"
 CLAIM = "broken_internal_link"

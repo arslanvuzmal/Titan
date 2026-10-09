@@ -14,7 +14,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.delivery import day_report
+from coldops.delivery import day_report
 
 from tests.delivery.conftest import build_sendable
 
@@ -31,16 +31,16 @@ async def test_the_report_carries_yesterday_as_well_as_today(db_session, workspa
     fixture = await build_sendable(db_session, workspace)
     yesterday = dt.datetime.now(dt.UTC) - dt.timedelta(days=1)
 
-    from titan.db.enums import MessageState
-    from titan.db.models import Message
-    from titan.db.session import workspace_unit_of_work
+    from coldops.db.enums import MessageState
+    from coldops.db.models import Message
+    from coldops.db.session import workspace_unit_of_work
 
     async with workspace_unit_of_work(workspace) as session:
         message = await session.get(Message, fixture.message_id)
         message.state = MessageState.SENT
         message.sent_at = yesterday
 
-    from titan.db.session import workspace_session
+    from coldops.db.session import workspace_session
 
     async with workspace_session(workspace) as session:
         report = await day_report.build(

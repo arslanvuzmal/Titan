@@ -1,7 +1,7 @@
 """Two components disagreeing about how warm the same mailbox is.
 
-``_capture_sender_health`` positioned a mailbox with ``_earliest(Titan's first
-send, the provider's warm-up start)``; ``_check_deliverability`` used Titan's
+``_capture_sender_health`` positioned a mailbox with ``_earliest(ColdOps's first
+send, the provider's warm-up start)``; ``_check_deliverability`` used ColdOps's
 first send alone. On 20 August the snapshot for ``sales@`` recorded day 13,
 allowance 25, and the send gate enforced day 2, allowance 6 -- for the same
 mailbox, on the same day, from the same worker.
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.delivery.deliverability import (
+from coldops.delivery.deliverability import (
     MAX_DAILY_STEP_UP,
     MIN_WARMUP_VOLUME,
     WARMUP_DAYS,
@@ -133,7 +133,7 @@ def test_the_two_paths_now_read_the_same_field() -> None:
     correct on its own."""
     import inspect
 
-    from titan.delivery import outbox_worker
+    from coldops.delivery import outbox_worker
 
     gate = inspect.getsource(outbox_worker.OutboxWorker._check_deliverability)
     health = inspect.getsource(outbox_worker.OutboxWorker._capture_sender_health)
@@ -159,7 +159,7 @@ def test_the_peak_window_excludes_today() -> None:
     """
     import inspect
 
-    from titan.delivery import outbox_worker
+    from coldops.delivery import outbox_worker
 
     gate = inspect.getsource(outbox_worker.OutboxWorker._check_deliverability)
     peak_query = gate[gate.index("recent_peak_sends = (") :]

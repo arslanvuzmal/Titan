@@ -1,6 +1,6 @@
 """The seed file, and the two mistakes it exists to make impossible.
 
-A seed is an address Titan owns at a provider it wants measured. The file is
+A seed is an address ColdOps owns at a provider it wants measured. The file is
 separate from ``mailboxes.json`` for one reason worth testing: a seed that
 finds its way into the sender pool is cold outreach going out from somebody's
 personal Gmail.
@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from titan.delivery.seeds import SeedConfigError, load_seeds, parse_seeds
+from coldops.delivery.seeds import SeedConfigError, load_seeds, parse_seeds
 
 GMAIL = {
     "address": "seed@gmail.com",

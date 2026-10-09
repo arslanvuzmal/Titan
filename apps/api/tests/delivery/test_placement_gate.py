@@ -5,8 +5,8 @@ from __future__ import annotations
 import datetime as dt
 from types import SimpleNamespace
 
-from titan.delivery import deliverability, placement_gate
-from titan.delivery.placement_gate import (
+from coldops.delivery import deliverability, placement_gate
+from coldops.delivery.placement_gate import (
     BELOW_FLOOR,
     DOMAIN_RESTING,
     UNMEASURED,

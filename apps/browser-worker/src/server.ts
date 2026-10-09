@@ -2,7 +2,7 @@
  * The browser worker's HTTP surface.
  *
  * Deliberately tiny: one research endpoint, one health endpoint, one readiness
- * endpoint. This service is the only place in Titan that fetches arbitrary
+ * endpoint. This service is the only place in ColdOps that fetches arbitrary
  * URLs, and it holds no credentials for email, models, or the database.
  */
 
@@ -67,7 +67,7 @@ function validateRequest(raw: unknown): ResearchRequest {
     timeout_seconds: clamp(r.timeout_seconds, 5, 300, 120),
     max_response_bytes: clamp(r.max_response_bytes, 10_000, 20_000_000, 5_000_000),
     max_redirects: clamp(r.max_redirects, 0, 10, 5),
-    user_agent: (r.user_agent ?? 'TitanOS-Research/0.2').slice(0, 300),
+    user_agent: (r.user_agent ?? 'Mozilla/5.0 (compatible; SiteCheck/1.0; +https://arslanvuzmallone.com/bot)').slice(0, 300),
     respect_robots: r.respect_robots !== false,
     capture_screenshots: r.capture_screenshots !== false,
     run_lighthouse: r.run_lighthouse === true,
@@ -92,7 +92,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const isResearch = req.method === 'POST' && url.pathname === '/research';
-  // One URL, no crawl. Used to ask whether a claim Titan is about to send is
+  // One URL, no crawl. Used to ask whether a claim ColdOps is about to send is
   // still true -- see recheckUrl in crawler.ts for why it lives on this side
   // of the credential boundary.
   const isRecheck = req.method === 'POST' && url.pathname === '/recheck';
@@ -128,7 +128,7 @@ const server = http.createServer(async (req, res) => {
         userAgent:
           typeof body?.user_agent === 'string' && body.user_agent
             ? body.user_agent
-            : 'TitanBot/1.0 (+https://arslanvuzmallone.com/titan)',
+            : 'Mozilla/5.0 (compatible; SiteCheck/1.0; +https://arslanvuzmallone.com/bot)',
         timeoutSeconds:
           typeof body?.timeout_seconds === 'number' ? body.timeout_seconds : 25,
       });
@@ -143,7 +143,7 @@ const server = http.createServer(async (req, res) => {
         userAgent:
           typeof body?.user_agent === 'string' && body.user_agent
             ? body.user_agent
-            : 'TitanBot/1.0 (+https://arslanvuzmallone.com/titan)',
+            : 'Mozilla/5.0 (compatible; SiteCheck/1.0; +https://arslanvuzmallone.com/bot)',
         timeoutSeconds:
           typeof body?.timeout_seconds === 'number' ? body.timeout_seconds : 90,
         // Bounded here as well as by the caller: an unbounded scroll is a

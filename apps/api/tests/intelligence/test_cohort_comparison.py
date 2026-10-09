@@ -1,7 +1,7 @@
 """Telling a business where it stands against the ones we looked at.
 
 The persuasive half of the absence design, and the one with a shape the rest
-of Titan does not have: a statement about businesses *other than* the
+of ColdOps does not have: a statement about businesses *other than* the
 recipient, in a cold commercial email, made for commercial gain.
 
 That is defensible when it is a claim about our own measurement and indefensible
@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.intelligence.cohort import (
+from coldops.intelligence.cohort import (
     MIN_COHORT,
     MIN_SHARE,
     CohortReading,
     comparison_for,
 )
-from titan.intelligence.modernisation import Capability
+from coldops.intelligence.modernisation import Capability
 
 NOW = dt.datetime(2026, 9, 8, 10, 0, tzinfo=dt.UTC)
 

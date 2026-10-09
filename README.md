@@ -83,7 +83,7 @@ counts are in the verification report.
 ## Architecture
 
 ```
-apps/api/titan/
+apps/api/coldops/
   config.py          exhaustive settings; no os.getenv anywhere else
   db/                SQLAlchemy 2.0 models, Alembic migrations, scoped sessions
   security/          SSRF guard, redaction
@@ -115,8 +115,8 @@ python -m alembic upgrade head
 
 # 3. Verify
 python -m pytest tests -q          # 274 passed
-python -m titan.cli preflight      # explains why sending is disabled
-python -m titan.cli invariants     # the 22 safety invariants and where each lives
+python -m coldops.cli preflight      # explains why sending is disabled
+python -m coldops.cli invariants     # the 22 safety invariants and where each lives
 
 # 4. Browser worker
 cd ../browser-worker
@@ -135,7 +135,7 @@ module would be fiction.
 ## Safety posture
 
 Production sending is disabled at four independent levels and defaults to off at
-every one. `python -m titan.cli preflight` reports which gates are closed:
+every one. `python -m coldops.cli preflight` reports which gates are closed:
 
 ```
 PROCESS GATE CLOSED: 4 blocker(s).

@@ -14,7 +14,7 @@ the populated ones.
 from __future__ import annotations
 
 import pytest
-from titan.intelligence.profile_defects import (
+from coldops.intelligence.profile_defects import (
     MIN_PHOTOS,
     ProfileSnapshot,
     findings_from_profile,
@@ -233,7 +233,7 @@ def test_googles_own_summary_is_never_turned_into_a_claim_about_their_copy() -> 
     recipient their listing has no description, which they disprove by opening
     their own profile.
     """
-    from titan.providers.places import PROFILE_FIELDS
+    from coldops.providers.places import PROFILE_FIELDS
 
     assert "editorialSummary" not in PROFILE_FIELDS
     assert "listing_has_no_description" not in _types(
@@ -273,7 +273,7 @@ def test_a_payload_that_cannot_identify_itself_is_a_failed_read_not_an_empty_lis
 
 def test_the_mask_and_the_claimable_fields_cannot_drift() -> None:
     """One list, used for the request and for what may be claimed from it."""
-    from titan.providers.places import PROFILE_FIELD_MASK, PROFILE_FIELDS
+    from coldops.providers.places import PROFILE_FIELD_MASK, PROFILE_FIELDS
 
     assert PROFILE_FIELD_MASK.split(",") == list(PROFILE_FIELDS)
     for field in ("websiteUri", "regularOpeningHours", "photos"):
@@ -297,7 +297,7 @@ def test_owner_replies_are_never_claimed_because_places_does_not_return_them() -
     replies" about twelve consecutive businesses, when what it described was
     the response shape. `reviews` is not asked for, and nothing claims it.
     """
-    from titan.providers.places import PROFILE_FIELDS
+    from coldops.providers.places import PROFILE_FIELDS
 
     assert "reviews" not in PROFILE_FIELDS
     payload = _payload(

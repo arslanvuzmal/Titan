@@ -12,17 +12,17 @@ import re
 from pathlib import Path
 
 import pytest
-from sqlalchemy.orm.attributes import set_committed_value
-from titan.db.enums import VerificationMethod
-from titan.db.models.research import AuditFinding, FindingEvidence
-from titan.intelligence import findings as findings_mod
-from titan.outreach.variables import (
+from coldops.db.enums import VerificationMethod
+from coldops.db.models.research import AuditFinding, FindingEvidence
+from coldops.intelligence import findings as findings_mod
+from coldops.outreach.variables import (
     _CONSEQUENCE,
     _FRICTION,
     _INSIGHT,
     _SHORT,
     derive_variables,
 )
+from sqlalchemy.orm.attributes import set_committed_value
 
 MAPPED = sorted(_CONSEQUENCE)
 
@@ -73,7 +73,7 @@ def test_every_issue_type_the_detectors_produce_can_be_written_about() -> None:
     scores the lead, it shows in the CRM, and then the message step silently
     falls back or refuses. Two of these -- accessibility and load time -- also
     happen to be the only faults that mean the same thing on every kind of site,
-    so leaving them unmapped narrows what Titan can talk about the most.
+    so leaving them unmapped narrows what ColdOps can talk about the most.
     """
     detectors = Path(findings_mod.__file__).read_text(encoding="utf-8")
     produced = set(re.findall(r'issue_type="([a-z_]+)"', detectors))

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from titan.activities import pipeline
+from coldops.activities import pipeline
 
 
 @pytest.fixture(autouse=True)

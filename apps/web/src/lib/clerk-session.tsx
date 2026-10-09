@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * Clerk-backed sessions, for a deployed Titan.
+ * Clerk-backed sessions, for a deployed ColdOps.
  *
- * The API refuses to mint its own tokens when TITAN_ENVIRONMENT=production, so
+ * The API refuses to mint its own tokens when COLDOPS_ENVIRONMENT=production, so
  * this is the only way to sign in to a deployment. It fills the same
  * `SessionContext` as the local provider, so every screen is unaware of which
  * mode it is running under.
@@ -14,7 +14,7 @@
  * considers it valid, for no benefit.
  *
  * As in the local path, the principal is fetched before the shell renders: a
- * Clerk identity with no Titan membership must land on a clear message, not on
+ * Clerk identity with no ColdOps membership must land on a clear message, not on
  * a CRM whose every request then fails.
  */
 
@@ -57,13 +57,13 @@ function ClerkSessionBridge({ children }: { children: React.ReactNode }) {
       .catch((e: unknown) => {
         if (cancelled) return;
         setStatus('signed-out');
-        // A Clerk identity with no Titan membership is the expected first-run
+        // A Clerk identity with no ColdOps membership is the expected first-run
         // failure, and the message says so rather than reading as a bug.
         setError(
           isSignedIn
             ? e instanceof Error
-              ? `Signed in to Clerk, but this identity has no Titan access: ${e.message}`
-              : 'this identity has no Titan access'
+              ? `Signed in to Clerk, but this identity has no ColdOps access: ${e.message}`
+              : 'this identity has no ColdOps access'
             : null,
         );
       });
@@ -102,7 +102,7 @@ function ClerkSessionBridge({ children }: { children: React.ReactNode }) {
   if (isLoaded && !isSignedIn) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 px-4">
-        <h1 className="text-lg font-semibold text-slate-900">Titan-OS</h1>
+        <h1 className="text-lg font-semibold text-slate-900">ColdOps</h1>
         <SignIn routing="hash" />
       </main>
     );

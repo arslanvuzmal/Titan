@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from titan.intelligence.fuel import (
+from coldops.intelligence.fuel import (
     FALLBACK_CRAWL_RATE_PER_HOUR,
     FALLBACK_EXTRACTION_RATE,
     MAX_QUEUE_HOURS,
@@ -179,7 +179,7 @@ def test_the_reserve_drains_before_a_draft_can_expire() -> None:
     it manufactures drafts which quietly expire. It only does so if the tank
     holds more than the approval window can drain.
     """
-    from titan.workflows.research import DEFAULT_APPROVAL_TTL
+    from coldops.workflows.research import DEFAULT_APPROVAL_TTL
 
     assert RESERVE_DAYS < DEFAULT_APPROVAL_TTL.days
 
@@ -240,7 +240,7 @@ def test_stalled_research_is_not_counted_as_fuel_on_its_way() -> None:
     """
     import inspect
 
-    from titan.intelligence import fuel
+    from coldops.intelligence import fuel
 
     source = inspect.getsource(fuel.read_fuel_state)
 
@@ -252,8 +252,8 @@ def test_the_freshness_bound_matches_the_sweeper_that_frees_them() -> None:
     """One deadline, not two. A lead the sweeper still considers in progress
     must not already have been written off here, or the two would disagree
     about the same lead."""
-    from titan.intelligence.fuel import STALE_AFTER as fuel_deadline
-    from titan.intelligence.stale_runs import STALE_AFTER as sweeper_deadline
+    from coldops.intelligence.fuel import STALE_AFTER as fuel_deadline
+    from coldops.intelligence.stale_runs import STALE_AFTER as sweeper_deadline
 
     assert fuel_deadline is sweeper_deadline
 
@@ -325,7 +325,7 @@ def test_the_queue_ceiling_is_measured_from_completions_not_configuration() -> N
     """
     import inspect
 
-    from titan.intelligence import fuel
+    from coldops.intelligence import fuel
 
     source = inspect.getsource(fuel.read_fuel_state)
 
@@ -360,8 +360,8 @@ def test_a_jammed_crawler_leaves_no_headroom_rather_than_a_negative_one() -> Non
 def _reserve_sql() -> str:
     import uuid
 
+    from coldops.intelligence.fuel import _reachable_untouched_query
     from sqlalchemy.dialects import postgresql
-    from titan.intelligence.fuel import _reachable_untouched_query
 
     q = _reachable_untouched_query(uuid.UUID("00000000-0000-0000-0000-000000000001"))
     return str(q.compile(dialect=postgresql.dialect()))

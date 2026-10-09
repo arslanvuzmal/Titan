@@ -264,7 +264,7 @@ async function robotsAllows(origin: string, userAgent: string, path: string): Pr
     //   Disallow: /private/*/x      the path was crawled despite being refused
     //
     // Under-blocking is the failure that cannot be argued away: the site said
-    // no in the one machine-readable way it has, and Titan went anyway. The
+    // no in the one machine-readable way it has, and ColdOps went anyway. The
     // other three over-blocked (no Allow support, an empty User-agent value
     // matching everything, and a group named "bot" matching any agent whose
     // name contains it), which cost leads rather than trust.
@@ -277,7 +277,7 @@ async function robotsAllows(origin: string, userAgent: string, path: string): Pr
     return robots.isAllowed(`${origin}${path}`, userAgent) ?? true;
   } catch {
     // Network failure reading robots.txt is not consent; but neither is it a
-    // prohibition. Titan proceeds and records that robots was unreadable.
+    // prohibition. ColdOps proceeds and records that robots was unreadable.
     return true;
   }
 }
@@ -285,7 +285,7 @@ async function robotsAllows(origin: string, userAgent: string, path: string): Pr
 /**
  * Re-measure one URL, cheaply, so a claim can be checked before it is sent.
  *
- * Every message Titan sends asserts something about a page: "the link in your
+ * Every message ColdOps sends asserts something about a page: "the link in your
  * navigation returns 404", "your Book Now button leads nowhere". That
  * assertion was measured when the site was crawled, and the send gate only
  * asks how *old* the measurement is -- never whether it is still true. A
@@ -418,7 +418,7 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
         '--disable-dev-shm-usage',
         '--no-zygote',
         // Same-origin policy stays ON. These only reduce the attack surface of
-        // features Titan never needs.
+        // features ColdOps never needs.
         '--disable-background-networking',
         '--disable-sync',
         '--disable-extensions',
@@ -598,7 +598,7 @@ export async function runCrawl(req: ResearchRequest): Promise<CrawlResult> {
         }
 
         // Enqueue same-origin links only. External links are recorded as
-        // evidence but never crawled -- Titan researches one business at a time.
+        // evidence but never crawled -- ColdOps researches one business at a time.
         if (item.depth < req.max_depth) {
           for (const link of evidence.nav_links) {
             if (link.is_external) continue;

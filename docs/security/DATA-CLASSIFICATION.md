@@ -21,6 +21,6 @@ Titan-OS processes data according to four distinct confidentiality tiers:
 
 ## 2. Redaction & Minimization Policy
 
-1. **Log Sanitization:** All log output passes through `titan.security.redaction.Redactor`, which automatically strips patterns matching API keys, Bearer tokens, email addresses, and Authorization headers.
+1. **Log Sanitization:** All log output passes through `coldops.security.redaction.Redactor`, which automatically strips patterns matching API keys, Bearer tokens, email addresses, and Authorization headers.
 2. **Minimization of Public Data:** Titan-OS captures ONLY publicly accessible web content and contact pointers. Scraping of private directories or unauthorized personal data stores is prohibited.
 3. **Suppression Permanence:** Deleting a lead or contact record from Titan-OS MUST NOT delete the corresponding `suppression_entries` record. Suppression records are permanent to guarantee compliance with unsubscribe and opt-out requests.

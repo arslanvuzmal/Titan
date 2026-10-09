@@ -19,7 +19,7 @@ import datetime as dt
 import zoneinfo
 
 import pytest
-from titan.intelligence.greeting import (
+from coldops.intelligence.greeting import (
     NEUTRAL,
     greeting_at,
     greeting_for_hour,

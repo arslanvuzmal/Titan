@@ -68,10 +68,10 @@ x-titan-env: &titan-env
   # address and a password put here would appear in `docker compose config`,
   # in `docker inspect`, and in every screenshot of either. The file is
   # mounted read-only into the three services that genuinely need it and
-  # into nothing else. See titan.delivery.mailboxes.
+  # into nothing else. See coldops.delivery.mailboxes.
   TITAN_MAILBOX_FILE: ${TITAN_MAILBOX_FILE:-}
   # Daily warm-up traffic with partner mailboxes on Gmail/Outlook. See
-  # titan.delivery.warmup.round_pool; partners must not be placement seeds.
+  # coldops.delivery.warmup.round_pool; partners must not be placement seeds.
   TITAN_WARMUP_ENABLED: ${TITAN_WARMUP_ENABLED:-false}
   TITAN_WARMUP_PARTNER_FILE: ${TITAN_WARMUP_PARTNER_FILE:-}
   # Evidence pages: the public origin they are served from, and the key that
@@ -82,7 +82,7 @@ x-titan-env: &titan-env
   # Titan's own probe. Same class of gap as the SMTP block above: the
   # settings existed and nothing passed them in, so a container read the
   # default 'null' and reported a clean sweep over addresses it had never
-  # checked. See titan/intelligence/smtp_probe.py.
+  # checked. See coldops/intelligence/smtp_probe.py.
   TITAN_MAILBOX_VERIFIER: ${TITAN_MAILBOX_VERIFIER:-null}
   TITAN_SMTP_PROBE_HELO: ${TITAN_SMTP_PROBE_HELO:-}
   TITAN_SMTP_PROBE_MAIL_FROM: ${TITAN_SMTP_PROBE_MAIL_FROM:-}
@@ -134,7 +134,7 @@ x-titan-env: &titan-env
   # sent was the deterministic template text. The rewriter never ran once.
   TITAN_MODEL_REWRITES_ENABLED: ${TITAN_MODEL_REWRITES_ENABLED:-false}
   # Model IDs are configuration. Pinned routes that leave a provider's
-  # catalogue must be changeable without a rebuild; `titan validate-models`
+  # catalogue must be changeable without a rebuild; `coldops validate-models`
   # checks them against the live catalogue.
   TITAN_MODEL_ROUTE_EXTRACTION: ${TITAN_MODEL_ROUTE_EXTRACTION:-nvidia:nvidia/nemotron-3-super-120b-a12b}
   TITAN_MODEL_ROUTE_RESEARCH: ${TITAN_MODEL_ROUTE_RESEARCH:-nvidia:nvidia/nemotron-3-super-120b-a12b}
@@ -144,7 +144,7 @@ x-titan-env: &titan-env
   # --- message content ---
   # Real previous projects, cited in the credibility paragraph. Unset is a
   # working state: the message keeps its generic credential sentence rather
-  # than inventing a client. See titan/intelligence/case_studies.py.
+  # than inventing a client. See coldops/intelligence/case_studies.py.
   TITAN_CASE_STUDIES_PATH: ${TITAN_CASE_STUDIES_PATH:-}
   # A one-page summary, linked from the references block. A link and not an
   # attachment: an unsolicited PDF from an unknown sender is a strong spam
@@ -152,7 +152,7 @@ x-titan-env: &titan-env
   # -- which is the engagement signal this system otherwise does not have.
   TITAN_ONE_PAGER_URL: ${TITAN_ONE_PAGER_URL:-}
   # No cold mail from a mailbox without a recent inbox reading. See
-  # titan.delivery.placement_gate.
+  # coldops.delivery.placement_gate.
   TITAN_PLACEMENT_GATE_ENABLED: ${TITAN_PLACEMENT_GATE_ENABLED:-false}
   # "brief" for the cold domains: 60-120 words, one link. See Settings.message_form.
   TITAN_MESSAGE_FORM: ${TITAN_MESSAGE_FORM:-full}
@@ -256,7 +256,7 @@ services:
   # A capture server: accepts every message and delivers none of them. This is
   # how the real send path -- headers, footers, unsubscribe, the lot -- gets
   # exercised and read before anything reaches a stranger, which is what
-  # titan/delivery/providers/smtp.py was written for.
+  # coldops/delivery/providers/smtp.py was written for.
   #
   # Opt-in, so `docker compose up -d` does not start it by accident:
   #     docker compose --profile rehearsal up -d mailpit
@@ -289,10 +289,10 @@ services:
   api:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
-    command: ["uvicorn", "titan.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["uvicorn", "coldops.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports: ["${API_HOST_PORT:-8000}:8000"]
     volumes:
-      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # Read-only, and only here: the API for `coldops mailbox`, the outbox
       # worker to authenticate as each mailbox, the inbound worker to read
       # each one. The browser worker and the web app never see it.
       - ./docs/one-pager:/run/one-pager:ro
@@ -319,7 +319,7 @@ services:
   temporal-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
-    command: ["python", "-m", "titan.workers.temporal_worker"]
+    command: ["python", "-m", "coldops.workers.temporal_worker"]
     volumes:
       # The composer reads case_studies.json from here. This worker is where
       # drafts are written, so it is the one service that needs it -- the mount
@@ -350,9 +350,9 @@ services:
   outbox-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
-    command: ["python", "-m", "titan.workers.outbox"]
+    command: ["python", "-m", "coldops.workers.outbox"]
     volumes:
-      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # Read-only, and only here: the API for `coldops mailbox`, the outbox
       # worker to authenticate as each mailbox, the inbound worker to read
       # each one. The browser worker and the web app never see it.
       - ./docs/one-pager:/run/one-pager:ro
@@ -390,9 +390,9 @@ services:
   inbound-worker:
     build: {context: ., dockerfile: apps/api/Dockerfile}
     environment: *titan-env
-    command: ["python", "-m", "titan.workers.inbound"]
+    command: ["python", "-m", "coldops.workers.inbound"]
     volumes:
-      # Read-only, and only here: the API for `titan mailbox`, the outbox
+      # Read-only, and only here: the API for `coldops mailbox`, the outbox
       # worker to authenticate as each mailbox, the inbound worker to read
       # each one. The browser worker and the web app never see it.
       - ./secrets:/run/secrets:ro

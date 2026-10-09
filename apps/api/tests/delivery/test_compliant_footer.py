@@ -17,11 +17,11 @@ and only the *drift* is closed.
 
 from __future__ import annotations
 
-from titan.delivery.outbox_worker import (
+from coldops.delivery.outbox_worker import (
     with_compliant_footer,
     with_one_click_unsubscribe,
 )
-from titan.delivery.providers.base import OutboundEmail
+from coldops.delivery.providers.base import OutboundEmail
 
 ADDRESS = "Clifton Business District, DHA, Karachi"
 

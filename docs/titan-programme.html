@@ -1251,7 +1251,7 @@
 
         <div class="note" style="background:var(--defer-soft);border-color:var(--defer)">
           <h4 style="color:var(--defer)">Authentication &mdash; passing every check, and weaker than it looks</h4>
-          <p><code>titan auth</code> is new. It prints what <code>dns_auth</code> has always computed and nothing ever displayed: <code>preflight</code> reports whether the process may send, <code>check-providers</code> whether credentials exist, and the daily verification records three booleans &mdash; all of which are true for a domain whose DMARC policy does nothing.</p>
+          <p><code>coldops auth</code> is new. It prints what <code>dns_auth</code> has always computed and nothing ever displayed: <code>preflight</code> reports whether the process may send, <code>check-providers</code> whether credentials exist, and the daily verification records three booleans &mdash; all of which are true for a domain whose DMARC policy does nothing.</p>
           <div class="tablewrap">
             <table>
               <thead><tr><th>Record</th><th>State</th><th>What it means</th></tr></thead>
@@ -1265,7 +1265,7 @@
               </tbody>
             </table>
           </div>
-          <p><strong><code>p=none</code> is the one to move.</strong> It tells receivers to do nothing when a message fails authentication &mdash; so anyone may send as your domain and Gmail is instructed to accept it. Go to <code>p=quarantine</code> once a week or two of DMARC reports show your own mail passing, then <code>p=reject</code>. <code>titan auth</code> prints the exact MTA-STS and TLS-RPT records to publish alongside.</p>
+          <p><strong><code>p=none</code> is the one to move.</strong> It tells receivers to do nothing when a message fails authentication &mdash; so anyone may send as your domain and Gmail is instructed to accept it. Go to <code>p=quarantine</code> once a week or two of DMARC reports show your own mail passing, then <code>p=reject</code>. <code>coldops auth</code> prints the exact MTA-STS and TLS-RPT records to publish alongside.</p>
           <p><em>One thing checked rather than assumed:</em> the DKIM selector list includes <code>spacemail</code>, so the pass is real and not a lookup that quietly found nothing.</p>
         </div>
       </section>
@@ -1468,7 +1468,7 @@
                 <tr><td><strong>The score gate came down</strong> from 70 to 55 across all 29 active campaigns, on your instruction</td><td class="mono">3,481 leads admitted</td></tr>
                 <tr><td><strong>Six active campaigns had no sender at all</strong> and could never have sent &mdash; they were created after the last provisioning run and nothing linked them</td><td class="mono">76 links added</td></tr>
                 <tr><td><code>contact@</code> and <code>marketing@</code> renamed to <code>arslan@</code> and <code>me@</code>, in the file, in the database and in every campaign pool; SMTP and IMAP verified on all five</td><td class="mono">5 mailboxes live</td></tr>
-                <tr><td><strong>Our own address was on our own bounce list.</strong> <code>arslan@</code> was suppressed on 25 August, when it did not exist &mdash; and <code>titan warmup</code> sends between the pool's own mailboxes, so the newest mailbox was the one that could not have warmed up</td><td class="mono">removed</td></tr>
+                <tr><td><strong>Our own address was on our own bounce list.</strong> <code>arslan@</code> was suppressed on 25 August, when it did not exist &mdash; and <code>coldops warmup</code> sends between the pool's own mailboxes, so the newest mailbox was the one that could not have warmed up</td><td class="mono">removed</td></tr>
                 <tr><td>The policy-page rule, its tests, and the re-assessment of everything already stored</td><td class="mono">92 held back</td></tr>
                 <tr><td><strong>A false NXDOMAIN can no longer refuse a live domain.</strong> Contradictory MX readings inside one assessment now resolve to &ldquo;not checked&rdquo; rather than letting the negative win</td><td class="mono">3 restored</td></tr>
               </tbody>

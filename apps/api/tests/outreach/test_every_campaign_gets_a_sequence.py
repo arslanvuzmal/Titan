@@ -33,7 +33,7 @@ import pathlib
 
 import pytest
 
-TITAN = pathlib.Path(__file__).resolve().parents[2] / "titan"
+TITAN = pathlib.Path(__file__).resolve().parents[2] / "coldops"
 
 
 def _calls_in(tree: ast.AST) -> set[str]:

@@ -1,5 +1,5 @@
 /**
- * Typed client for the Titan-OS API.
+ * Typed client for the ColdOps API.
  *
  * Replaces the pre-0.2 `demoMode.ts`, which served hardcoded fabrications
  * ("Acme Corp ($150k ARR Potential)") indistinguishably from real data. Every
@@ -516,7 +516,7 @@ export interface Meeting {
   lead_id: string;
   organization_name: string | null;
   status: string;
-  /** Null on every meeting Titan opens: a reply is never parsed for a time. */
+  /** Null on every meeting ColdOps opens: a reply is never parsed for a time. */
   scheduled_at: string | null;
   duration_minutes: number | null;
   location_or_link: string | null;

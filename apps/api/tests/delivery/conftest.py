@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 import pytest
 import pytest_asyncio
-from titan.config import OperatingMode, Settings
-from titan.db.enums import (
+from coldops.config import OperatingMode, Settings
+from coldops.db.enums import (
     CampaignStatus,
     ContactSource,
     DraftStatus,
@@ -24,7 +24,7 @@ from titan.db.enums import (
     VerificationStatus,
     WorkspaceRole,
 )
-from titan.db.models import (
+from coldops.db.models import (
     Campaign,
     CampaignPolicy,
     Contact,

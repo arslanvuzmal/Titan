@@ -20,8 +20,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from titan.activities.vitals import ALL_VITALS_ACTIVITIES, ping_watchdog
-from titan.workflows.types import PingWatchdogInput
+from coldops.activities.vitals import ALL_VITALS_ACTIVITIES, ping_watchdog
+from coldops.workflows.types import PingWatchdogInput
 
 pytestmark = pytest.mark.asyncio
 
@@ -42,7 +42,7 @@ class _Pinger:
 @pytest.fixture
 def pinger(monkeypatch) -> _Pinger:
     stub = _Pinger()
-    monkeypatch.setattr("titan.activities.daily_report.healthcheck_pinger", stub)
+    monkeypatch.setattr("coldops.activities.daily_report.healthcheck_pinger", stub)
     return stub
 
 
@@ -53,11 +53,11 @@ def _url(monkeypatch, value: str | None) -> None:
     place -- which is the right design and simply means the seam is the
     accessor rather than the object.
     """
-    from titan.config import get_settings
+    from coldops.config import get_settings
 
     real = get_settings()
     stub = SimpleNamespace(**{**real.model_dump(), "healthcheck_ping_url": value})
-    monkeypatch.setattr("titan.activities.vitals.get_settings", lambda: stub)
+    monkeypatch.setattr("coldops.activities.vitals.get_settings", lambda: stub)
 
 
 async def test_it_pings_when_a_url_is_configured(monkeypatch, pinger) -> None:
@@ -106,7 +106,7 @@ async def test_an_unreachable_watchdog_never_raises(monkeypatch) -> None:
     """
     _url(monkeypatch, URL)
     monkeypatch.setattr(
-        "titan.activities.daily_report.healthcheck_pinger",
+        "coldops.activities.daily_report.healthcheck_pinger",
         _Pinger(fails=OSError("connection refused")),
     )
 
@@ -130,7 +130,7 @@ async def test_a_failed_ping_is_distinguishable_from_an_unconfigured_one(
 
     _url(monkeypatch, URL)
     monkeypatch.setattr(
-        "titan.activities.daily_report.healthcheck_pinger",
+        "coldops.activities.daily_report.healthcheck_pinger",
         _Pinger(fails=TimeoutError("timed out")),
     )
     broken = await ping_watchdog(PingWatchdogInput())

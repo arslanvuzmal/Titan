@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.delivery.day_digest import compose, day_is_over
-from titan.delivery.day_report import DayReport, Deferral, MailboxDay
+from coldops.delivery.day_digest import compose, day_is_over
+from coldops.delivery.day_report import DayReport, Deferral, MailboxDay
 
 NOON = dt.datetime(2026, 9, 7, 12, 0, tzinfo=dt.UTC)
 LATE = dt.datetime(2026, 9, 7, 23, 30, tzinfo=dt.UTC)
@@ -213,7 +213,7 @@ def test_an_early_morning_zero_is_not_the_same_as_a_broken_day() -> None:
     all day. The panel exists precisely so those two are told apart, and
     printing a bare number made them identical inside the panel itself.
     """
-    from titan.delivery.day_digest import day_state
+    from coldops.delivery.day_digest import day_state
 
     quiet_morning = report(sent=0, as_of=dt.datetime(2026, 9, 8, 6, 30, tzinfo=dt.UTC))
     quiet_evening = report(sent=0, as_of=dt.datetime(2026, 9, 8, 18, 0, tzinfo=dt.UTC))
@@ -226,7 +226,7 @@ def test_an_early_morning_zero_is_not_the_same_as_a_broken_day() -> None:
 def test_a_day_that_is_sending_says_so_rather_than_counting() -> None:
     sending = report(sent=46, as_of=dt.datetime(2026, 9, 8, 9, 0, tzinfo=dt.UTC))
 
-    from titan.delivery.day_digest import day_state
+    from coldops.delivery.day_digest import day_state
 
     assert "sending" in day_state(sending).lower()
 
@@ -237,7 +237,7 @@ def test_a_spent_day_is_finished_not_stalled() -> None:
     Every mailbox at its cap is the system working, and calling it "nothing
     sent" would raise an alarm on the best possible day.
     """
-    from titan.delivery.day_digest import day_state
+    from coldops.delivery.day_digest import day_state
 
     spent = report(
         sent=25,

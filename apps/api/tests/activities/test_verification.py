@@ -13,13 +13,13 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from coldops.activities.verification import verify_sender_identities
+from coldops.db.models import SenderIdentity
+from coldops.db.models.ops import Task
+from coldops.db.session import get_sessionmaker
+from coldops.intelligence.sender_auth import DomainAuth
+from coldops.workflows.types import VerifySendersInput
 from sqlalchemy import select
-from titan.activities.verification import verify_sender_identities
-from titan.db.models import SenderIdentity
-from titan.db.models.ops import Task
-from titan.db.session import get_sessionmaker
-from titan.intelligence.sender_auth import DomainAuth
-from titan.workflows.types import VerifySendersInput
 
 pytestmark = pytest.mark.asyncio
 
@@ -60,7 +60,7 @@ async def seed_sender(
             workspace_id=workspace_id,
             label=f"sender-{tag}",
             from_email=f"{tag}@{domain}",
-            from_name="Titan",
+            from_name="ColdOps",
             reply_to_email=f"{tag}@{domain}",
             sending_domain=domain,
             domain_verified=verified,
@@ -81,8 +81,8 @@ async def run(workspace_id: uuid.UUID, results: dict[str, DomainAuth]):
     def fake(domain: str, **_):
         return results[domain]
 
-    with patch("titan.activities.verification.check_domain_auth", side_effect=fake):
-        with patch("titan.activities.verification.activity") as fake_activity:
+    with patch("coldops.activities.verification.check_domain_auth", side_effect=fake):
+        with patch("coldops.activities.verification.activity") as fake_activity:
             fake_activity.heartbeat = lambda *a, **k: None
             return await verify_sender_identities(
                 VerifySendersInput(workspace_id=str(workspace_id))
@@ -246,8 +246,8 @@ async def test_identities_sharing_a_domain_cost_one_lookup(db_session, workspace
         return auth("shared.test")
 
     with (
-        patch("titan.activities.verification.check_domain_auth", side_effect=counting),
-        patch("titan.activities.verification.activity") as fake_activity,
+        patch("coldops.activities.verification.check_domain_auth", side_effect=counting),
+        patch("coldops.activities.verification.activity") as fake_activity,
     ):
         fake_activity.heartbeat = lambda *a, **k: None
         result = await verify_sender_identities(

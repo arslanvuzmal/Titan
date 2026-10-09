@@ -20,10 +20,10 @@ import uuid
 import httpx
 import pytest
 import pytest_asyncio
+from coldops.db.enums import MessageState
+from coldops.db.models import Message, ProviderEvent
+from coldops.db.session import get_sessionmaker
 from sqlalchemy import select
-from titan.db.enums import MessageState
-from titan.db.models import Message, ProviderEvent
-from titan.db.session import get_sessionmaker
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,14 +41,14 @@ async def client(monkeypatch, database_available: bool):
     import os
 
     if not database_available:
-        pytest.skip("integration database unavailable (set TITAN_TEST_DATABASE_URL)")
+        pytest.skip("integration database unavailable (set COLDOPS_TEST_DATABASE_URL)")
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    monkeypatch.setenv("TITAN_RESEND_WEBHOOK_SECRET", WEBHOOK_SECRET)
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    monkeypatch.setenv("COLDOPS_RESEND_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -63,12 +63,12 @@ async def unconfigured_client(monkeypatch):
     """The same app with no webhook secret. Must fail closed."""
     import os
 
-    os.environ.setdefault("TITAN_LOCAL_JWT_SECRET", "test-secret-not-for-production")
-    monkeypatch.delenv("TITAN_RESEND_WEBHOOK_SECRET", raising=False)
-    from titan.config import get_settings
+    os.environ.setdefault("COLDOPS_LOCAL_JWT_SECRET", "test-secret-not-for-production")
+    monkeypatch.delenv("COLDOPS_RESEND_WEBHOOK_SECRET", raising=False)
+    from coldops.config import get_settings
 
     get_settings.cache_clear()
-    from titan.api.main import app
+    from coldops.api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
@@ -242,14 +242,14 @@ async def seed_sent_message(workspace_id: uuid.UUID, *, provider_message_id: str
     approved. A fixture that skipped it would be testing a message shape the
     database will not hold.
     """
-    from titan.db.enums import (
+    from coldops.db.enums import (
         CampaignStatus,
         ContactSource,
         DraftStatus,
         Industry,
         LeadStatus,
     )
-    from titan.db.models import (
+    from coldops.db.models import (
         Campaign,
         Contact,
         ContactChannel,
@@ -266,7 +266,7 @@ async def seed_sent_message(workspace_id: uuid.UUID, *, provider_message_id: str
             workspace_id=workspace_id,
             label="primary",
             from_email="sender@titan-fixture.test",
-            from_name="Titan",
+            from_name="ColdOps",
             reply_to_email="sender@titan-fixture.test",
             sending_domain="titan-fixture.test",
             # Recent on purpose: authorization_errors() expires a verification
@@ -370,7 +370,7 @@ async def test_a_complaint_marks_the_message_and_suppresses_the_address(
     so the weekly report's complaint rate was 0.00% by construction -- against
     a Gmail ceiling of 0.30%.
     """
-    from titan.db.models.compliance import SuppressionEntry
+    from coldops.db.models.compliance import SuppressionEntry
 
     recipient = await seed_sent_message(workspace, provider_message_id="resend-cx-1")
     body = event(

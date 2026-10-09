@@ -10,7 +10,7 @@ The payloads below are the real ones from the live account.
 
 from __future__ import annotations
 
-from titan.delivery.smartlead_replies import (
+from coldops.delivery.smartlead_replies import (
     SmartleadReply,
     leads_with_replies,
     replies_from_history,
@@ -173,7 +173,7 @@ def test_only_the_leads_that_answered_are_followed_up() -> None:
 
 
 def test_addresses_are_normalised() -> None:
-    """They are matched against Titan's own normalised column."""
+    """They are matched against ColdOps's own normalised column."""
     rows = [
         {"lead_email": "  Stacey@Olliers.COM ", "reply_time": "2026-08-17T08:24:39.000Z"}
     ]

@@ -6,7 +6,7 @@
  * State comes from provider webhooks, collapsed so a duplicate delivery
  * notification cannot advance a message twice and a late "sent" cannot
  * overwrite a recorded bounce. What is shown here is what the provider
- * actually reported, not what Titan hoped would happen.
+ * actually reported, not what ColdOps hoped would happen.
  */
 
 import React from 'react';

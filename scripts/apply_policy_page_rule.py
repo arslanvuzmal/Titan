@@ -22,10 +22,10 @@ import sys
 
 from sqlalchemy import select, update
 
-from titan.db.enums import verification_permits_sending
-from titan.db.models import ContactChannel, ContactVerification, Workspace
-from titan.db.session import get_sessionmaker, workspace_unit_of_work
-from titan.intelligence.bounce_risk import assess
+from coldops.db.enums import verification_permits_sending
+from coldops.db.models import ContactChannel, ContactVerification, Workspace
+from coldops.db.session import get_sessionmaker, workspace_unit_of_work
+from coldops.intelligence.bounce_risk import assess
 
 
 async def main() -> int:

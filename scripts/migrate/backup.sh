@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything the new host needs, in one file.
 #
-# Run this on the machine Titan is running on now. It produces a single tarball
+# Run this on the machine ColdOps is running on now. It produces a single tarball
 # containing the database, the secrets, and a manifest saying exactly what was
 # captured and from which commit.
 #
@@ -24,7 +24,7 @@ DB_NAME="${TITAN_DB_NAME:-titan}"
 
 say() { printf '  %s\n' "$*"; }
 
-echo "Titan migration backup"
+echo "ColdOps migration backup"
 echo "  repo   : ${REPO_ROOT}"
 echo "  staging: ${OUT_DIR}"
 echo

@@ -12,9 +12,9 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from titan.intelligence.composer import ComposedMessage
-from titan.intelligence.message_validator import PITCH_MAX_WORDS, PITCH_MIN_WORDS
-from titan.intelligence.rewriter import (
+from coldops.intelligence.composer import ComposedMessage
+from coldops.intelligence.message_validator import PITCH_MAX_WORDS, PITCH_MIN_WORDS
+from coldops.intelligence.rewriter import (
     MAX_SENTENCE_GROWTH,
     RewriteRefusal,
     SentenceRewrite,
@@ -307,7 +307,7 @@ class StubGateway:
 @pytest.mark.asyncio
 async def test_a_model_outage_keeps_the_deterministic_text() -> None:
     """A third party being down must not fail a draft."""
-    from titan.intelligence.rewriter import rewrite_message
+    from coldops.intelligence.rewriter import rewrite_message
 
     outcome = await rewrite_message(
         message(),
@@ -333,7 +333,7 @@ async def test_the_outage_is_recorded_with_its_reason() -> None:
     26th and the OpenRouter account had no credit. A diagnostic that cannot
     name the fault is not a diagnostic.
     """
-    from titan.intelligence.rewriter import rewrite_message
+    from coldops.intelligence.rewriter import rewrite_message
 
     outcome = await rewrite_message(
         message(),
@@ -351,7 +351,7 @@ async def test_the_outage_is_recorded_with_its_reason() -> None:
 @pytest.mark.asyncio
 async def test_the_sentence_travels_in_the_untrusted_channel() -> None:
     """It is built from the prospect's page, which can contain instructions."""
-    from titan.intelligence.rewriter import rewrite_message
+    from coldops.intelligence.rewriter import rewrite_message
 
     gateway = StubGateway(["The booking button on harborline.co.uk gives HTTP 404."])
     await rewrite_message(
@@ -369,7 +369,7 @@ async def test_the_sentence_travels_in_the_untrusted_channel() -> None:
 @pytest.mark.asyncio
 async def test_a_model_that_invents_a_metric_is_refused() -> None:
     """The rule the whole module exists for."""
-    from titan.intelligence.rewriter import rewrite_message
+    from coldops.intelligence.rewriter import rewrite_message
 
     gateway = StubGateway(
         [
@@ -406,7 +406,7 @@ def test_a_percentage_of_a_business_outcome_is_prohibited(text: str) -> None:
     'more'/'increase' or preceded by a currency symbol, so a share of bookings
     or leads went through untouched.
     """
-    from titan.intelligence.message_validator import prohibited_content
+    from coldops.intelligence.message_validator import prohibited_content
 
     violation = prohibited_content(text)
 
@@ -423,8 +423,8 @@ def test_a_percentage_of_a_business_outcome_is_prohibited(text: str) -> None:
     ],
 )
 def test_a_measured_page_fact_with_a_number_is_still_allowed(text: str) -> None:
-    """Titan measures page facts. Blocking every percentage would block those."""
-    from titan.intelligence.message_validator import prohibited_content
+    """ColdOps measures page facts. Blocking every percentage would block those."""
+    from coldops.intelligence.message_validator import prohibited_content
 
     assert prohibited_content(text) is None
 
@@ -478,8 +478,8 @@ def test_a_rewrite_carries_every_field_the_composer_set() -> None:
     """
     from dataclasses import fields
 
-    from titan.intelligence.composer import ComposedMessage
-    from titan.intelligence.vernacular import Engine
+    from coldops.intelligence.composer import ComposedMessage
+    from coldops.intelligence.vernacular import Engine
 
     original = ComposedMessage(
         subject="A subject",

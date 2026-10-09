@@ -13,9 +13,9 @@ import datetime as dt
 import zoneinfo
 
 import pytest
-from titan.db.enums import Region
-from titan.policy.engine import DenyCode, evaluate_send
-from titan.policy.schedule import (
+from coldops.db.enums import Region
+from coldops.policy.engine import DenyCode, evaluate_send
+from coldops.policy.schedule import (
     MONDAY_TO_FRIDAY,
     REGION_SEND_DAYS,
     REGION_TIMEZONES,
@@ -86,8 +86,8 @@ def test_the_end_hour_is_exclusive() -> None:
 
 def test_a_refusal_here_is_temporary_not_fatal() -> None:
     """The message waits for Monday; it is not thrown away."""
-    from titan.delivery.outbox_worker import OutboxWorker
-    from titan.delivery.providers.mock import MockEmailProvider
+    from coldops.delivery.outbox_worker import OutboxWorker
+    from coldops.delivery.providers.mock import MockEmailProvider
 
     decision = evaluate_send(windowed(now=SATURDAY_NOON_UTC))
     worker = OutboxWorker(MockEmailProvider())

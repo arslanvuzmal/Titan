@@ -1,7 +1,7 @@
 /**
  * SSRF guard, worker-side.
  *
- * This mirrors `titan/security/url_guard.py`. Both exist deliberately: the
+ * This mirrors `coldops/security/url_guard.py`. Both exist deliberately: the
  * control plane vets the seed URL before dispatch, and the worker re-vets every
  * link it discovers and every redirect it follows -- because those URLs come
  * from the page, which is hostile input the control plane never saw.
@@ -60,15 +60,15 @@ export interface UrlVerdict {
  * The fixture server necessarily binds loopback, which the guard exists to
  * refuse. Rather than weaken the guard, this opens a narrow hole that:
  *
- *   - is off unless TITAN_UNSAFE_ALLOW_LOOPBACK is exactly "1";
+ *   - is off unless COLDOPS_UNSAFE_ALLOW_LOOPBACK is exactly "1";
  *   - permits ONLY 127.0.0.1/::1 on the configured fixture port;
  *   - is asserted absent from every production config by an invariant test.
  *
  * It is read once at module load so a later mutation of process.env cannot
  * enable it mid-run.
  */
-const ALLOW_LOOPBACK = process.env.TITAN_UNSAFE_ALLOW_LOOPBACK === '1';
-const LOOPBACK_TEST_PORT = Number(process.env.TITAN_FIXTURE_PORT ?? 8899);
+const ALLOW_LOOPBACK = process.env.COLDOPS_UNSAFE_ALLOW_LOOPBACK === '1';
+const LOOPBACK_TEST_PORT = Number(process.env.COLDOPS_FIXTURE_PORT ?? 8899);
 
 function loopbackFixtureAllowed(host: string, port: number): boolean {
   if (!ALLOW_LOOPBACK) return false;
@@ -170,7 +170,7 @@ export async function validateUrl(
 
   // The fixture hatch is evaluated before the port allowlist because the
   // fixture server necessarily listens on a non-standard port. It still
-  // requires TITAN_UNSAFE_ALLOW_LOOPBACK=1 *and* an exact host/port match.
+  // requires COLDOPS_UNSAFE_ALLOW_LOOPBACK=1 *and* an exact host/port match.
   if (loopbackFixtureAllowed(host, port)) {
     return { allowed: true, url: rawUrl, hostname: host, resolvedIps: ['127.0.0.1'] };
   }

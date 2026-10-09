@@ -12,9 +12,8 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import update
-from titan.activities.reporting import _variant_arms
-from titan.autonomy.experiments import (
+from coldops.activities.reporting import _variant_arms
+from coldops.autonomy.experiments import (
     MIN_OUTCOMES_PER_ARM,
     MIN_SENDS_PER_ARM,
     Arm,
@@ -24,8 +23,9 @@ from titan.autonomy.experiments import (
     compare,
     describe,
 )
-from titan.db.models import Lead, Message, MessageDraft
-from titan.db.session import get_sessionmaker
+from coldops.db.models import Lead, Message, MessageDraft
+from coldops.db.session import get_sessionmaker
+from sqlalchemy import update
 
 from tests.delivery.conftest import build_sendable
 
@@ -278,7 +278,7 @@ async def test_a_draft_with_no_variant_is_excluded(db_session, workspace) -> Non
 
 @pytest.mark.asyncio
 async def test_another_workspace_is_not_counted(db_session, workspace) -> None:
-    from titan.db.models import Workspace
+    from coldops.db.models import Workspace
 
     other = Workspace(name="Other", slug=f"o-{uuid.uuid4().hex[:12]}")
     db_session.add(other)

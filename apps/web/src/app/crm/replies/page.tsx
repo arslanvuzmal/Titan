@@ -4,7 +4,7 @@
  * The reply desk.
  *
  * Every person who wrote back, what they said in their own words, and the
- * answer Titan suggested. Nothing here sends on its own: the operator reads
+ * answer ColdOps suggested. Nothing here sends on its own: the operator reads
  * the reply, edits the answer, and presses send. The answer goes out in the
  * same thread as their message, from the mailbox they wrote to.
  *
@@ -155,7 +155,7 @@ function ReplyCard({ reply, onDone }: { reply: DeskReply; onDone: () => void }) 
           {hasBlank ? (
             <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Fill in the part marked <code className="font-mono">[TODO: …]</code> before
-              sending. Titan never writes a price or a date for you.
+              sending. ColdOps never writes a price or a date for you.
             </p>
           ) : (
             <p className="mt-1 text-xs text-slate-500">

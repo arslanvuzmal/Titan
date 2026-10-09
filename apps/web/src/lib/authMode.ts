@@ -21,7 +21,7 @@ export const CLERK_PUBLISHABLE_KEY =
 /**
  * True when this build authenticates through Clerk.
  *
- * Must match the API's `TITAN_AUTH_MODE`. If they disagree the CRM shows a
+ * Must match the API's `COLDOPS_AUTH_MODE`. If they disagree the CRM shows a
  * sign-in form whose tokens the API will not accept, so keep them in step.
  */
 export const CLERK_ENABLED = CLERK_PUBLISHABLE_KEY.length > 0;

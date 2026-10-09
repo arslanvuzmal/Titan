@@ -21,11 +21,11 @@ import datetime as dt
 import uuid
 
 import pytest
-from titan.activities.research import close_research_run
-from titan.db.enums import LeadStatus
-from titan.db.models import Lead, ResearchRun
-from titan.db.session import workspace_unit_of_work
-from titan.workflows.types import CloseResearchRunInput, ResearchOutcome
+from coldops.activities.research import close_research_run
+from coldops.db.enums import LeadStatus
+from coldops.db.models import Lead, ResearchRun
+from coldops.db.session import workspace_unit_of_work
+from coldops.workflows.types import CloseResearchRunInput, ResearchOutcome
 
 from tests.delivery.conftest import build_sendable
 

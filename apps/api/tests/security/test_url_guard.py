@@ -14,14 +14,14 @@ from __future__ import annotations
 import ipaddress
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
-from titan.security.url_guard import (
+from coldops.security.url_guard import (
     BlockReason,
     is_public_address,
     validate_redirect_chain,
     validate_url,
 )
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 
 def fixed_resolver(*addresses: str):

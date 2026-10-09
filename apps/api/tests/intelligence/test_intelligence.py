@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from titan.contracts.evidence import (
+from coldops.contracts.evidence import (
     CrawlResult,
     CtaObservation,
     FormObservation,
@@ -19,7 +19,7 @@ from titan.contracts.evidence import (
     PageEvidence,
     SecurityHeaders,
 )
-from titan.db.enums import (
+from coldops.db.enums import (
     ContactSource,
     FindingCategory,
     Industry,
@@ -27,20 +27,20 @@ from titan.db.enums import (
     VerificationMethod,
     VerificationStatus,
 )
-from titan.intelligence import contacts as contacts_mod
-from titan.intelligence.findings import (
+from coldops.intelligence import contacts as contacts_mod
+from coldops.intelligence.findings import (
     MIN_PAGES_FOR_ABSENCE,
     DetectedFinding,
     detect_findings,
 )
-from titan.intelligence.message_validator import (
+from coldops.intelligence.message_validator import (
     MessageContext,
     ViolationCode,
     sentences,
     validate_message,
 )
-from titan.intelligence.playbooks import PLAYBOOKS, get_playbook, select_offers
-from titan.intelligence.scoring import Band, ScoringInput, score_lead
+from coldops.intelligence.playbooks import PLAYBOOKS, get_playbook, select_offers
+from coldops.intelligence.scoring import Band, ScoringInput, score_lead
 
 from tests.support import sample_message
 
@@ -877,7 +877,7 @@ def test_undeliverable_service_removes_its_weight() -> None:
     ],
 )
 def test_band_boundaries(total: int, expected: Band) -> None:
-    from titan.intelligence.scoring import band_for
+    from coldops.intelligence.scoring import band_for
 
     assert band_for(total) is expected
 
@@ -1264,8 +1264,8 @@ def test_an_opt_out_address_is_never_an_outreach_target(local: str) -> None:
     somebody who already said no, in the way most likely to be reported.
     Found live: remove@expressestateagency.co.uk was queued twice.
     """
-    from titan.db.enums import ContactSource, VerificationStatus
-    from titan.intelligence.contacts import check_contact_eligibility
+    from coldops.db.enums import ContactSource, VerificationStatus
+    from coldops.intelligence.contacts import check_contact_eligibility
 
     result = check_contact_eligibility(
         source=ContactSource.FIRST_PARTY_WEBSITE,
@@ -1287,8 +1287,8 @@ def test_a_shared_mailbox_is_still_a_legitimate_target(local: str) -> None:
     The opt-out list must not swallow the role list: refusing these would
     remove most small businesses from reach entirely.
     """
-    from titan.db.enums import ContactSource, VerificationStatus
-    from titan.intelligence.contacts import check_contact_eligibility
+    from coldops.db.enums import ContactSource, VerificationStatus
+    from coldops.intelligence.contacts import check_contact_eligibility
 
     result = check_contact_eligibility(
         source=ContactSource.FIRST_PARTY_WEBSITE,
@@ -1466,7 +1466,7 @@ def test_a_403_is_not_a_broken_link() -> None:
 
 
 def test_a_429_is_our_own_crawl_rate() -> None:
-    """The clearest case of all. Being rate-limited is a fact about Titan's
+    """The clearest case of all. Being rate-limited is a fact about ColdOps's
     footprint on their server, not about their website."""
     assert "broken_internal_link" not in _statuses_flagged(429)
 

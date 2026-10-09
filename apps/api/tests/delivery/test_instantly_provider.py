@@ -3,12 +3,12 @@
 Instantly is campaign-shaped like Smartlead: there is no transactional send, so
 ``send()`` hands one already-authorized message to a dedicated single-step
 campaign. That makes the step count the load-bearing safety property. A campaign
-with three steps sends two messages Titan never drafted, never validated against
+with three steps sends two messages ColdOps never drafted, never validated against
 evidence and never authorized -- silently, outside every gate in this
 repository.
 
 Nothing here talks to Instantly. There is no account yet, and the request field
-names are unconfirmed against a live key; these prove the behaviour Titan
+names are unconfirmed against a live key; these prove the behaviour ColdOps
 controls, which is what it refuses and how it fails.
 """
 
@@ -18,20 +18,20 @@ import hashlib
 import hmac
 
 import pytest
-from titan.db.enums import MessageState
-from titan.delivery.providers.base import (
+from coldops.db.enums import MessageState
+from coldops.delivery.providers.base import (
     EmailProvider,
     OutboundEmail,
     SendErrorKind,
     WebhookVerificationError,
 )
-from titan.delivery.providers.instantly import (
+from coldops.delivery.providers.instantly import (
     BODY_FIELD,
     SUBJECT_FIELD,
     InstantlyProvider,
     _sequence_step_count,
 )
-from titan.providers.instantly import InstantlyError
+from coldops.providers.instantly import InstantlyError
 
 pytestmark = pytest.mark.asyncio
 
@@ -104,7 +104,7 @@ async def test_a_single_step_campaign_is_accepted() -> None:
 
 async def test_a_multi_step_campaign_is_refused() -> None:
     """Planted violation: accept any step count and Instantly sends two
-    messages Titan never wrote, to a stranger, outside every gate here."""
+    messages ColdOps never wrote, to a stranger, outside every gate here."""
     p = provider(FakeClient(campaign=_steps(3)))
 
     ok, detail = await p.verify_campaign_shape()
@@ -126,7 +126,7 @@ async def test_an_unreadable_shape_is_refused_not_assumed() -> None:
     fails.
 
     ``None`` is not zero and is not one. A campaign whose shape could not be
-    determined might send three messages Titan never wrote, and the honest
+    determined might send three messages ColdOps never wrote, and the honest
     answer is to refuse rather than to assume the convenient one.
     """
     ok, detail = await provider(
@@ -190,7 +190,7 @@ async def test_acceptance_without_an_id_is_not_acceptance() -> None:
 async def test_a_rejected_key_is_a_configuration_failure_not_a_retry() -> None:
     """Retrying cannot fix a credential, and an expired plan looks identical
     from here. Retrying either just burns the queue."""
-    from titan.providers.instantly import InstantlyAuthError
+    from coldops.providers.instantly import InstantlyAuthError
 
     client = FakeClient()
     client.raise_on_create = InstantlyAuthError("Plan expired!")

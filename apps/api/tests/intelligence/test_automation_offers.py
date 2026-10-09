@@ -14,9 +14,9 @@ ended `no_offer_matching_the_evidence`.
 from __future__ import annotations
 
 import pytest
-from titan.activities.pipeline import _WORTH_OPENING_WITH, lead_rank
-from titan.db.enums import Industry
-from titan.intelligence.playbooks import PLAYBOOKS, select_offers
+from coldops.activities.pipeline import _WORTH_OPENING_WITH, lead_rank
+from coldops.db.enums import Industry
+from coldops.intelligence.playbooks import PLAYBOOKS, select_offers
 
 #: The industries carrying live campaigns. These must be complete.
 CAMPAIGN_INDUSTRIES = (Industry.DENTIST, Industry.MED_SPA, Industry.LAW_FIRM)

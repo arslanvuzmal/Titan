@@ -9,8 +9,8 @@ Los Angeles recipient at midnight.
 from __future__ import annotations
 
 import pytest
-from titan.db.enums import Region
-from titan.outreach.smartlead_markets import (
+from coldops.db.enums import Region
+from coldops.outreach.smartlead_markets import (
     MARKETS,
     MIN_NEW_LEADS_PER_DAY,
     MarketSchedule,
@@ -21,7 +21,7 @@ from titan.outreach.smartlead_markets import (
     schedule_for,
     smartlead_weekday,
 )
-from titan.policy.schedule import REGION_WORKING_HOURS
+from coldops.policy.schedule import REGION_WORKING_HOURS
 
 # ------------------------------------------------------------- the day numbering
 
@@ -29,7 +29,7 @@ from titan.policy.schedule import REGION_WORKING_HOURS
 def test_monday_to_friday_survives_the_translation() -> None:
     """The failure this function exists to prevent.
 
-    Titan counts Monday as 0; Smartlead counts Sunday as 0. Handing one to the
+    ColdOps counts Monday as 0; Smartlead counts Sunday as 0. Handing one to the
     other unchanged shifts the whole working week by a day -- mail on Sunday,
     silence on Friday -- and every field involved is a plausible small integer,
     so nothing rejects it.
@@ -40,7 +40,7 @@ def test_monday_to_friday_survives_the_translation() -> None:
 
 
 def test_the_gulf_working_week_survives_it_too() -> None:
-    """Sunday to Thursday, which is 6,0,1,2,3 in Titan's numbering and 0,1,2,3,4
+    """Sunday to Thursday, which is 6,0,1,2,3 in ColdOps's numbering and 0,1,2,3,4
     in Smartlead's. The two are easy to mistake for each other, and the mistake
     is invisible in either system."""
     gulf = schedule_for(Region.MIDDLE_EAST)
@@ -78,7 +78,7 @@ def test_every_market_gets_its_own_clock() -> None:
 
 
 def test_the_schedule_is_the_working_day_not_titans_send_window() -> None:
-    """Titan opens an hour before work starts, deliberately. Smartlead is a
+    """ColdOps opens an hour before work starts, deliberately. Smartlead is a
     second sender with its own bounds, and widening both by an hour compounds
     into two hours before anybody is at their desk."""
     for schedule in all_schedules():
@@ -107,15 +107,15 @@ def test_a_market_with_no_representative_clock_is_refused() -> None:
 def test_campaign_names_are_distinct_and_readable() -> None:
     """The operator picks a campaign out of this list by eye.
 
-    Title-casing the enum yields "Titan-OS - Uk" and "Titan-OS - Usa", which is
+    Title-casing the enum yields "ColdOps - Uk" and "ColdOps - Usa", which is
     the kind of small wrong that reads as machine output.
     """
     names = [campaign_name(region) for region in MARKETS]
 
     assert len(set(names)) == len(names)
-    assert campaign_name(Region.MIDDLE_EAST) == "Titan-OS - Middle East"
-    assert campaign_name(Region.UK) == "Titan-OS - UK"
-    assert campaign_name(Region.USA) == "Titan-OS - USA"
+    assert campaign_name(Region.MIDDLE_EAST) == "ColdOps - Middle East"
+    assert campaign_name(Region.UK) == "ColdOps - UK"
+    assert campaign_name(Region.USA) == "ColdOps - USA"
 
 
 def test_a_market_outside_the_plan_has_no_name() -> None:
@@ -142,7 +142,7 @@ def test_the_request_body_carries_every_field_smartlead_needs() -> None:
 
 
 def test_capacity_is_what_the_account_permits_added_up() -> None:
-    """Read from Smartlead, not configured in Titan. A second copy of somebody
+    """Read from Smartlead, not configured in ColdOps. A second copy of somebody
     else's setting is wrong the first time they change it in their own UI."""
     boxes = [
         {"id": 1, "from_email": "sales@x.com", "message_per_day": 50},
@@ -153,7 +153,7 @@ def test_capacity_is_what_the_account_permits_added_up() -> None:
 
 
 def test_capacity_excludes_the_mailbox_outreach_may_not_use() -> None:
-    """Capacity Titan is not allowed to spend is not capacity.
+    """Capacity ColdOps is not allowed to spend is not capacity.
 
     Counting ``projects@`` would let a campaign be configured for sixty more
     messages a day than it can actually send, and the shortfall would show up
@@ -227,7 +227,10 @@ def test_the_carrier_settings_use_the_write_vocabulary() -> None:
     asymmetry in this API, after max_new_leads_per_day and delay_in_days. It is
     pinned here because nothing about the name suggests which half it is.
     """
-    from titan.outreach.smartlead_markets import CARRIER_SETTINGS, TRACK_SETTINGS_AS_READ
+    from coldops.outreach.smartlead_markets import (
+        CARRIER_SETTINGS,
+        TRACK_SETTINGS_AS_READ,
+    )
 
     assert CARRIER_SETTINGS["track_settings"] == [
         "DONT_TRACK_EMAIL_OPEN",
@@ -243,7 +246,7 @@ def test_tracking_is_off_and_the_body_is_plain_text() -> None:
     which filters weigh, for an open rate that Apple Mail Privacy Protection has
     made unreadable anyway.
     """
-    from titan.outreach.smartlead_markets import CARRIER_SETTINGS
+    from coldops.outreach.smartlead_markets import CARRIER_SETTINGS
 
     assert CARRIER_SETTINGS["send_as_plain_text"] is True
     assert len(CARRIER_SETTINGS["track_settings"]) == 2
@@ -252,7 +255,7 @@ def test_tracking_is_off_and_the_body_is_plain_text() -> None:
 def test_the_campaign_offers_the_opt_out_the_message_promises() -> None:
     """The composed body says to reply STOP. A carrier campaign with no
     unsubscribe text makes that sentence a lie."""
-    from titan.outreach.smartlead_markets import CARRIER_SETTINGS
+    from coldops.outreach.smartlead_markets import CARRIER_SETTINGS
 
     assert "STOP" in CARRIER_SETTINGS["unsubscribe_text"]
     assert CARRIER_SETTINGS["stop_lead_settings"] == "REPLY_TO_AN_EMAIL"
@@ -260,18 +263,18 @@ def test_the_campaign_offers_the_opt_out_the_message_promises() -> None:
 
 # ==========================================================================
 # The carrier holds one step, because it may only ever send one authorized
-# message. Titan's own cadence is a separate thing and still has four.
+# message. ColdOps's own cadence is a separate thing and still has four.
 # ==========================================================================
 def test_the_carrier_sequence_is_exactly_one_step() -> None:
     """Planted violation: add a second step and this fails.
 
     A carrier holding four steps sends steps two, three and four itself, on its
     own timer, from whatever merge fields happen to be set -- with no draft, no
-    validation and no approval behind any of them. Titan's carrier check
+    validation and no approval behind any of them. ColdOps's carrier check
     refuses such a campaign, and that refusal is what stopped ``sales@``
     sending anything at all: 46 failed, 43 queued, zero delivered.
     """
-    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+    from coldops.outreach.smartlead_markets import SEQUENCE_STEPS
 
     assert len(SEQUENCE_STEPS) == 1
 
@@ -279,7 +282,7 @@ def test_the_carrier_sequence_is_exactly_one_step() -> None:
 def test_the_one_step_carries_titan_composed_text() -> None:
     """Merge variables, not content. Anything literal here would be a message
     Smartlead wrote and nobody approved."""
-    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+    from coldops.outreach.smartlead_markets import SEQUENCE_STEPS
 
     step = SEQUENCE_STEPS[0]
 
@@ -294,8 +297,8 @@ def test_the_shape_matches_what_the_carrier_check_demands() -> None:
     between them is a campaign that can be created and never sent through."""
     import inspect
 
-    from titan.delivery.providers import smartlead as provider
-    from titan.outreach.smartlead_markets import SEQUENCE_STEPS
+    from coldops.delivery.providers import smartlead as provider
+    from coldops.outreach.smartlead_markets import SEQUENCE_STEPS
 
     check = inspect.getsource(provider.SmartleadProvider.verify_campaign_shape)
 
@@ -307,10 +310,10 @@ def test_titan_keeps_its_own_follow_up_cadence() -> None:
     """Follow-ups did not go away; they moved to where they can be checked.
 
     Reducing the carrier to one step would be a real loss if nothing else
-    followed up, so this pins the fact that Titan still has a four-step cadence
+    followed up, so this pins the fact that ColdOps still has a four-step cadence
     of its own for FollowUpScheduler to drive.
     """
-    from titan.outreach.sequence import STEP_DELAYS_IN_DAYS
+    from coldops.outreach.sequence import STEP_DELAYS_IN_DAYS
 
     assert len(STEP_DELAYS_IN_DAYS) == 4
     assert STEP_DELAYS_IN_DAYS[0] == 0

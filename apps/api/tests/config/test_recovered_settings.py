@@ -1,6 +1,6 @@
 """The settings recovered from the deployed environment.
 
-The deployed service sets seven TITAN_* variables this repository's Settings
+The deployed service sets seven COLDOPS_* variables this repository's Settings
 model did not define. Because `extra="ignore"`, they were read straight past:
 a deploy of this tree would have run with Smartlead silently disabled and no
 error anywhere.
@@ -12,7 +12,7 @@ names are now readable, and that they arrived switched off.
 from __future__ import annotations
 
 import pytest
-from titan.config import Settings
+from coldops.config import Settings
 
 RECOVERED = [
     "owner_title",
@@ -96,11 +96,11 @@ def test_the_real_deployed_environment_boots(monkeypatch: pytest.MonkeyPatch) ->
     which is why this test sets real environment variables.
     """
     monkeypatch.setenv(
-        "TITAN_SMARTLEAD_TEST_RECIPIENTS",
+        "COLDOPS_SMARTLEAD_TEST_RECIPIENTS",
         "arslan@arslanvuzmallone.com,outreach@arslanvuzmallone.com",
     )
-    monkeypatch.setenv("TITAN_SMARTLEAD_PRODUCTION_ENABLED", "true")
-    monkeypatch.setenv("TITAN_SMARTLEAD_SANDBOX_CAMPAIGN_ID", "3770055")
+    monkeypatch.setenv("COLDOPS_SMARTLEAD_PRODUCTION_ENABLED", "true")
+    monkeypatch.setenv("COLDOPS_SMARTLEAD_SANDBOX_CAMPAIGN_ID", "3770055")
 
     settings = Settings()
 

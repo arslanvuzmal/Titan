@@ -62,7 +62,7 @@ because the seed credentials were not on the server.
 
    ```
    ssh -i ~/.ssh/titan_hetzner root@168.119.161.220
-   docker exec -it deploy-api-1 python -m titan.cli oauth-microsoft        --client-id <the client ID> --address <the outlook address>
+   docker exec -it deploy-api-1 python -m coldops.cli oauth-microsoft        --client-id <the client ID> --address <the outlook address>
    ```
 
    It prints a code and **microsoft.com/devicelogin**. Open that page on any

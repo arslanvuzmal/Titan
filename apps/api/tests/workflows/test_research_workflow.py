@@ -16,16 +16,11 @@ import uuid
 from dataclasses import dataclass, field
 
 import pytest
-from temporalio import activity
-from temporalio.client import Client
-from temporalio.contrib.pydantic import pydantic_data_converter
-from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import Worker
-from titan.workflows.research import (
+from coldops.workflows.research import (
     LeadResearchWorkflow,
     research_workflow_id,
 )
-from titan.workflows.types import (
+from coldops.workflows.types import (
     AnalyseActivityInput,
     AnalyseActivityResult,
     ApprovalDecisionSignal,
@@ -34,18 +29,23 @@ from titan.workflows.types import (
     ContactActivityResult,
     CrawlActivityInput,
     CrawlActivityResult,
-    ReadProfileInput,
-    ReadProfileResult,
     DraftActivityInput,
     DraftActivityResult,
     QueueActivityInput,
     QueueActivityResult,
+    ReadProfileInput,
+    ReadProfileResult,
     RecordEventInput,
     ResearchLeadInput,
     ResearchOutcome,
     ScoreActivityInput,
     ScoreActivityResult,
 )
+from temporalio import activity
+from temporalio.client import Client
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Worker
 
 #: A test workflow is time-skipped, so anything past this is a stuck run
 #: rather than a slow one.
@@ -593,7 +593,7 @@ def test_workflow_body_performs_no_io() -> None:
     import pathlib
 
     source = pathlib.Path(
-        pathlib.Path(__file__).resolve().parents[2] / "titan/workflows/research.py"
+        pathlib.Path(__file__).resolve().parents[2] / "coldops/workflows/research.py"
     ).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
@@ -883,7 +883,7 @@ def test_analysis_does_not_close_the_run() -> None:
     """
     import inspect
 
-    from titan.activities import pipeline
+    from coldops.activities import pipeline
 
     src = inspect.getsource(pipeline.analyse_evidence)
     # Scoped to the ResearchRun write. The CrawlRun row in the same function

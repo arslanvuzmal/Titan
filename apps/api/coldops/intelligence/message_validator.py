@@ -1,0 +1,792 @@
+"""Message policy validation.
+
+The last thing standing between a generated draft and a real person's inbox.
+Mission section 12.2 lists what must be rejected; this module implements it and
+returns *every* violation so a reviewer sees the whole picture.
+
+The central rule: every sentence that asserts a fact about the recipient's
+business must map, through ``claim_map``, to a finding backed by evidence. A
+sentence with no such mapping is treated as an unsupported claim and blocks the
+draft -- not because the model is untrustworthy in general, but because a
+confident sentence about a stranger's website is only worth sending if it is
+demonstrably true.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+MAX_SUBJECT_CHARS = 120
+MAX_BODY_CHARS = 2200
+MAX_BODY_WORDS = 380
+MIN_BODY_WORDS = 40
+
+#: The band the four lines have to land in, counted before the signature.
+#:
+#: The whole-body count above is nearly useless as a quality bound: a footer
+#: with an address and an unsubscribe link is forty words on its own, so a body
+#: could pass MIN_BODY_WORDS while saying almost nothing, and a 140-word pitch
+#: with a paragraph of portfolio history passed MAX_BODY_WORDS comfortably.
+#: Both happened. What matters is the length of what the recipient actually has
+#: to read before deciding, and that is the pitch.
+# Widened from 55-90 when the message went from four parts to six, and again
+# to 180-320 when the message had to explain the defect and the repair rather
+# than name them.
+#
+# **This is now the only definition.** It used to be declared here *and* in
+# ``coldops.intelligence.composer``, with a comment on each asking the reader to
+# keep them in step by hand -- and the consequence of them drifting is not
+# subtle: a validator band that disagrees with the composer band refuses
+# everything the composer writes, which is how 628 drafts once failed their own
+# generator's rules. The composer imports these instead, which it can do freely
+# because it already imports ``sentences`` from this module. Two constants that
+# must agree are one constant.
+#
+# **The floor came down to 140 on 10 September**, when the generic-context and
+# upside paragraphs were dropped from the composer. It is still a structural
+# guarantee rather than a style preference -- under it, one of observation,
+# mechanism, consequence, repair, credential or ask has gone missing. Measured
+# over 413 delivered messages the old structure averaged 277 words against a
+# cold-email norm of well under half that, and the two paragraphs removed were
+# 86 of 292 on a representative message.
+#
+# The ceiling deliberately did **not** move. 520 drafts composed under the old
+# structure sit in the queue at around 290 words and this runs at send time, so
+# tightening the ceiling to match the new shape would refuse every one of them.
+PITCH_MIN_WORDS = 140
+PITCH_MAX_WORDS = 320
+
+#: The band for the brief form (``Settings.message_form = "brief"``), which is
+#: what goes out from the cold domains: observation, cost, who I am, ask -- the
+#: mechanism, the repair and the references moved to the evidence page. Across
+#: every issue type and register it composes to 74-112 words. Under 60, a part
+#: is missing; over 120, it is the full form wearing the wrong label.
+BRIEF_PITCH_MIN_WORDS = 60
+BRIEF_PITCH_MAX_WORDS = 120
+
+
+def pitch_band(form: str = "full") -> tuple[int, int]:
+    """The word band a message of this form has to land in, at compose time."""
+    if form == "brief":
+        return BRIEF_PITCH_MIN_WORDS, BRIEF_PITCH_MAX_WORDS
+    return PITCH_MIN_WORDS, PITCH_MAX_WORDS
+
+
+#: What the send gate and the redraft check accept: either form.
+#:
+#: They run on drafts already written, and a switch of form must not refuse
+#: everything queued under the previous one -- the compose-time check above is
+#: the strict one, and it ran when each draft was written. This bound exists to
+#: catch a body mangled after the fact, which lands outside both forms.
+ANY_FORM_BAND = (BRIEF_PITCH_MIN_WORDS, PITCH_MAX_WORDS)
+
+
+class ViolationCode(StrEnum):
+    UNSUPPORTED_CLAIM = "unsupported_claim"
+    MISSING_EVIDENCE = "missing_evidence"
+    FABRICATED_METRIC = "fabricated_metric"
+    INVENTED_NAME = "invented_name"
+    FALSE_RELATIONSHIP = "implies_existing_relationship"
+    WORK_NOT_PERFORMED = "implies_work_already_performed"
+    FALSE_URGENCY = "false_urgency"
+    FEAR_APPEAL = "fear_based_manipulation"
+    EXCESSIVE_PRAISE = "exaggerated_praise"
+    AI_SPAM_LANGUAGE = "ai_spam_language"
+    MULTIPLE_OFFERS = "multiple_unrelated_offers"
+    TOO_LONG = "message_too_long"
+    TOO_SHORT = "message_too_short"
+    PITCH_TOO_LONG = "pitch_too_long"
+    PITCH_TOO_SHORT = "pitch_too_short"
+    UNVERIFIABLE_CLIENTELE = "claims_a_clientele_that_cannot_be_shown"
+    UNCOUNTED_FINDINGS = "claims_findings_that_were_not_counted"
+    SUBJECT_TOO_LONG = "subject_too_long"
+    DECEPTIVE_SUBJECT = "deceptive_subject"
+    MISSING_FOOTER = "missing_required_footer"
+    MISSING_MAILING_ADDRESS = "missing_mailing_address"
+    MISSING_UNSUBSCRIBE = "missing_unsubscribe"
+    MISSING_SENDER_IDENTITY = "missing_sender_identity"
+    WRONG_PORTFOLIO_URL = "wrong_or_missing_portfolio_url"
+    ACRONYM_MANGLED = "acronym_mangled"
+    PLACEHOLDER_LEFT = "unfilled_placeholder"
+    DUPLICATE_RECENT = "duplicate_of_recent_message"
+    FOLLOWUP_ADDS_NOTHING = "followup_adds_no_new_evidence"
+    INJECTION_ECHO = "echoes_untrusted_page_instructions"
+
+
+@dataclass(frozen=True, slots=True)
+class Violation:
+    code: ViolationCode
+    detail: str
+    excerpt: str | None = None
+
+    def __str__(self) -> str:
+        return f"{self.code.value}: {self.detail}"
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationReport:
+    passed: bool
+    violations: tuple[Violation, ...] = ()
+    #: Sentences that made a factual claim and were successfully traced.
+    supported_sentences: tuple[str, ...] = ()
+    word_count: int = 0
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "passed": self.passed,
+            "word_count": self.word_count,
+            "violations": [
+                {"code": v.code.value, "detail": v.detail, "excerpt": v.excerpt}
+                for v in self.violations
+            ],
+            "supported_sentences": list(self.supported_sentences),
+        }
+
+
+@dataclass(slots=True)
+class MessageContext:
+    subject: str
+    body: str
+    #: [{sentence, claim, finding_id, evidence_ids: [...], source_url}]
+    claim_map: list[dict[str, Any]]
+    #: Finding IDs that actually exist and carry >=1 evidence row.
+    evidenced_finding_ids: frozenset[str]
+    sender_name: str
+    portfolio_url: str
+    mailing_address: str | None
+    unsubscribe_present: bool
+    #: Names ColdOps actually knows, so an invented one can be spotted.
+    known_names: frozenset[str] = field(default_factory=frozenset)
+    #: Findings cited by previous messages in this sequence.
+    previously_cited_finding_ids: frozenset[str] = field(default_factory=frozenset)
+    is_followup: bool = False
+    requires_new_evidence: bool = False
+    recent_body_hashes: frozenset[str] = field(default_factory=frozenset)
+    #: Text harvested from the prospect's site. Used to detect a model echoing
+    #: injected instructions back into the message.
+    untrusted_page_text: str = ""
+    #: ``"full"`` or ``"brief"``: which word band the pitch is held to.
+    form: str = "full"
+    #: The lead's evidence page. In the brief form it is the one link, and the
+    #: page itself carries the portfolio -- so it satisfies the link rule.
+    evidence_url: str | None = None
+
+
+# --------------------------------------------------------------------------
+# Detectors
+# --------------------------------------------------------------------------
+
+#: A sentence is treated as making a factual claim about the recipient when it
+#: asserts something observable about their site or business.
+_CLAIM_MARKERS = re.compile(
+    r"\b(your|your's|yours|the)\b.{0,60}\b("
+    r"site|website|homepage|page|form|button|link|booking|checkout|"
+    r"navigation|menu|contact|listing|reviews?|load(?:s|ing)?|speed|"
+    r"mobile|images?|cta"
+    r")\b",
+    re.IGNORECASE,
+)
+
+#: Numbers presented as measured outcomes. ColdOps measures page facts, not
+#: business results, so a revenue/conversion figure is fabricated by definition.
+_METRIC_PATTERNS = (
+    re.compile(
+        r"\b\d{1,3}%\s*(?:more|increase|uplift|boost|growth|conversion|revenue)", re.I
+    ),
+    re.compile(
+        r"\b(?:increase|boost|grow|double|triple)\w*\s+(?:your\s+)?\w*\s*(?:revenue|sales|leads|bookings|conversions?)\s+by\s+\d",
+        re.I,
+    ),
+    re.compile(r"\b(?:losing|lost|missing out on)\s+[$£€]\s?[\d,]+", re.I),
+    re.compile(r"\b[$£€]\s?[\d,]{3,}\s*(?:per|/)\s*(?:month|year|week)", re.I),
+    re.compile(r"\b\d+x\s+(?:more|your)\b", re.I),
+    # A share of a business outcome. The patterns above all require the number
+    # to be followed by "more"/"increase" or preceded by a currency symbol, so
+    # "30% of your bookings" and "costing you 20%" went through untouched --
+    # which is the most natural way to phrase the fabrication, and the one a
+    # model reaches for first. A bare percentage is deliberately still allowed:
+    # ColdOps measures page facts, and "34% of images lack alt text" is one.
+    re.compile(
+        r"\b\d{1,3}%\s+of\s+(?:your\s+|their\s+)?"
+        r"(?:bookings?|revenue|sales|leads?|customers?|enquir\w+|inquir\w+|"
+        r"traffic|conversions?|visitors?|business)",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:costing|losing|cost|lose|loses)\s+(?:you|them)\s+\d{1,3}\s*%", re.I
+    ),
+)
+
+_FALSE_RELATIONSHIP = (
+    re.compile(
+        r"\b(?:as (?:we|I) discussed|per our (?:call|conversation|meeting)|following up on our|great (?:speaking|talking) with you|as promised|circling back on our)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:you (?:signed up|requested|asked for|downloaded))\b", re.I),
+    re.compile(r"\b(?:thanks for (?:reaching out|your enquiry|your interest))\b", re.I),
+)
+
+_WORK_PERFORMED = (
+    re.compile(
+        r"\b(?:I|we)\s+(?:ran|completed|performed|conducted|did)\s+(?:a\s+)?(?:full\s+)?(?:audit|analysis|review|assessment)\s+of\s+your\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:I|we)\s+(?:already\s+)?(?:built|created|designed|fixed|rebuilt|redesigned)\s+(?:you|your)\b",
+        re.I,
+    ),
+    re.compile(r"\battached is your (?:full |complete )?(?:report|audit)\b", re.I),
+)
+
+_FALSE_URGENCY = (
+    re.compile(
+        r"\b(?:act now|urgent|expires? (?:today|tomorrow|in \d)|last chance|final (?:notice|reminder|warning)|only \d+ (?:spots?|places?|slots?) (?:left|remaining)|limited time offer|24 hours only|don'?t miss out)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:this (?:offer|price) (?:ends|expires))\b", re.I),
+)
+
+_FEAR_APPEAL = (
+    re.compile(
+        r"\b(?:you(?:'re| are) losing (?:customers|clients|money|business)|your competitors are (?:already |now )?(?:beating|ahead of|stealing)|before it'?s too late|costing you (?:thousands|customers|clients)|bleeding (?:money|revenue|customers))\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:google will (?:penalise|penalize|drop|derank)|you'?ll (?:be )?(?:left behind|fall behind))\b",
+        re.I,
+    ),
+)
+
+_EXCESSIVE_PRAISE = (
+    re.compile(
+        r"\b(?:absolutely (?:stunning|amazing|incredible)|blown away|(?:truly |simply )?(?:phenomenal|outstanding|world.?class|best.in.class)|I love what you'?(?:ve|re) (?:done|doing)|huge fan of)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:your (?:website|site|brand) is (?:beautiful|gorgeous|stunning|amazing|incredible))\b",
+        re.I,
+    ),
+)
+
+_AI_SPAM = (
+    re.compile(
+        r"\b(?:I hope this (?:email|message) finds you well|I trust this (?:email|message) finds you)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:in today'?s (?:fast.paced|digital|competitive) (?:world|landscape|market))\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:leverage (?:the power of|cutting.edge)|revolutionise your|revolutionize your|game.?changer|synerg(?:y|ies|istic)|unlock (?:the|your) (?:full )?potential)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:as an AI|I am an AI|this (?:email|message) was (?:generated|written) by AI)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:your business could (?:really )?(?:use|benefit from) AI)\b", re.I),
+)
+
+#: A client base gestured at but never named.
+#:
+#: "mostly for firms your size", "usually for teams around your size", "for
+#: firms of this size" -- three phrasings of the same move, all of them sent.
+#: It implies a roster without listing one, which is the weakest possible play:
+#: a stranger who gestures at credentials they will not name has told the reader
+#: exactly how thin the credentials are.
+#:
+#: With no case studies to cite, the credential is the audit itself. Finding a
+#: real fault on somebody's site and offering the rest of the list demonstrates
+#: the capability instead of asserting it, and it cannot be faked.
+_UNVERIFIABLE_CLIENTELE = (
+    re.compile(
+        r"\b(?:firms?|business(?:es)?|clinics?|practices?|compan(?:y|ies)|teams?|"
+        r"gyms?|agenc(?:y|ies)|clients?|others?)\s+(?:of\s+)?"
+        r"(?:around\s+|about\s+)?(?:your|this|that|their)\s+(?:size|scale)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:business(?:es)?|compan(?:y|ies)|firms?|clinics?|practices?|gyms?|"
+        r"agenc(?:y|ies))\s+(?:just\s+)?like\s+(?:yours?|this)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:I|we)(?:'ve| have)\s+(?:helped|worked with)\s+"
+        r"(?:\d+\s+|many\s+|dozens of\s+|hundreds of\s+|lots of\s+|other\s+)?"
+        r"(?:business(?:es)?|compan(?:y|ies)|firms?|clinics?|practices?|gyms?|"
+        r"clients?|agenc(?:y|ies))\b",
+        re.I,
+    ),
+)
+
+#: A count of problems the message did not name.
+#:
+#: Three of the four offer registers used to end "and I noticed a few other
+#: things while I was there" or "there were a couple of others worth a look".
+#: Both assert a number of findings, in the one sentence the claim map does not
+#: check -- and the number was never read from anything. A message says one
+#: thing; if there is a second finding worth citing it goes in the follow-up,
+#: where it gets an evidence row like everything else.
+_UNCOUNTED_FINDINGS = (
+    re.compile(
+        r"\b(?:a\s+few|a\s+couple\s+of|several|a\s+number\s+of|some|"
+        r"various|multiple|other|more)\s+(?:other\s+)?"
+        r"(?:things?|issues?|problems?|faults?|errors?|others?)\b",
+        re.I,
+    ),
+    re.compile(r"\bamong other (?:things|issues|problems)\b", re.I),
+    re.compile(r"\bthe rest of (?:the |what )?(?:issues|problems|list)\b", re.I),
+)
+
+_PLACEHOLDER = re.compile(
+    r"(\{\{[^}]*\}\}|\[(?:FIRST_?NAME|COMPANY|BUSINESS|NAME|CITY|X|INSERT[^\]]*)\]|<<[^>]+>>|TODO:|FIXME:|\bLorem ipsum\b)",
+    re.IGNORECASE,
+)
+
+_INJECTION_ECHO = (
+    re.compile(r"\bignore (?:all )?previous instructions\b", re.I),
+    re.compile(r"\b(?:system prompt|you are now an? (?:unrestricted|new))\b", re.I),
+    re.compile(r"\bskip approval\b", re.I),
+)
+
+#: Acronyms whose casing must survive generation intact (mission 12.1).
+#: Acronyms whose casing must survive generation intact. HTTPS/URL/LCP are
+#: deliberately absent: they appear lowercase inside legitimate links and paths,
+#: so checking them produces false positives on correct messages.
+_ACRONYMS = ("SEO", "CTA", "CRM", "API", "HVAC", "GDPR", "SPF", "DKIM", "DMARC", "ROI")
+
+#: URLs are removed before the acronym check for the same reason.
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def reads_as_recipient_claim(text: str) -> bool:
+    """Whether ``text`` would be read as asserting something about the recipient.
+
+    The detector behind ``UNSUPPORTED_CLAIM``, exposed so that content built
+    *before* a message exists -- a case study written into a registry by hand --
+    can be held to the same rule at the point a human can still fix it. Sharing
+    the compiled pattern rather than restating it is the point: two copies of a
+    rule this load-bearing would diverge on the first edit.
+    """
+    return any(_CLAIM_MARKERS.search(sentence) for sentence in sentences(text))
+
+
+def sentences(text: str) -> list[str]:
+    """Split into sentences, tolerating hard-wrapped lines.
+
+    A naive split on ``\\n`` breaks a wrapped sentence into fragments, none of
+    which then matches its claim_map entry -- which would reject every
+    well-formed message. Paragraph breaks (blank lines) do end a sentence;
+    single newlines inside a paragraph do not.
+    """
+    out: list[str] = []
+    for paragraph in re.split(r"\n\s*\n", text):
+        unwrapped = re.sub(r"[ \t]*\n[ \t]*", " ", paragraph).strip()
+        if not unwrapped:
+            continue
+        out.extend(
+            part.strip() for part in re.split(r"(?<=[.!?])\s+", unwrapped) if part.strip()
+        )
+    return out
+
+
+def _scan(
+    patterns: tuple[re.Pattern[str], ...],
+    text: str,
+    code: ViolationCode,
+    detail: str,
+) -> list[Violation]:
+    out: list[Violation] = []
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            out.append(Violation(code, detail, match.group(0)[:160]))
+            break  # one violation per category is enough to block
+    return out
+
+
+def pitch_of(body: str, sender_name: str) -> str:
+    """What the recipient reads before the signature.
+
+    Split on the sender's own name, which is the first line of every footer
+    this system writes. Falls back to the whole body when the name is absent --
+    a message missing its signature is already a violation, and guessing a
+    boundary here would hide the more important one.
+    """
+    name = (sender_name or "").strip()
+    if not name:
+        return body
+    index = body.find("\n" + name)
+    return body if index < 0 else body[:index]
+
+
+def validate_message(ctx: MessageContext) -> ValidationReport:
+    """Check a draft against every message policy rule."""
+    violations: list[Violation] = []
+    body = ctx.body or ""
+    subject = ctx.subject or ""
+    words = len(body.split())
+
+    # ---- length and shape ------------------------------------------------
+    if len(subject) > MAX_SUBJECT_CHARS:
+        violations.append(
+            Violation(
+                ViolationCode.SUBJECT_TOO_LONG,
+                f"{len(subject)} chars > {MAX_SUBJECT_CHARS}",
+            )
+        )
+    if not subject.strip():
+        violations.append(Violation(ViolationCode.DECEPTIVE_SUBJECT, "subject is empty"))
+    if re.match(r"^\s*(re|fwd?)\s*:", subject, re.I):
+        violations.append(
+            Violation(
+                ViolationCode.DECEPTIVE_SUBJECT,
+                "subject fakes a reply or forward to a conversation that never happened",
+                subject[:80],
+            )
+        )
+    if len(body) > MAX_BODY_CHARS or words > MAX_BODY_WORDS:
+        violations.append(
+            Violation(ViolationCode.TOO_LONG, f"{words} words / {len(body)} chars")
+        )
+    if words < MIN_BODY_WORDS:
+        violations.append(Violation(ViolationCode.TOO_SHORT, f"only {words} words"))
+
+    pitch_words = len(pitch_of(body, ctx.sender_name).split())
+    band_min, band_max = pitch_band(ctx.form)
+    if pitch_words > band_max:
+        violations.append(
+            Violation(
+                ViolationCode.PITCH_TOO_LONG,
+                f"{pitch_words} words before the signature > {band_max}",
+            )
+        )
+    elif pitch_words < band_min:
+        violations.append(
+            Violation(
+                ViolationCode.PITCH_TOO_SHORT,
+                f"{pitch_words} words before the signature < {band_min}",
+            )
+        )
+
+    # ---- required footer elements ----------------------------------------
+    if ctx.sender_name and ctx.sender_name.lower() not in body.lower():
+        violations.append(
+            Violation(
+                ViolationCode.MISSING_SENDER_IDENTITY,
+                f"'{ctx.sender_name}' does not appear",
+            )
+        )
+    evidence_link_carries_it = (
+        ctx.form == "brief" and bool(ctx.evidence_url) and str(ctx.evidence_url) in body
+    )
+    if ctx.portfolio_url not in body and not evidence_link_carries_it:
+        violations.append(
+            Violation(
+                ViolationCode.WRONG_PORTFOLIO_URL,
+                f"expected portfolio link {ctx.portfolio_url}",
+            )
+        )
+    mailing_address = (ctx.mailing_address or "").strip()
+    if not mailing_address:
+        violations.append(
+            Violation(
+                ViolationCode.MISSING_MAILING_ADDRESS,
+                "no physical mailing address configured; required in commercial email",
+            )
+        )
+    elif mailing_address not in body:
+        violations.append(
+            Violation(
+                ViolationCode.MISSING_FOOTER, "mailing address is not present in the body"
+            )
+        )
+    if not ctx.unsubscribe_present:
+        violations.append(
+            Violation(ViolationCode.MISSING_UNSUBSCRIBE, "no unsubscribe mechanism")
+        )
+
+    # ---- prohibited rhetoric ---------------------------------------------
+    violations += _scan(
+        _METRIC_PATTERNS,
+        body,
+        ViolationCode.FABRICATED_METRIC,
+        "quantified business outcome ColdOps cannot have measured",
+    )
+    violations += _scan(
+        _FALSE_RELATIONSHIP,
+        body,
+        ViolationCode.FALSE_RELATIONSHIP,
+        "implies a prior conversation that did not happen",
+    )
+    violations += _scan(
+        _WORK_PERFORMED,
+        body,
+        ViolationCode.WORK_NOT_PERFORMED,
+        "implies work was performed for the recipient",
+    )
+    violations += _scan(
+        _FALSE_URGENCY, body, ViolationCode.FALSE_URGENCY, "manufactured deadline"
+    )
+    violations += _scan(
+        _FEAR_APPEAL, body, ViolationCode.FEAR_APPEAL, "fear-based framing"
+    )
+    violations += _scan(
+        _EXCESSIVE_PRAISE, body, ViolationCode.EXCESSIVE_PRAISE, "exaggerated flattery"
+    )
+    violations += _scan(
+        _AI_SPAM, body, ViolationCode.AI_SPAM_LANGUAGE, "generic AI-outreach phrasing"
+    )
+    violations += _scan(
+        _UNVERIFIABLE_CLIENTELE,
+        body,
+        ViolationCode.UNVERIFIABLE_CLIENTELE,
+        "implies a client base that cannot be named",
+    )
+    violations += _scan(
+        _UNCOUNTED_FINDINGS,
+        body,
+        ViolationCode.UNCOUNTED_FINDINGS,
+        "claims further findings that carry no evidence",
+    )
+    violations += _scan(
+        _INJECTION_ECHO,
+        body,
+        ViolationCode.INJECTION_ECHO,
+        "echoes instructions injected into a crawled page",
+    )
+
+    placeholder = _PLACEHOLDER.search(body) or _PLACEHOLDER.search(subject)
+    if placeholder:
+        violations.append(
+            Violation(
+                ViolationCode.PLACEHOLDER_LEFT,
+                "template placeholder not filled",
+                placeholder.group(0)[:80],
+            )
+        )
+
+    # ---- acronym integrity -------------------------------------------------
+    prose = _URL_RE.sub(" ", body)
+    for acronym in _ACRONYMS:
+        # Flag a lowercase rendering that is not part of a longer word.
+        bad = re.search(rf"(?<![A-Za-z]){acronym.lower()}(?![A-Za-z])", prose)
+        if bad and acronym not in prose:
+            violations.append(
+                Violation(
+                    ViolationCode.ACRONYM_MANGLED,
+                    f"{acronym} written as {bad.group(0)!r}",
+                )
+            )
+
+    # ---- claim traceability ------------------------------------------------
+    supported, claim_violations = _validate_claims(ctx)
+    violations += claim_violations
+
+    # ---- offer focus -------------------------------------------------------
+    distinct_findings = {
+        str(entry.get("finding_id")) for entry in ctx.claim_map if entry.get("finding_id")
+    }
+    if len(distinct_findings) > 3:
+        violations.append(
+            Violation(
+                ViolationCode.MULTIPLE_OFFERS,
+                f"{len(distinct_findings)} separate findings cited; a first message "
+                "should lead with one observation",
+            )
+        )
+
+    # ---- follow-up rules ----------------------------------------------------
+    if ctx.is_followup and ctx.requires_new_evidence:
+        new_findings = distinct_findings - ctx.previously_cited_finding_ids
+        if not new_findings:
+            violations.append(
+                Violation(
+                    ViolationCode.FOLLOWUP_ADDS_NOTHING,
+                    "follow-up cites only findings already used in an earlier message",
+                )
+            )
+
+    # ---- duplicate detection ------------------------------------------------
+    import hashlib
+
+    body_hash = hashlib.sha256(
+        re.sub(r"\s+", " ", body.strip().lower()).encode("utf-8")
+    ).hexdigest()
+    if body_hash in ctx.recent_body_hashes:
+        violations.append(
+            Violation(ViolationCode.DUPLICATE_RECENT, "identical body sent recently")
+        )
+
+    return ValidationReport(
+        passed=not violations,
+        violations=tuple(violations),
+        supported_sentences=tuple(supported),
+        word_count=words,
+    )
+
+
+def _validate_claims(ctx: MessageContext) -> tuple[list[str], list[Violation]]:
+    """Every factual sentence must trace to an evidenced finding."""
+    violations: list[Violation] = []
+    supported: list[str] = []
+
+    mapped: dict[str, dict[str, Any]] = {}
+    for entry in ctx.claim_map:
+        sentence = str(entry.get("sentence", "")).strip()
+        if sentence:
+            mapped[_normalize(sentence)] = entry
+
+    for sentence in sentences(ctx.body):
+        if not _CLAIM_MARKERS.search(sentence):
+            continue  # not a factual claim about the recipient
+        key = _normalize(sentence)
+        claim = mapped.get(key)
+        if claim is None:
+            violations.append(
+                Violation(
+                    ViolationCode.UNSUPPORTED_CLAIM,
+                    "sentence asserts something about the recipient's site but is "
+                    "not present in claim_map",
+                    sentence[:160],
+                )
+            )
+            continue
+
+        finding_id = str(claim.get("finding_id") or "")
+        evidence_ids = [str(e) for e in (claim.get("evidence_ids") or [])]
+        if not finding_id:
+            violations.append(
+                Violation(
+                    ViolationCode.MISSING_EVIDENCE,
+                    "claim has no finding_id",
+                    sentence[:160],
+                )
+            )
+        elif finding_id not in ctx.evidenced_finding_ids:
+            violations.append(
+                Violation(
+                    ViolationCode.MISSING_EVIDENCE,
+                    f"finding {finding_id} does not exist or has no evidence rows",
+                    sentence[:160],
+                )
+            )
+        elif not evidence_ids:
+            violations.append(
+                Violation(
+                    ViolationCode.MISSING_EVIDENCE,
+                    "claim cites no evidence ids",
+                    sentence[:160],
+                )
+            )
+        else:
+            supported.append(sentence)
+
+    # A name ColdOps does not know must not appear in a greeting.
+    # Case-insensitive on the salutation itself: without re.IGNORECASE the
+    # ordinary capitalised "Hi Jonathan," never matched, so an invented name
+    # passed straight through.
+    greeting = re.match(
+        r"^\s*(?:hi|hello|hey|dear)\s+([A-Z][a-z]{1,20})\b", ctx.body, re.IGNORECASE
+    )
+    if greeting:
+        name = greeting.group(1)
+        if ctx.known_names and name not in ctx.known_names:
+            violations.append(
+                Violation(
+                    ViolationCode.INVENTED_NAME,
+                    f"greeting addresses {name!r}, which is not a name ColdOps recorded",
+                    greeting.group(0),
+                )
+            )
+
+    return supported, violations
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower()).rstrip(".!?")
+
+
+__all__ = [
+    "ANY_FORM_BAND",
+    "BRIEF_PITCH_MAX_WORDS",
+    "BRIEF_PITCH_MIN_WORDS",
+    "MAX_BODY_WORDS",
+    "PITCH_MAX_WORDS",
+    "PITCH_MIN_WORDS",
+    "MessageContext",
+    "ValidationReport",
+    "Violation",
+    "ViolationCode",
+    "pitch_band",
+    "pitch_of",
+    # Public so content assembled before a message exists -- the case study
+    # registry -- is held to the same rule at a point a human can fix it.
+    "reads_as_recipient_claim",
+    # Public because the composer builds its claim map with it. Two
+    # near-identical splitters is how a claim map comes to disagree with
+    # the validator reading it.
+    "sentences",
+    "validate_message",
+]
+
+
+#: Pattern groups that describe content no message may contain, whoever wrote
+#: it. Exposed so a caller that produces candidate text -- the model rewriter --
+#: can reject it at the point it is produced rather than discovering it after
+#: assembling a message around it.
+#:
+#: Deliberately a reference to the same tuples validate_message scans, not a
+#: copy. Two lists of banned rhetoric drift, and the copy that drifts is always
+#: the one guarding the newer path.
+PROHIBITED_RHETORIC: tuple[
+    tuple[tuple[re.Pattern[str], ...], ViolationCode, str], ...
+] = (
+    (
+        _METRIC_PATTERNS,
+        ViolationCode.FABRICATED_METRIC,
+        "quantified business outcome ColdOps cannot have measured",
+    ),
+    (
+        _FALSE_RELATIONSHIP,
+        ViolationCode.FALSE_RELATIONSHIP,
+        "implies a prior conversation that did not happen",
+    ),
+    (
+        _WORK_PERFORMED,
+        ViolationCode.WORK_NOT_PERFORMED,
+        "implies work was performed for the recipient",
+    ),
+    (_FALSE_URGENCY, ViolationCode.FALSE_URGENCY, "manufactured deadline"),
+    (_FEAR_APPEAL, ViolationCode.FEAR_APPEAL, "fear-based framing"),
+    (_EXCESSIVE_PRAISE, ViolationCode.EXCESSIVE_PRAISE, "exaggerated flattery"),
+    (_AI_SPAM, ViolationCode.AI_SPAM_LANGUAGE, "generic AI-outreach phrasing"),
+    (
+        _UNVERIFIABLE_CLIENTELE,
+        ViolationCode.UNVERIFIABLE_CLIENTELE,
+        "implies a client base that cannot be named",
+    ),
+    (
+        _UNCOUNTED_FINDINGS,
+        ViolationCode.UNCOUNTED_FINDINGS,
+        "claims further findings that carry no evidence",
+    ),
+)
+
+
+def prohibited_content(text: str) -> Violation | None:
+    """The first prohibited-rhetoric violation in ``text``, if any.
+
+    A cheaper, narrower check than ``validate_message``: it takes a fragment
+    rather than a whole message, so it can judge a single sentence before that
+    sentence is built into anything.
+    """
+    for patterns, code, detail in PROHIBITED_RHETORIC:
+        found = _scan(patterns, text, code, detail)
+        if found:
+            return found[0]
+    return None

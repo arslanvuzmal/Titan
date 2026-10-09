@@ -13,7 +13,7 @@ workspace's. Both are the human's numbers.
 from __future__ import annotations
 
 import pytest
-from titan.autonomy.allocation import (
+from coldops.autonomy.allocation import (
     EXPLORATION_FLOOR,
     HEALTH_WEIGHT,
     MAX_FLOOR_SHARE,
@@ -21,7 +21,7 @@ from titan.autonomy.allocation import (
     allocate,
     explain,
 )
-from titan.autonomy.health import CampaignHealth
+from coldops.autonomy.health import CampaignHealth
 
 H = CampaignHealth
 

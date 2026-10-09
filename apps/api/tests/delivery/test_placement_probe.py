@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.delivery.placement_probe import PlannedProbe, plan_round, rotation_day
-from titan.delivery.seeds import parse_seeds
+from coldops.delivery.placement_probe import PlannedProbe, plan_round, rotation_day
+from coldops.delivery.seeds import parse_seeds
 
 MAILBOXES = [
     "arslan@arslanvuzmallone.com",

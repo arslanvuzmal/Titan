@@ -11,10 +11,10 @@ estate already has, or -- much worse -- creates a campaign that can send.
 
 from __future__ import annotations
 
-from titan.config import OperatingMode
-from titan.db.enums import CampaignStatus
-from titan.intelligence import territories
-from titan.intelligence.expansion import (
+from coldops.config import OperatingMode
+from coldops.db.enums import CampaignStatus
+from coldops.intelligence import territories
+from coldops.intelligence.expansion import (
     MAX_NEW_PER_PASS,
     PRODUCTIVE_NEW_SHARE,
     Exhausted,
@@ -131,7 +131,7 @@ def test_a_new_market_is_never_authorised_to_send() -> None:
     """
     import inspect
 
-    from titan.intelligence import expansion
+    from coldops.intelligence import expansion
 
     source = inspect.getsource(expansion.expand)
 
@@ -152,7 +152,7 @@ def test_new_campaigns_are_active_so_discovery_actually_runs() -> None:
     planned at all, and the whole point is that it starts finding leads."""
     import inspect
 
-    from titan.intelligence import expansion
+    from coldops.intelligence import expansion
 
     assert "CampaignStatus.ACTIVE" in inspect.getsource(expansion.expand)
     assert CampaignStatus.ACTIVE.value == "active"

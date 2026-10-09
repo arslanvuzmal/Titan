@@ -22,7 +22,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from titan.intelligence.case_studies import CaseStudy, load, registry, select
+from coldops.intelligence.case_studies import CaseStudy, load, registry, select
 
 GOOD = {
     "reference": "leeds-dental",

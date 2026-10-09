@@ -220,7 +220,7 @@ export default function CompliancePage() {
                 ))}
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                A guessed address is stored so Titan remembers not to guess it
+                A guessed address is stored so ColdOps remembers not to guess it
                 again — never so that it can be used.
               </p>
             </div>

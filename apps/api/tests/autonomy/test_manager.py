@@ -10,7 +10,7 @@ prevent.
 from __future__ import annotations
 
 import pytest
-from titan.autonomy.actuator import (
+from coldops.autonomy.actuator import (
     MAX_MANAGED_LEAD_SCORE,
     MAX_SCORE_STEP,
     Actuation,
@@ -20,16 +20,16 @@ from titan.autonomy.actuator import (
     effective_min_lead_score,
     evaluate,
 )
-from titan.autonomy.health import (
+from coldops.autonomy.health import (
     SCALING_REPLY_RATE,
     CampaignHealth,
     CampaignWindow,
     classify,
     explain,
 )
-from titan.autonomy.manager import ManagedState, confidence_for, plan
-from titan.db.enums import CampaignStatus
-from titan.delivery.deliverability import MIN_SAMPLE_FOR_RATES, ReputationWindow
+from coldops.autonomy.manager import ManagedState, confidence_for, plan
+from coldops.db.enums import CampaignStatus
+from coldops.delivery.deliverability import MIN_SAMPLE_FOR_RATES, ReputationWindow
 
 BOUNDS = Bounds(configured_daily_limit=40, configured_min_lead_score=70)
 
@@ -267,7 +267,7 @@ def test_volume_is_not_decided_here() -> None:
     """One authority per knob.
 
     How much a campaign sends became a question about every campaign at once as
-    soon as they shared a workspace limit, and titan.autonomy.allocation answers
+    soon as they shared a workspace limit, and coldops.autonomy.allocation answers
     it. Two authorities writing the same column would fight over it every cycle.
     """
     cases = [

@@ -13,16 +13,16 @@ import uuid
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from coldops.activities.discovery import discover_leads
+from coldops.db.enums import CampaignStatus, Industry, LeadStatus, SuppressionReason
+from coldops.db.models import Campaign, CampaignPolicy, Lead, LeadSource, Organization
+from coldops.db.models.lead import OrganizationDomain, OrganizationLocation
+from coldops.db.models.ops import Task
+from coldops.db.session import get_sessionmaker, workspace_unit_of_work
+from coldops.delivery.suppression import suppress
+from coldops.providers.places import DiscoveredBusiness, DiscoveryResult
+from coldops.workflows.types import DiscoverActivityInput
 from sqlalchemy import select
-from titan.activities.discovery import discover_leads
-from titan.db.enums import CampaignStatus, Industry, LeadStatus, SuppressionReason
-from titan.db.models import Campaign, CampaignPolicy, Lead, LeadSource, Organization
-from titan.db.models.lead import OrganizationDomain, OrganizationLocation
-from titan.db.models.ops import Task
-from titan.db.session import get_sessionmaker, workspace_unit_of_work
-from titan.delivery.suppression import suppress
-from titan.providers.places import DiscoveredBusiness, DiscoveryResult
-from titan.workflows.types import DiscoverActivityInput
 
 pytestmark = pytest.mark.asyncio
 
@@ -122,9 +122,9 @@ async def run_discovery(request: DiscoverActivityInput, result: DiscoveryResult)
     below pass for the wrong reason.
     """
     with (
-        patch("titan.activities.discovery.GooglePlacesProvider") as ProviderCls,
-        patch("titan.activities.discovery.get_settings") as get_settings,
-        patch("titan.activities.discovery.activity") as fake_activity,
+        patch("coldops.activities.discovery.GooglePlacesProvider") as ProviderCls,
+        patch("coldops.activities.discovery.get_settings") as get_settings,
+        patch("coldops.activities.discovery.activity") as fake_activity,
     ):
         fake_activity.heartbeat = lambda *a, **k: None
         get_settings.return_value.google_places_api_key = "key"
@@ -482,7 +482,7 @@ async def test_a_search_that_returns_nothing_at_all_does_not_notify(
 
 
 def test_the_thresholds_are_stated_where_they_can_be_argued_with() -> None:
-    from titan.activities.discovery import (
+    from coldops.activities.discovery import (
         EXHAUSTION_WINDOW_RUNS,
         MIN_ADMIT_RATE,
         MIN_RETURNED_TO_JUDGE,
@@ -500,7 +500,7 @@ def test_a_trickle_of_new_records_no_longer_reprieves_a_query() -> None:
     Four per cent. That query is returning the same businesses it returned
     yesterday and costs money every time it is asked.
     """
-    from titan.activities.discovery import MIN_ADMIT_RATE
+    from coldops.activities.discovery import MIN_ADMIT_RATE
 
     returned, admitted = 72, 3
 
@@ -511,7 +511,7 @@ def test_a_trickle_of_new_records_no_longer_reprieves_a_query() -> None:
 def test_genuinely_fresh_ground_is_left_alone() -> None:
     """Edinburgh on the live data: 360 returned, 29 new. Eight per cent, and
     worth asking again."""
-    from titan.activities.discovery import MIN_ADMIT_RATE
+    from coldops.activities.discovery import MIN_ADMIT_RATE
 
     assert 29 / 360 > MIN_ADMIT_RATE
 
@@ -523,7 +523,7 @@ def test_a_thin_window_cannot_retire_a_territory() -> None:
     narrow or a bad minute at Google, not ground worked out -- and retiring on
     it abandons a territory nobody actually searched.
     """
-    from titan.activities.discovery import MIN_RETURNED_TO_JUDGE
+    from coldops.activities.discovery import MIN_RETURNED_TO_JUDGE
 
     assert 4 < MIN_RETURNED_TO_JUDGE
 
@@ -533,7 +533,7 @@ def test_exhaustion_is_computed_from_the_counters_not_stored() -> None:
     refills, and has to be cleared by hand."""
     import inspect
 
-    from titan.activities import discovery
+    from coldops.activities import discovery
 
     source = inspect.getsource(discovery._exhausted_geographies)
 

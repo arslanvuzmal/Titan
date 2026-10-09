@@ -17,16 +17,16 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-from titan.delivery.deliverability import (
+from coldops.delivery.deliverability import (
     ALLOWED_ATTACHMENT_TYPES,
     MAX_ATTACHMENT_BYTES,
     MAX_ATTACHMENTS,
     Severity,
     check_attachments,
 )
-from titan.delivery.outbox_worker import ONE_PAGER_NOTE, with_one_pager
-from titan.delivery.providers.base import Attachment, OutboundEmail
-from titan.delivery.providers.smtp import SmtpProvider
+from coldops.delivery.outbox_worker import ONE_PAGER_NOTE, with_one_pager
+from coldops.delivery.providers.base import Attachment, OutboundEmail
+from coldops.delivery.providers.smtp import SmtpProvider
 
 BODY = (
     "Hi Sarah,\n\n"

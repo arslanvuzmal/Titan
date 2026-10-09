@@ -3,7 +3,7 @@
 /**
  * Lead workspace.
  *
- * Everything Titan knows about one business, arranged so a reviewer can answer
+ * Everything ColdOps knows about one business, arranged so a reviewer can answer
  * the only question that matters before a message goes out: *is this claim
  * true, and can I see why it is true?*
  *
@@ -224,7 +224,7 @@ function ContactsTab({ leadId }: { leadId: string }) {
         </div>
       ))}
       <p className="text-xs text-slate-500">
-        Addresses Titan guessed from a pattern are shown so you can see what was
+        Addresses ColdOps guessed from a pattern are shown so you can see what was
         found, and are never contactable — no evidence links a guessed address
         to a real mailbox.
       </p>
@@ -487,7 +487,7 @@ function BusinessTab({ organizationId }: { organizationId: string }) {
         <Field label="Business status">
           <Value>{data.business_status}</Value>
         </Field>
-        <Field label="Google Place ID" hint="The only Places field Titan may cache indefinitely">
+        <Field label="Google Place ID" hint="The only Places field ColdOps may cache indefinitely">
           <Value mono>{data.google_place_id}</Value>
         </Field>
       </dl>

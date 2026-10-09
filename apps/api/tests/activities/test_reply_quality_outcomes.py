@@ -18,11 +18,11 @@ import datetime as dt
 import uuid
 
 import pytest
+from coldops.activities.orchestration import _campaign_outcomes
+from coldops.db.enums import LeadStatus, ReplyClass
+from coldops.db.models import InboundMessage, Lead, ReplyClassification
+from coldops.db.session import workspace_session
 from sqlalchemy import update
-from titan.activities.orchestration import _campaign_outcomes
-from titan.db.enums import LeadStatus, ReplyClass
-from titan.db.models import InboundMessage, Lead, ReplyClassification
-from titan.db.session import workspace_session
 
 from tests.delivery.conftest import build_sendable
 

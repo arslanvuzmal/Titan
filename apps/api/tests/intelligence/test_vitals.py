@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from titan.intelligence.vitals import (
+from coldops.intelligence.vitals import (
     DECLINE_DAYS,
     IDLE_ALARM_HOUR_UTC,
     MIN_RESEARCH_SAMPLE,

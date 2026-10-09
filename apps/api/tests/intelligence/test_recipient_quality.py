@@ -13,7 +13,7 @@ as a property held by the system, and it is the second one that was promised.
 
 One thing this file deliberately does not test, because the codebase
 deliberately does not do it: SMTP-level probing. The phase asks for it;
-`titan.intelligence.mx` refuses it in writing -- asking a stranger's server
+`coldops.intelligence.mx` refuses it in writing -- asking a stranger's server
 whether a stranger's mailbox exists is unreliable and is treated as abuse, and
 it damages the sending reputation the rest of the package exists to protect.
 Invalidity is established from DNS, which is conclusive in the direction that
@@ -22,13 +22,13 @@ matters, and mailbox-level answers are left to a purchased service.
 
 from __future__ import annotations
 
-from titan.db.enums import (
+from coldops.db.enums import (
     SENDABLE_VERIFICATION_STATUSES,
     ContactSource,
     VerificationStatus,
     verification_permits_sending,
 )
-from titan.intelligence.verifier import NullVerifier, build_verifier
+from coldops.intelligence.verifier import NullVerifier, build_verifier
 
 UNTRUSTED = ContactSource.PUBLIC_DIRECTORY
 TRUSTED = ContactSource.FIRST_PARTY_WEBSITE
@@ -133,7 +133,7 @@ def test_the_policy_engine_is_where_the_gate_lives() -> None:
     """
     import inspect
 
-    from titan.policy import engine
+    from coldops.policy import engine
 
     source = inspect.getsource(engine)
 

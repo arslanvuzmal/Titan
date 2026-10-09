@@ -12,7 +12,7 @@ If an unauthorized email send, prompt injection attack, or deliverability anomal
 
 ```bash
 # Set global environment override on API and worker containers
-docker exec titan-api python -c "from titan.config import settings; print(settings.environment)"
+docker exec titan-api python -c "from coldops.config import settings; print(settings.environment)"
 # Set TITAN_OUTBOUND_ENABLED=false across all environment manifests
 ```
 

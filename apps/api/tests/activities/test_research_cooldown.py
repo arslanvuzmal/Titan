@@ -16,8 +16,8 @@ from __future__ import annotations
 import datetime as dt
 import inspect
 
-from titan.activities import orchestration
-from titan.db.enums import LeadStatus
+from coldops.activities import orchestration
+from coldops.db.enums import LeadStatus
 
 
 def test_a_cooldown_exists_and_is_under_a_day() -> None:

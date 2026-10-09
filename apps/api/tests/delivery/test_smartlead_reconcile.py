@@ -1,7 +1,7 @@
-"""Giving Smartlead's sends a record in Titan's own model.
+"""Giving Smartlead's sends a record in ColdOps's own model.
 
 The CRM, the bounce escalation and every outcome query read ``messages``. For
-real outreach that table was empty, because Smartlead delivers and Titan never
+real outreach that table was empty, because Smartlead delivers and ColdOps never
 learned it happened -- so a complete, working CRM showed nothing and four real
 bounces could not be counted.
 
@@ -16,16 +16,16 @@ import datetime as dt
 import uuid
 
 import pytest
-from sqlalchemy import select, update
-from titan.db.enums import DraftStatus, MessageState, Region
-from titan.db.models import (
+from coldops.db.enums import DraftStatus, MessageState, Region
+from coldops.db.models import (
     Campaign,
     Lead,
     Message,
     MessageDraft,
     OrganizationLocation,
 )
-from titan.delivery.smartlead_reconcile import dedupe_key, reconcile_send
+from coldops.delivery.smartlead_reconcile import dedupe_key, reconcile_send
+from sqlalchemy import select, update
 
 from tests.delivery.conftest import build_sendable
 
@@ -214,7 +214,7 @@ async def test_the_subject_wins_over_the_step_number(db_session, workspace) -> N
 async def test_an_unknown_sender_falls_back_rather_than_losing_the_send(
     db_session, workspace
 ) -> None:
-    """Smartlead holds mailboxes Titan was never told about.
+    """Smartlead holds mailboxes ColdOps was never told about.
 
     Losing the whole send record over a missing sender row would trade a precise
     gap for a total one.
@@ -230,7 +230,7 @@ async def test_an_unknown_sender_falls_back_rather_than_losing_the_send(
         subject=None,
         sequence_number=1,
         sent_at=SENT_AT,
-        from_email="a-mailbox-titan-never-heard-of@example.test",
+        from_email="a-mailbox-coldops-never-heard-of@example.test",
     )
 
     assert outcome.created is True
@@ -261,7 +261,7 @@ async def test_the_send_is_stamped_in_the_recipients_own_clock(
 ) -> None:
     """The column existed, was indexed, and held nothing that mattered.
 
-    The outbox worker stamps it for Titan's own sends, and everything real went
+    The outbox worker stamps it for ColdOps's own sends, and everything real went
     out through Smartlead -- so time-of-day learning had an index over an empty
     set. The fixture's organisation is in Europe/London.
     """

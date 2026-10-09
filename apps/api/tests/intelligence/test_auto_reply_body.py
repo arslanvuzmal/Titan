@@ -7,13 +7,13 @@ and was classified as a human reply -- which stops outreach to that lead for
 good and counts as an outcome in every rate the system tunes on.
 
 The trap this must not fall into is the opposite error. Per the module's own
-preamble, treating a human as a machine is the worse of the two, because Titan
+preamble, treating a human as a machine is the worse of the two, because ColdOps
 then keeps mailing somebody who answered.
 """
 
 from __future__ import annotations
 
-from titan.intelligence.replies import InboundMessage, ReplyKind, classify_reply
+from coldops.intelligence.replies import InboundMessage, ReplyKind, classify_reply
 
 # The live reply, verbatim from Smartlead.
 LIVE_OUT_OF_OFFICE = (
@@ -45,7 +45,7 @@ def test_a_past_tense_mention_is_a_person() -> None:
     """The error that would matter more.
 
     Somebody apologising for a slow reply is engaging, and reading them as a
-    responder means Titan keeps writing to a lead who already answered.
+    responder means ColdOps keeps writing to a lead who already answered.
     """
     body = (
         "Hi -- sorry for the slow reply, I was on annual leave last week. "

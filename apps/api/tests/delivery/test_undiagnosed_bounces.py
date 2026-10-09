@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import inspect
 
-from titan.activities import delivery_events
-from titan.delivery.bounces import (
+from coldops.activities import delivery_events
+from coldops.delivery.bounces import (
     SOFT_BOUNCES_TO_SUPPRESS,
     UNDIAGNOSED_BOUNCES_TO_SUPPRESS,
     BounceKind,
@@ -63,7 +63,7 @@ def test_it_still_escalates_rather_than_suppressing_at_once() -> None:
 def test_both_kinds_count_toward_the_same_total() -> None:
     """They are all evidence about the same address. Only how many it takes
     depends on what the provider could tell us about the latest one."""
-    import titan.delivery.bounces as bounces
+    import coldops.delivery.bounces as bounces
 
     query = inspect.getsource(bounces._soft_bounce_count)
 
@@ -73,6 +73,6 @@ def test_both_kinds_count_toward_the_same_total() -> None:
 def test_the_hold_message_says_which_kind_it_is() -> None:
     """It is written to ``status_reason`` and is what an operator reads when
     asking why a lead stopped."""
-    source = inspect.getsource(__import__("titan.delivery.bounces", fromlist=["x"]))
+    source = inspect.getsource(__import__("coldops.delivery.bounces", fromlist=["x"]))
 
     assert "undiagnosed" in source

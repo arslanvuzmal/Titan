@@ -7,7 +7,7 @@ indistinguishable failures -- is covered in test_api_security.py.
 from __future__ import annotations
 
 import pytest
-from titan.api.passwords import (
+from coldops.api.passwords import (
     PasscodeRejected,
     check_strength,
     hash_passcode,

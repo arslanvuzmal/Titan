@@ -12,16 +12,16 @@ import datetime as dt
 import zoneinfo
 
 import pytest
-from titan.db.enums import Region
-from titan.policy.calendars import (
+from coldops.db.enums import Region
+from coldops.policy.calendars import (
     REGION_COUNTRIES,
     clear_cache,
     holiday_on,
     is_working_day,
     resolve_country,
 )
-from titan.policy.engine import DenyCode, evaluate_send
-from titan.policy.schedule import SendWindow
+from coldops.policy.engine import DenyCode, evaluate_send
+from coldops.policy.schedule import SendWindow
 
 from .test_send_authorization import sendable_context
 

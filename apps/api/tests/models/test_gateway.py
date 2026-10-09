@@ -11,15 +11,14 @@ from __future__ import annotations
 import json
 
 import pytest
-from pydantic import BaseModel, Field
-from titan.config import Settings
-from titan.db.enums import ModelTask
-from titan.models.channels import (
+from coldops.config import Settings
+from coldops.db.enums import ModelTask
+from coldops.models.channels import (
     PromptBundle,
     UntrustedBlock,
     looks_like_injection,
 )
-from titan.models.gateway import (
+from coldops.models.gateway import (
     BudgetExceededError,
     BudgetLedger,
     CircuitBreaker,
@@ -29,7 +28,8 @@ from titan.models.gateway import (
     Route,
     SchemaValidationError,
 )
-from titan.models.providers import MockChatProvider
+from coldops.models.providers import MockChatProvider
+from pydantic import BaseModel, Field
 
 
 class Finding(BaseModel):
@@ -58,7 +58,7 @@ def gateway(
 
 
 def bundle(task: str = "Extract the finding.") -> PromptBundle:
-    return PromptBundle(system="You are Titan.", task=task)
+    return PromptBundle(system="You are ColdOps.", task=task)
 
 
 # ==========================================================================
@@ -397,7 +397,7 @@ async def test_validate_models_passes_when_everything_matches() -> None:
 # ==========================================================================
 def test_untrusted_content_is_fenced_with_a_nonce() -> None:
     bundle_ = PromptBundle(
-        system="You are Titan.",
+        system="You are ColdOps.",
         untrusted=[UntrustedBlock("page", "Hello", "https://x.test/")],
         task="Summarise.",
     )
@@ -442,7 +442,7 @@ def test_untrusted_content_is_length_bounded() -> None:
 def test_untrusted_content_never_enters_the_system_channel() -> None:
     secret = "PLEASE-IGNORE-EVERYTHING-XYZZY"
     bundle_ = PromptBundle(
-        system="You are Titan.",
+        system="You are ColdOps.",
         policy="Never fabricate.",
         untrusted=[UntrustedBlock("page", secret)],
     )

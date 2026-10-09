@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from titan.api import health
-from titan.delivery.placement_gate import UNMEASURED
+from coldops.api import health
+from coldops.delivery.placement_gate import UNMEASURED
 
 from tests.api.test_api_security import auth
 from tests.api.test_crm import client, crm  # noqa: F401  (fixtures)

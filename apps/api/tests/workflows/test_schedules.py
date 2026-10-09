@@ -14,17 +14,17 @@ import datetime as dt
 import uuid
 
 import pytest
-from temporalio.client import ScheduleAlreadyRunningError, ScheduleOverlapPolicy
-from temporalio.exceptions import WorkflowAlreadyStartedError
-from titan.db.enums import CampaignStatus
-from titan.workflows import schedules
-from titan.workflows.schedules import (
+from coldops.db.enums import CampaignStatus
+from coldops.workflows import schedules
+from coldops.workflows.schedules import (
     Applied,
     Outcome,
     plan_orchestrators,
     plan_schedules,
     summarise,
 )
+from temporalio.client import ScheduleAlreadyRunningError, ScheduleOverlapPolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 QUEUE = "titan-research"
 WS = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -141,10 +141,10 @@ def test_a_workspace_gets_a_report_and_a_verification_job() -> None:
 def test_the_crons_come_from_the_workflows_not_from_here() -> None:
     """The workflows already declared when they should run. Restating the cron
     in the installer would let the two drift silently."""
-    from titan.workflows.delivery_events import DEFAULT_CRON as poll_cron
-    from titan.workflows.reporting import DEFAULT_CRON as report_cron
-    from titan.workflows.sender_health import DEFAULT_CRON as health_cron
-    from titan.workflows.verification import DEFAULT_CRON as verify_cron
+    from coldops.workflows.delivery_events import DEFAULT_CRON as poll_cron
+    from coldops.workflows.reporting import DEFAULT_CRON as report_cron
+    from coldops.workflows.sender_health import DEFAULT_CRON as health_cron
+    from coldops.workflows.verification import DEFAULT_CRON as verify_cron
 
     crons = {j.workflow: j.cron for j in plan_schedules(WS, task_queue=QUEUE)}
 

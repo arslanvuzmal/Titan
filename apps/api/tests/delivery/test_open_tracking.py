@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import uuid
 
-from titan.config import Settings
-from titan.delivery.open_tracking import (
+from coldops.config import Settings
+from coldops.delivery.open_tracking import (
     PIXEL,
     PIXEL_CONTENT_TYPE,
     open_token,
@@ -35,7 +35,7 @@ class TestItIsOffUntilSomebodyDecidesOtherwise:
         file, which is how the rewriter flag ended up true on a false belief."""
         import pathlib
 
-        source = pathlib.Path("titan/config.py").read_text(encoding="utf-8")
+        source = pathlib.Path("coldops/config.py").read_text(encoding="utf-8")
         window = source.split("open_tracking_enabled")[0][-1400:]
 
         assert "placement holding at inbox for a week" in window
