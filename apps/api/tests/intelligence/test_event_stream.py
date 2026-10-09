@@ -139,3 +139,30 @@ def test_every_projection_is_scoped_to_its_workspace(projection):
 def test_every_source_appears_once():
     sources = [p.source for p in es.PROJECTIONS]
     assert len(sources) == len(set(sources))
+
+
+async def test_the_managers_heartbeat_is_not_an_event(db_session, workspace):
+    from coldops.db.models import AutonomyDecision
+
+    fx = await build_sendable(db_session, workspace)
+    for proposed, applied in ((-1, False), (5, False), (5, True)):
+        db_session.add(
+            AutonomyDecision(
+                workspace_id=workspace,
+                campaign_id=fx.campaign_id,
+                decided_at=NOW,
+                actuation="set_daily_limit",
+                health="healthy",
+                previous_value=-1,
+                proposed_value=proposed,
+                applied_value=proposed if applied else -1,
+                applied=applied,
+                reason="test",
+                evidence={},
+                confidence=0.5,
+            )
+        )
+    await db_session.commit()
+    report = await es.project(db_session, workspace_id=workspace, since=es.EPOCH)
+    await db_session.commit()
+    assert report.inserted["autonomy_decisions"] == 2

@@ -222,6 +222,52 @@ async def test_a_decision_that_changes_nothing_is_still_recorded(
 
 
 @pytest.mark.asyncio
+async def test_the_same_no_op_every_cycle_is_recorded_once(db_session, sendable) -> None:
+    """282,944 of 306,516 rows were one refusal repeated each cycle. The first stays."""
+    keep = proposal(
+        Actuation.SET_DAILY_LIMIT, sendable.campaign_id, current=40, proposed=40
+    )
+    for _ in range(5):
+        await _apply(sendable.workspace_id, sendable.campaign_id, [keep])
+    rows = await _decisions(sendable.workspace_id)
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_no_op_for_a_new_reason_is_recorded(db_session, sendable) -> None:
+    """The trail still shows every transition -- just not every repetition of a state."""
+    first = proposal(
+        Actuation.SET_DAILY_LIMIT, sendable.campaign_id, current=40, proposed=40
+    )
+    second = Proposal(
+        actuation=first.actuation,
+        campaign_id=first.campaign_id,
+        current=40,
+        proposed=40,
+        reason="a different reason",
+        confidence=0.5,
+        evidence={},
+    )
+    await _apply(sendable.workspace_id, sendable.campaign_id, [first])
+    await _apply(sendable.workspace_id, sendable.campaign_id, [first])
+    await _apply(sendable.workspace_id, sendable.campaign_id, [second])
+    assert len(await _decisions(sendable.workspace_id)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_that_reaches_for_a_change_is_always_recorded(
+    db_session, sendable
+) -> None:
+    """Refused or clamped, every real proposal stays: that is the boundary's evidence."""
+    reach = proposal(
+        Actuation.SET_DAILY_LIMIT, sendable.campaign_id, current=40, proposed=400
+    )
+    for _ in range(3):
+        await _apply(sendable.workspace_id, sendable.campaign_id, [reach])
+    assert len(await _decisions(sendable.workspace_id)) == 3
+
+
+@pytest.mark.asyncio
 async def test_another_workspace_cannot_see_the_trail(db_session, sendable) -> None:
     from coldops.db.models import Workspace
 

@@ -272,6 +272,10 @@ PROJECTIONS: tuple[Projection, ...] = (
                        'reason', a.reason)
             FROM autonomy_decisions a
             WHERE a.workspace_id = :ws AND a.created_at >= :since
+              -- Only proposals that reached for a change, applied or refused.
+              -- "Keep it as it is" every cycle is the manager's heartbeat, not
+              -- an event: 282,944 of them were 92% of the first backfill.
+              AND (a.applied OR a.proposed_value IS DISTINCT FROM a.previous_value)
         """,
     ),
     # A probe is two facts: it left, and later someone found where it landed.
