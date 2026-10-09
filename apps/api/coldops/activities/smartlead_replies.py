@@ -77,6 +77,12 @@ async def collect_smartlead_replies(
 ) -> CollectRepliesResult:
     """One pass over every carrier campaign, ingesting replies not seen before."""
     settings = get_settings()
+    # Replies to mail ColdOps sent itself land in its own mailboxes and are
+    # read over IMAP by the inbound worker; Smartlead holds none of them.
+    if settings.email_provider != "smartlead":
+        return CollectRepliesResult(
+            refused_reason=f"not the carrier: mail goes through {settings.email_provider}"
+        )
     if settings.smartlead_api_key is None:
         return CollectRepliesResult(refused_reason="no Smartlead API key is configured")
 

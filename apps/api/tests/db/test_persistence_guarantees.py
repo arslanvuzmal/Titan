@@ -71,7 +71,10 @@ async def test_immutable_tables_have_update_triggers(db_session) -> None:
         text(
             "SELECT c.relname FROM pg_trigger t "
             "JOIN pg_class c ON c.oid = t.tgrelid "
-            "WHERE t.tgname LIKE '%_no_update' AND NOT t.tgisinternal"
+            # Either fully frozen, or frozen apart from erasing content for
+            # retention (pages, inbound_messages): both refuse every other UPDATE.
+            "WHERE (t.tgname LIKE '%_no_update' OR t.tgname LIKE '%_redaction_only') "
+            "AND NOT t.tgisinternal"
         )
     )
     protected = {r[0] for r in rows}

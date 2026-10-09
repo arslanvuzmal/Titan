@@ -28,14 +28,44 @@ target_metadata = Base.metadata
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 
 
-def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """Keep Alembic's attention on ColdOps's own tables.
+#: Tables created by migrations and used through SQL, with no ORM model.
+#:
+#: Without this list ``alembic check`` proposes dropping all of them, so it
+#: has failed on every run since the first one was added -- and a check that
+#: always fails is a check nobody reads, which is how it stopped guarding
+#: anything. Named here, one by one, so a table that is meant to have a model
+#: and lacks one still shows up as drift.
+SQL_ONLY_TABLES = frozenset(
+    {
+        "call_outcomes",
+        "call_suppressions",
+        "engagement_events",
+        "events",
+        "ml_labels",
+        "ml_models",
+        "ml_predictions",
+        "placement_checks",
+        "sending_claims",
+    }
+)
 
-    Prevents autogenerate from proposing to drop tables owned by extensions or
-    left over from the pre-0.2 Prisma schema during the transition window.
+#: Indexes created by a migration on a modelled table, for a query the ORM
+#: does not express.
+SQL_ONLY_INDEXES = frozenset({"ix_messages_one_pager"})
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Keep Alembic's attention on ColdOps's own modelled tables.
+
+    Prevents autogenerate from proposing to drop tables owned by extensions,
+    left over from the pre-0.2 Prisma schema, or deliberately SQL-only.
     """
-    if type_ == "table" and name in {"alembic_version"}:
+    if type_ == "table" and name in {"alembic_version"} | SQL_ONLY_TABLES:
         return False
+    if type_ == "index":
+        table = getattr(getattr(obj, "table", None), "name", None)
+        if table in SQL_ONLY_TABLES or name in SQL_ONLY_INDEXES:
+            return False
     return True
 
 

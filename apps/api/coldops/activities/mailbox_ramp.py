@@ -103,6 +103,18 @@ async def ramp_mailboxes(request: RampMailboxesInput) -> RampMailboxesResult:
     from coldops.providers.smartlead import SmartleadClient, SmartleadError
 
     settings = get_settings()
+    # This ramp writes limits into Smartlead. When mail goes out through
+    # ColdOps's own SMTP pool, Smartlead is not the carrier: the outbox worker
+    # ramps each mailbox itself from its first send date (warmup_limit), and
+    # calling a carrier that is no longer used only failed every morning with
+    # an authentication error that read like a broken ramp.
+    if settings.email_provider != "smartlead":
+        return RampMailboxesResult(
+            unavailable=(
+                f"not the carrier: mail goes through {settings.email_provider}, "
+                "which ramps each mailbox in the outbox worker"
+            )
+        )
     if not settings.smartlead_api_key:
         return RampMailboxesResult(unavailable="no Smartlead API key is configured")
 

@@ -757,6 +757,38 @@ def test_the_production_stack_does_not_ship_a_default_password() -> None:
     )
 
 
+#: The services that run ColdOps's own code and read its settings.
+APP_SERVICES = ("migrate", "api", "outbox-worker", "inbound-worker", "temporal-worker")
+
+
+def test_every_production_service_reads_the_whole_env_file() -> None:
+    """No allow-list between ``.env`` and the code.
+
+    The development compose forwards an explicit list of variables, and four
+    settings (``MODEL_REWRITES_ENABLED``, ``OPERATOR_EMAIL``, ``CASE_STUDIES_PATH``
+    and every Smartlead variable) were added to ``.env`` and the code but not the
+    list -- so the containers ran on code defaults, silently. Production avoids
+    the whole class of bug by loading the file itself. This keeps it that way.
+    """
+    compose = REPO / "deploy" / "docker-compose.prod.yml"
+    if not compose.exists():
+        pytest.skip("no production compose in this tree")
+    text_ = compose.read_text(encoding="utf-8")
+    missing = []
+    for service in APP_SERVICES:
+        block = re.search(
+            rf"^  {re.escape(service)}:\r?\n(.*?)(?=^  [a-z][a-z-]*:\r?\n|^[a-z])",
+            text_,
+            flags=re.M | re.S,
+        )
+        assert block, f"{service} is not in the production compose"
+        if "env_file: [../.env]" not in block.group(1):
+            missing.append(service)
+    assert not missing, (
+        f"these services do not load .env and would miss settings: {missing}"
+    )
+
+
 def test_the_browser_worker_gets_no_application_credentials() -> None:
     """Invariant 3, at the deployment layer.
 

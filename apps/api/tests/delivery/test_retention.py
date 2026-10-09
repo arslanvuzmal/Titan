@@ -96,7 +96,12 @@ async def test_a_business_that_replied_is_never_erased(db_session, workspace):
                     'Re: your note', 'Yes, interested.', :at, '{}'::jsonb, :ws)
             """
         ),
-        {"pid": f"retention-{lead.draft_id}", "lead": lead.lead_id, "at": LONG_AGO, "ws": workspace},
+        {
+            "pid": f"retention-{lead.draft_id}",
+            "lead": lead.lead_id,
+            "at": LONG_AGO,
+            "ws": workspace,
+        },
     )
     await db_session.commit()
 
@@ -210,3 +215,47 @@ def test_foreign_mail_is_kept_for_less_time_than_a_business_we_wrote_to():
     """A business gets thirty days because its follow-up sequence needs them.
     Backscatter has no sequence and no relationship."""
     assert FOREIGN_RETENTION_DAYS < RETENTION_DAYS
+
+
+@pytest.mark.asyncio
+async def test_an_inbound_message_can_be_erased_but_not_otherwise_changed(
+    db_session, workspace
+):
+    """The trigger allows exactly the retention job's change and refuses any other."""
+    import uuid as _uuid
+
+    from sqlalchemy.exc import DBAPIError
+
+    row_id = _uuid.uuid4()
+    await db_session.execute(
+        text(
+            "INSERT INTO inbound_messages (id, workspace_id, provider, provider_inbound_id, "
+            "from_email_normalized, subject, body_text, received_at, raw_payload) "
+            "VALUES (:id, :ws, 'test', :pid, 'a@b.test', 'Re', 'hello', now(), CAST(:payload AS jsonb))"
+        ),
+        {"id": row_id, "ws": workspace, "pid": row_id.hex, "payload": '{"k": 1}'},
+    )
+    await db_session.commit()
+    with pytest.raises(DBAPIError):
+        await db_session.execute(
+            text("UPDATE inbound_messages SET subject = 'changed' WHERE id = :id"),
+            {"id": row_id},
+        )
+    await db_session.rollback()
+    with pytest.raises(DBAPIError):
+        await db_session.execute(
+            text(
+                "UPDATE inbound_messages SET body_text = NULL, raw_payload = '{}'::jsonb, "
+                "subject = 'sneaky' WHERE id = :id"
+            ),
+            {"id": row_id},
+        )
+    await db_session.rollback()
+    await db_session.execute(
+        text(
+            "UPDATE inbound_messages SET body_text = NULL, raw_payload = '{}'::jsonb "
+            "WHERE id = :id"
+        ),
+        {"id": row_id},
+    )
+    await db_session.commit()

@@ -204,6 +204,16 @@ async def poll_delivery_events(
     from coldops.providers.smartlead import SmartleadClient, SmartleadError
 
     settings = get_settings()
+    # Smartlead's statistics describe mail Smartlead sent. With ColdOps's own
+    # pool as carrier there is nothing there to read: bounces and replies
+    # arrive in the mailboxes and are collected by the inbound worker.
+    if settings.email_provider != "smartlead":
+        return PollDeliveryEventsResult(
+            unavailable=(
+                f"not the carrier: mail goes through {settings.email_provider}; "
+                "outcomes arrive by IMAP"
+            )
+        )
     if not settings.smartlead_api_key:
         return PollDeliveryEventsResult(unavailable="no Smartlead API key is configured")
 

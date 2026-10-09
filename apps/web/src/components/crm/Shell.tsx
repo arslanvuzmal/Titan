@@ -16,10 +16,16 @@ import { useSession } from '@/lib/session';
 import { api, type SendingPreflight } from '@/lib/titan';
 import { Badge, Button, Spinner } from './ui';
 
-const NAV = [
+/** Where the call sheet lives: the API's own origin. */
+const CALL_SHEET_URL = `${(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '')}/api/v1/calls/sheet`;
+
+const NAV: { href: string; label: string; exact?: boolean; external?: boolean }[] = [
   { href: '/crm', label: 'Overview', exact: true },
   { href: '/crm/leads', label: 'Leads' },
   { href: '/crm/replies', label: 'Replies' },
+  // The call sheet is served by the API (it calls bearer-protected endpoints on
+  // the same origin), so this one leaves the CRM and opens in a new tab.
+  { href: CALL_SHEET_URL, label: 'Calls', external: true },
   { href: '/crm/inbox', label: 'Inbox health' },
   { href: '/crm/approvals', label: 'Approvals' },
   { href: '/crm/opportunities', label: 'Opportunities' },
@@ -171,6 +177,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="flex flex-1 flex-wrap items-center gap-1">
             {NAV.map((item) => {
+              if (item.external) {
+                return (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener"
+                    className="rounded-lg px-3 py-1.5 text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  >
+                    {item.label} ↗
+                  </a>
+                );
+              }
               const active = item.exact
                 ? pathname === item.href
                 : pathname.startsWith(item.href);
