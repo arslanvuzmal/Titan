@@ -236,7 +236,41 @@ async def _own_addresses(
     operator = (get_settings().operator_email or "").strip().casefold()
     if operator:
         own.add(operator)
+    own |= _warmup_and_seed_addresses()
     return frozenset(own)
+
+
+def _warmup_and_seed_addresses() -> set[str]:
+    """Warm-up partners and placement seeds: outside accounts, but ours.
+
+    A partner's warm-up mail and replies arrive in the sending mailboxes, and
+    since warm-up stopped carrying a header of its own (October) nothing else
+    tells them apart from a stranger writing in. Without this they were logged
+    as replies from unknown senders -- and became training data for the reply
+    reader. Read from the same files warm-up and placement use; a file that
+    cannot be read is logged and skipped, never fatal to ingesting real mail.
+    """
+    from coldops.delivery.mailboxes import load_mailboxes
+    from coldops.delivery.seeds import load_seeds
+
+    settings = get_settings()
+    found: set[str] = set()
+    if settings.warmup_partner_file:
+        try:
+            found |= {
+                a.casefold()
+                for a in load_mailboxes(settings.warmup_partner_file).addresses()
+            }
+        except Exception as exc:  # never block real replies on a partner file
+            logger.warning("could not read warm-up partners: %s", exc)
+    if settings.seed_file:
+        try:
+            found |= {
+                seed.address.casefold() for seed in load_seeds(settings.seed_file).all()
+            }
+        except Exception as exc:
+            logger.warning("could not read placement seeds: %s", exc)
+    return found
 
 
 async def ingest_inbound(

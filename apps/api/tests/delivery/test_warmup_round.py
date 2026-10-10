@@ -105,7 +105,11 @@ async def test_no_partners_is_a_skip_that_says_why(monkeypatch) -> None:
 
 
 # -------------------------------------------------------------- the schedule
-def test_the_round_is_scheduled_daily() -> None:
+def test_the_round_runs_hourly_through_the_working_day() -> None:
+    """Hourly 09:10-17:10 UTC, each run sending what is due: no single burst."""
+    from coldops.delivery.warmup import SEND_HOURS
+
     jobs = {j.workflow: j for j in plan_schedules(uuid.uuid4(), task_queue="q")}
     assert "WarmupRoundWorkflow" in jobs
-    assert jobs["WarmupRoundWorkflow"].cron == "10 9 * * *"
+    assert jobs["WarmupRoundWorkflow"].cron == "10 9-17 * * *"
+    assert (min(SEND_HOURS), max(SEND_HOURS)) == (9, 17)

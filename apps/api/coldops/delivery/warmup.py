@@ -46,6 +46,7 @@ import hashlib
 import imaplib
 import logging
 import random
+import re
 import smtplib
 import ssl
 from dataclasses import dataclass, field
@@ -56,10 +57,30 @@ from coldops.delivery.microsoft_oauth import imap_login
 
 logger = logging.getLogger(__name__)
 
-#: Marks a message as warm-up, in the mail itself. Present on every message
-#: this module sends, so a human reading a mailbox -- or this module on a later
-#: pass -- can tell warm-up traffic from anything a person wrote.
-WARMUP_HEADER = "X-ColdOps-Warmup"
+#: How warm-up mail is recognised -- without a header of its own.
+#:
+#: Until October every message carried ``X-ColdOps-Warmup: 1``. A custom
+#: header shared by every message is exactly the fingerprint a receiving
+#: network uses to spot a warm-up pool and discount all of it. So nothing
+#: visible marks the mail now: a warm-up message is one that comes FROM a
+#: participant *and* whose Message-ID has the 32-hex shape this module gives
+#: it (:func:`_message_id`, :func:`_reply_id`). Gmail's own composer and
+#: ColdOps's reports use other shapes, so neither is mistaken for warm-up.
+_WARMUP_ID = re.compile(r"^<[0-9a-f]{32}@[^>\s]+>$")
+
+#: How far back a mailbox is searched for warm-up mail.
+SEARCH_DAYS = 10
+
+#: Share of received warm-up messages that are starred, and on Gmail also
+#: marked Important. Next to rescuing from spam and replying, a star is the
+#: strongest "this sender matters" signal a recipient gives.
+STAR_SHARE = 0.35
+
+#: The UTC hours a day's warm-up is spread across. The schedule runs once an
+#: hour (09:10-17:10 UTC) and sends what is due, instead of the whole day in one burst at 09:10
+#: -- a burst is what a machine looks like; correspondence arrives through
+#: the day.
+SEND_HOURS: tuple[int, ...] = tuple(range(9, 18))
 
 #: Folders a receiving server might file warm-up mail in. Finding a message in
 #: one of these and moving it back to the inbox is the single most valuable
@@ -218,6 +239,7 @@ class WarmupReport:
     rescued_from_spam: int = 0
     marked_read: int = 0
     replied: int = 0
+    starred: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -270,6 +292,39 @@ def _message_id(
         f"titan-warmup:{on_date.isoformat()}:{sender}:{recipient}:{index}".encode()
     ).hexdigest()[:32]
     return f"<{digest}@{domain}>"
+
+
+def is_warmup_id(message_id: str | None) -> bool:
+    """Whether a Message-ID has the shape warm-up gives its mail."""
+    return bool(_WARMUP_ID.match((message_id or "").strip()))
+
+
+def _share(key: str, salt: str) -> float:
+    """A stable number in [0, 1) per message: one message always decides the same way."""
+    digest = hashlib.sha256(f"{salt}:{key}".encode()).hexdigest()[:8]
+    return int(digest, 16) / 0x100000000
+
+
+def _reply_id(original_id: str, domain: str) -> str:
+    """A reply's Message-ID: deterministic, and the same 32-hex shape."""
+    digest = hashlib.sha256(f"reply:{original_id.strip()}".encode()).hexdigest()[:32]
+    return f"<{digest}@{domain}>"
+
+
+def send_hour(send: PlannedSend) -> int:
+    """The UTC hour this message is due, spread across SEND_HOURS."""
+    digest = hashlib.sha256(send.message_id.encode()).hexdigest()[:8]
+    return SEND_HOURS[int(digest, 16) % len(SEND_HOURS)]
+
+
+def due(sends: list[PlannedSend], now: dt.datetime) -> list[PlannedSend]:
+    """The part of today's plan whose hour has come.
+
+    Earlier hours are included, so a missed run is caught up by the next one;
+    :func:`send_round` skips anything already delivered.
+    """
+    hour = now.astimezone(dt.UTC).hour
+    return [s for s in sends if send_hour(s) <= hour]
 
 
 def plan(
@@ -339,7 +394,6 @@ def _build(send: PlannedSend) -> EmailMessage:
     message["Subject"] = send.subject
     message["Date"] = email.utils.formatdate(localtime=True)
     message["Message-ID"] = send.message_id
-    message[WARMUP_HEADER] = "1"
     # Not a bulk message, and saying so is true: it is one message to one
     # person. Marking it bulk would teach the receiver the opposite of what
     # warm-up exists to teach it.
@@ -393,40 +447,60 @@ def _connect(endpoint: Endpoint, *, timeout: float) -> imaplib.IMAP4:
     return client
 
 
-def _search_warmup(client: imaplib.IMAP4, folder: str) -> list[str]:
+def _from_any(senders: list[str]) -> list[str]:
+    """IMAP search terms matching mail from any of these addresses (prefix OR)."""
+    terms: list[str] = []
+    for address in senders[:-1]:
+        terms += ["OR", "FROM", f'"{address}"']
+    return [*terms, "FROM", f'"{senders[-1]}"']
+
+
+def _message_id_of(client: imaplib.IMAP4, uid: str) -> str:
+    status, data = client.uid("FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+    if status != "OK" or not data or not isinstance(data[0], tuple):
+        return ""
+    _, _, value = data[0][1].decode(errors="replace").partition(":")
+    return value.strip()
+
+
+def _search_warmup(
+    client: imaplib.IMAP4, folder: str, senders: list[str], *, unseen_only: bool = False
+) -> list[str]:
     """UIDs of warm-up messages in one folder, or [] if it does not exist.
 
-    Returned as text. ``imaplib`` hands back bytes from SEARCH and expects text
-    on the way back into UID commands, and mixing the two is how a UID reaches
-    a server as ``b'123'``.
+    Warm-up mail is mail from a participant with a warm-up-shaped Message-ID
+    (see ``_WARMUP_ID``). Returned as text: ``imaplib`` hands back bytes from
+    SEARCH and expects text on the way back into UID commands.
     """
+    if not senders:
+        return []
     status, _ = client.select(f'"{folder}"')
     if status != "OK":
         return []
+    since = (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=SEARCH_DAYS)).strftime(
+        "%d-%b-%Y"
+    )
+    criteria = ["SINCE", since, *(["UNSEEN"] if unseen_only else []), *_from_any(senders)]
     # The charset argument is positional and untyped in imaplib; None means
     # "no charset", which is what every server here wants.
-    status, data = client.uid("SEARCH", None, "HEADER", WARMUP_HEADER, "1")  # type: ignore[arg-type]
+    status, data = client.uid("SEARCH", None, *criteria)  # type: ignore[arg-type]
     if status != "OK" or not data or not data[0]:
         return []
-    return [uid.decode() for uid in data[0].split()]
+    uids = [uid.decode() for uid in data[0].split()]
+    return [uid for uid in uids if is_warmup_id(_message_id_of(client, uid))]
 
 
-def _delivered_ids_blocking(endpoint: Endpoint, *, timeout: float) -> set[str]:
+def _delivered_ids_blocking(
+    endpoint: Endpoint, *, senders: list[str], timeout: float
+) -> set[str]:
     """Message-IDs of warm-up mail already in this mailbox, anywhere."""
     found: set[str] = set()
     client: imaplib.IMAP4 | None = None
     try:
         client = _connect(endpoint, timeout=timeout)
         for folder in ("INBOX", *JUNK_FOLDERS):
-            for uid in _search_warmup(client, folder):
-                status, data = client.uid(
-                    "FETCH", uid, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"
-                )
-                if status != "OK" or not data or not isinstance(data[0], tuple):
-                    continue
-                header = data[0][1].decode(errors="replace")
-                _, _, value = header.partition(":")
-                cleaned = value.strip()
+            for uid in _search_warmup(client, folder, senders):
+                cleaned = _message_id_of(client, uid)
                 if cleaned:
                     found.add(cleaned)
     except (imaplib.IMAP4.error, OSError) as exc:
@@ -444,11 +518,14 @@ def _delivered_ids_blocking(endpoint: Endpoint, *, timeout: float) -> set[str]:
 
 
 async def already_delivered(
-    participant: Participant, *, timeout_seconds: float = 30.0
+    participant: Participant, *, senders: list[str], timeout_seconds: float = 30.0
 ) -> set[str]:
     """Which of today's messages this mailbox already holds."""
     return await asyncio.to_thread(
-        _delivered_ids_blocking, participant.imap, timeout=timeout_seconds
+        _delivered_ids_blocking,
+        participant.imap,
+        senders=senders,
+        timeout=timeout_seconds,
     )
 
 
@@ -470,9 +547,10 @@ async def send_round(
     delivered: dict[str, set[str]] = {}
     if skip_delivered:
         recipients = {s.recipient.address: s.recipient for s in sends}
+        senders = sorted({s.sender.address for s in sends})
         for address, participant in recipients.items():
             delivered[address] = await already_delivered(
-                participant, timeout_seconds=timeout_seconds
+                participant, senders=senders, timeout_seconds=timeout_seconds
             )
 
     for send in sends:
@@ -489,12 +567,24 @@ async def send_round(
 
 
 def _tend_blocking(
-    participant: Participant, *, timeout: float, reply_share: float, seed: str
-) -> tuple[int, int, int, list[str]]:
-    """Rescue from spam, mark read, and answer a share. One connection."""
-    rescued = marked = replied = 0
+    participant: Participant,
+    *,
+    senders: list[str],
+    timeout: float,
+    reply_share: float,
+    seed: str,
+) -> tuple[int, int, int, int, list[str]]:
+    """Rescue from spam, then read, star and answer what is new. One connection.
+
+    Only *unread* warm-up mail is read, starred or answered, so each message is
+    handled once however often the round runs. Before October every pass went
+    through the whole inbox and answered old messages again.
+    """
+    rescued = marked = replied = starred = 0
     errors: list[str] = []
     rng = random.Random(f"{seed}:{participant.address}")
+    others = [a for a in senders if a.lower() != participant.address.lower()]
+    on_gmail = "gmail.com" in (participant.imap.host or "").lower()
     client: imaplib.IMAP4 | None = None
     try:
         client = _connect(participant.imap, timeout=timeout)
@@ -502,7 +592,7 @@ def _tend_blocking(
         # 1. Anything filed as junk is moved back. This is the signal that
         #    matters most: a receiver learns from what its user rescues.
         for folder in JUNK_FOLDERS:
-            uids = _search_warmup(client, folder)
+            uids = _search_warmup(client, folder, others)
             for uid in uids:
                 status, _ = client.uid("COPY", uid, "INBOX")
                 if status != "OK":
@@ -512,13 +602,12 @@ def _tend_blocking(
             if uids:
                 client.expunge()
 
-        # 2. Read them, and answer some.
-        client.select("INBOX")
-        for uid in _search_warmup(client, "INBOX"):
+        # 2. Read what is new, star some, and answer some.
+        for uid in _search_warmup(client, "INBOX", others, unseen_only=True):
             status, data = client.uid(
                 "FETCH",
                 uid,
-                "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT X-COLDOPS-WARMUP-REPLY)])",
+                "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT IN-REPLY-TO)])",
             )
             if status != "OK" or not data or not isinstance(data[0], tuple):
                 continue
@@ -531,17 +620,26 @@ def _tend_blocking(
 
             client.uid("STORE", uid, "+FLAGS", "(\\Seen)")
             marked += 1
+            original_id = fields.get("message-id", "")
 
-            # Already answered, or is itself a reply: leave it.
-            if fields.get("x-coldops-warmup-reply") or fields.get(
-                "subject", ""
-            ).lower().startswith("re: re:"):
+            # A share is starred, and on Gmail marked Important too. Decided
+            # per message, so the same message never flips between passes.
+            if _share(original_id, "star") < STAR_SHARE:
+                client.uid("STORE", uid, "+FLAGS", "(\\Flagged)")
+                if on_gmail:
+                    try:
+                        client.uid("STORE", uid, "+X-GM-LABELS", "(\\Important)")
+                    except imaplib.IMAP4.error:
+                        pass  # a star alone still counts
+                starred += 1
+
+            # A reply is not answered: one exchange per thread is the pattern.
+            if fields.get("in-reply-to"):
                 continue
-            if rng.random() > reply_share:
+            if _share(original_id, "reply") >= reply_share:
                 continue
 
             sender = email.utils.parseaddr(fields.get("from", ""))[1]
-            original_id = fields.get("message-id", "")
             if not sender or not original_id:
                 continue
 
@@ -555,10 +653,7 @@ def _tend_blocking(
             reply["Date"] = email.utils.formatdate(localtime=True)
             reply["In-Reply-To"] = original_id
             reply["References"] = original_id
-            reply["Message-ID"] = email.utils.make_msgid(domain=participant.domain)
-            reply[WARMUP_HEADER] = "1"
-            # So a later pass does not answer the answer.
-            reply["X-ColdOps-Warmup-Reply"] = "1"
+            reply["Message-ID"] = _reply_id(original_id, participant.domain)
             reply.set_content(RESPONSES[rng.randrange(len(RESPONSES))] + "\n")
 
             endpoint = participant.smtp
@@ -589,7 +684,7 @@ def _tend_blocking(
                 client.logout()
             except Exception as exc:  # pragma: no cover - best effort close
                 logger.debug("imap logout failed: %s", exc)
-    return rescued, marked, replied, errors
+    return rescued, marked, replied, starred, errors
 
 
 async def tend(
@@ -602,10 +697,12 @@ async def tend(
     """Do the receiving half: rescue from spam, read, and answer some."""
     report = WarmupReport()
     seed = (on_date or dt.datetime.now(dt.UTC).date()).isoformat()
+    senders = [p.address for p in participants]
     for participant in participants:
-        rescued, marked, replied, errors = await asyncio.to_thread(
+        rescued, marked, replied, starred, errors = await asyncio.to_thread(
             _tend_blocking,
             participant,
+            senders=senders,
             timeout=timeout_seconds,
             reply_share=reply_share,
             seed=seed,
@@ -613,6 +710,7 @@ async def tend(
         report.rescued_from_spam += rescued
         report.marked_read += marked
         report.replied += replied
+        report.starred += starred
         report.errors.extend(errors)
     return report
 
@@ -730,7 +828,8 @@ __all__ = [
     "OPENERS",
     "REPLY_SHARE",
     "RESPONSES",
-    "WARMUP_HEADER",
+    "SEND_HOURS",
+    "STAR_SHARE",
     "NotAParticipant",
     "Participant",
     "PlannedSend",
@@ -739,10 +838,13 @@ __all__ = [
     "already_delivered",
     "check_recipients_are_participants",
     "describe_pool",
+    "due",
     "involving_ours",
+    "is_warmup_id",
     "participants_from",
     "plan",
     "round_pool",
+    "send_hour",
     "send_round",
     "tend",
 ]

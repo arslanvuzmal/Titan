@@ -13,6 +13,7 @@ for the same reason the placement activities do: a retrying activity would turn
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 from temporalio import activity
@@ -22,6 +23,7 @@ from coldops.delivery.mailboxes import MailboxConfigError, load_mailboxes
 from coldops.delivery.seeds import load_seeds
 from coldops.delivery.warmup import (
     check_recipients_are_participants,
+    due,
     involving_ours,
     participants_from,
     plan,
@@ -65,7 +67,9 @@ async def run_warmup_round(request: WarmupRoundInput) -> WarmupRoundResult:
     seeds = {seed.address for seed in load_seeds(settings.seed_file).all()}
     pool = round_pool(sending, partners, seed_addresses=seeds)
 
-    today = involving_ours(plan(pool), sending)
+    # Spread through the day: this runs hourly and sends only what is due by
+    # now; anything already delivered is skipped, so a missed hour catches up.
+    today = due(involving_ours(plan(pool), sending), dt.datetime.now(dt.UTC))
     check_recipients_are_participants(today, pool)
     timeout = float(settings.smtp_timeout_seconds)
     sent = await send_round(today, timeout_seconds=timeout)
@@ -78,6 +82,7 @@ async def run_warmup_round(request: WarmupRoundInput) -> WarmupRoundResult:
             "failed": sent.failed,
             "rescued": tended.rescued_from_spam,
             "replied": tended.replied,
+            "starred": tended.starred,
         },
     )
     return WarmupRoundResult(

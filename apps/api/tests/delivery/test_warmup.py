@@ -13,19 +13,27 @@ checking that it currently does not.
 from __future__ import annotations
 
 import datetime as dt
+from typing import ClassVar
 
 import pytest
 from coldops.delivery.mailboxes import parse_mailboxes
 from coldops.delivery.warmup import (
     MAX_PER_PARTNER,
-    WARMUP_HEADER,
+    SEND_HOURS,
+    STAR_SHARE,
     NotAParticipant,
     PlannedSend,
     _build,
+    _from_any,
+    _reply_id,
+    _share,
     check_recipients_are_participants,
     describe_pool,
+    due,
+    is_warmup_id,
     participants_from,
     plan,
+    send_hour,
     send_round,
 )
 
@@ -125,12 +133,16 @@ def test_a_send_only_mailbox_cannot_take_part() -> None:
 # ==========================================================================
 # The mail itself
 # ==========================================================================
-def test_every_message_says_it_is_warm_up() -> None:
-    """So a human reading the mailbox, and this module on a later pass, can
-    tell it from something a person wrote."""
-    send = plan(pool(*THREE), on_date=DAY)[0]
+def test_no_message_carries_a_warm_up_header() -> None:
+    """A header shared by every message is the fingerprint a receiving network
+    uses to spot a warm-up pool and discount it. Recognition is by sender and
+    Message-ID shape instead."""
+    message = _build(plan(pool(*THREE), on_date=DAY)[0])
 
-    assert _build(send)[WARMUP_HEADER] == "1"
+    assert not [
+        k for k in message.keys() if "warmup" in k.lower() or k.lower().startswith("x-")
+    ]
+    assert is_warmup_id(message["Message-ID"])
 
 
 def test_the_message_id_is_stable_for_a_day() -> None:
@@ -257,7 +269,7 @@ async def test_a_message_already_delivered_is_not_sent_again(monkeypatch) -> Non
     sends = plan(participants, on_date=DAY)
     delivered = {s.message_id for s in sends}
 
-    async def already(participant, *, timeout_seconds=30.0):
+    async def already(participant, *, senders, timeout_seconds=30.0):
         return delivered
 
     attempted: list[str] = []
@@ -280,7 +292,7 @@ async def test_a_failed_send_is_counted_and_named(monkeypatch) -> None:
     participants = pool(*THREE)
     sends = plan(participants, on_date=DAY)[:2]
 
-    async def none_delivered(participant, *, timeout_seconds=30.0):
+    async def none_delivered(participant, *, senders, timeout_seconds=30.0):
         return set()
 
     def refuse(send, *, timeout):
@@ -294,3 +306,160 @@ async def test_a_failed_send_is_counted_and_named(monkeypatch) -> None:
     assert report.failed == 2
     assert report.sent == 0
     assert all("535" in line for line in report.errors)
+
+
+# ==========================================================================
+# Recognition without a header
+# ==========================================================================
+@pytest.mark.parametrize(
+    ("message_id", "expected"),
+    [
+        ("<" + "a" * 32 + "@arslanvuzmallone.com>", True),
+        ("<CAJ8x+Wq3mK2pLzQ@mail.gmail.com>", False),  # Gmail's own composer
+        ("<176012345678.12.9876@deploy-api-1>", False),  # Python's make_msgid
+        ("", False),
+    ],
+)
+def test_only_the_warm_up_shape_is_recognised(message_id: str, expected: bool) -> None:
+    assert is_warmup_id(message_id) is expected
+
+
+def test_a_reply_has_the_same_shape_and_the_same_id_every_time() -> None:
+    original = "<" + "b" * 32 + "@gmail.com>"
+    first = _reply_id(original, "arslanvuzmallone.com")
+    assert first == _reply_id(original, "arslanvuzmallone.com")
+    assert is_warmup_id(first)
+
+
+def test_the_from_search_is_one_prefix_or_chain() -> None:
+    assert _from_any(["a@x", "b@y", "c@z"]) == [
+        "OR",
+        "FROM",
+        '"a@x"',
+        "OR",
+        "FROM",
+        '"b@y"',
+        "FROM",
+        '"c@z"',
+    ]
+    assert _from_any(["a@x"]) == ["FROM", '"a@x"']
+
+
+# ==========================================================================
+# Spread through the day
+# ==========================================================================
+def test_every_message_has_a_working_hour() -> None:
+    sends = plan(pool(*THREE), on_date=DAY)
+    assert all(send_hour(s) in SEND_HOURS for s in sends)
+
+
+def test_the_day_is_not_one_burst() -> None:
+    """A mature pool's day lands in several different hours."""
+    sends = plan(pool(*THREE, days={a: 30 for a in THREE}), on_date=DAY)
+    assert len({send_hour(s) for s in sends}) >= 3
+
+
+def test_only_what_is_due_goes_out_and_a_missed_hour_catches_up() -> None:
+    sends = plan(pool(*THREE, days={a: 30 for a in THREE}), on_date=DAY)
+    before = due(sends, dt.datetime(2026, 8, 24, 8, 30, tzinfo=dt.UTC))
+    midday = due(sends, dt.datetime(2026, 8, 24, 13, 10, tzinfo=dt.UTC))
+    evening = due(sends, dt.datetime(2026, 8, 24, 17, 10, tzinfo=dt.UTC))
+    assert before == []
+    assert all(send_hour(s) <= 13 for s in midday)
+    assert len(evening) == len(sends)
+
+
+# ==========================================================================
+# Starring and answering, once per message
+# ==========================================================================
+def test_starring_is_a_stable_minority() -> None:
+    ids = [f"<{i:032x}@gmail.com>" for i in range(400)]
+    starred = [m for m in ids if _share(m, "star") < STAR_SHARE]
+    assert 0.25 < len(starred) / len(ids) < 0.45
+    assert starred == [m for m in ids if _share(m, "star") < STAR_SHARE]
+
+
+class _FakeImap:
+    def __init__(self, messages: dict[str, str]) -> None:
+        self.messages = messages
+        self.stored: list[tuple[str, str, str]] = []
+
+    def uid(self, command, *args):
+        if command == "FETCH":
+            return "OK", [(b"header", self.messages[args[0]].encode())]
+        if command == "STORE":
+            self.stored.append(args)
+            return "OK", [b""]
+        if command == "COPY":
+            return "OK", [b""]
+        raise AssertionError(f"unexpected IMAP command {command}")
+
+    def select(self, *_):
+        return "OK", [b"3"]
+
+    def expunge(self):
+        return None
+
+    def logout(self):
+        return None
+
+
+class _FakeSmtp:
+    sent: ClassVar[list] = []
+
+    def __init__(self, *_, **__):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def login(self, *_):
+        return None
+
+    def send_message(self, message):
+        _FakeSmtp.sent.append(message)
+
+
+def test_tending_reads_new_mail_stars_a_share_and_never_answers_a_reply(
+    monkeypatch,
+) -> None:
+    from coldops.delivery import warmup
+
+    ids = {uid: f"<{int(uid):032x}@gmail.com>" for uid in ("1", "2", "3")}
+    messages = {
+        "1": f"Message-ID: {ids['1']}\r\nFrom: friend@gmail.com\r\nSubject: Quick check\r\n",
+        "2": (
+            f"Message-ID: {ids['2']}\r\nFrom: friend@gmail.com\r\nSubject: Re: Quick check\r\n"
+            f"In-Reply-To: <{'f' * 32}@arslanvuzmallone.com>\r\n"
+        ),
+        "3": f"Message-ID: {ids['3']}\r\nFrom: friend@gmail.com\r\nSubject: This week\r\n",
+    }
+    fake = _FakeImap(messages)
+    searched: list[tuple[str, bool]] = []
+
+    def search(client, folder, senders, *, unseen_only=False):
+        searched.append((folder, unseen_only))
+        return ["1", "2", "3"] if folder == "INBOX" else []
+
+    _FakeSmtp.sent = []
+    monkeypatch.setattr(warmup, "_connect", lambda *_a, **_k: fake)
+    monkeypatch.setattr(warmup, "_search_warmup", search)
+    monkeypatch.setattr(warmup.smtplib, "SMTP_SSL", _FakeSmtp)
+
+    me = pool(*THREE)[0]
+    _rescued, marked, replied, starred, errors = warmup._tend_blocking(
+        me, senders=["friend@gmail.com", me.address], timeout=5, reply_share=1.0, seed="x"
+    )
+
+    assert errors == []
+    assert ("INBOX", True) in searched  # only unread mail is read, starred, answered
+    assert marked == 3
+    assert replied == 2  # message 2 is itself a reply, so it is not answered
+    assert all(not k.lower().startswith("x-") for m in _FakeSmtp.sent for k in m.keys())
+    assert all(warmup.is_warmup_id(m["Message-ID"]) for m in _FakeSmtp.sent)
+    expected_stars = sum(1 for m in ids.values() if warmup._share(m, "star") < STAR_SHARE)
+    assert starred == expected_stars
+    assert sum(1 for s in fake.stored if s[2] == r"(\Flagged)") == expected_stars

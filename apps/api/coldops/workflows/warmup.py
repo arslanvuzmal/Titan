@@ -30,10 +30,12 @@ ROUND_RETRY = RetryPolicy(
     non_retryable_error_types=["PoolConflict", "NotAParticipant"],
 )
 
-#: 09:10 UTC daily. After the placement round has been read (~08:20), so a
-#: morning's readings are never taken in the middle of warm-up, and early
-#: enough in the European day that replies arrive in working hours.
-DEFAULT_CRON = "10 9 * * *"
+#: Hourly, 09:10 to 17:10 UTC. Each run sends the part of the day's plan that
+#: is due by then (see warmup.SEND_HOURS) and tends what has arrived, so the
+#: day's mail goes out through the working day instead of in one burst. Still
+#: after the placement round has been read (~08:20), so a morning's readings
+#: are never taken in the middle of warm-up.
+DEFAULT_CRON = "10 9-17 * * *"
 
 
 @workflow.defn(name="WarmupRoundWorkflow")
