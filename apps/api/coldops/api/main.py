@@ -29,6 +29,7 @@ from coldops import __version__
 from coldops.api.call_sheet import router as call_sheet_router
 from coldops.api.calls import router as calls_router
 from coldops.api.crm import router as crm_router
+from coldops.api.dashboard import router as dashboard_router
 from coldops.api.evidence import evidence_router
 from coldops.api.health import router as health_router
 from coldops.api.placement import open_pixel_router
@@ -209,6 +210,8 @@ app.include_router(reply_desk_router)
 # Is cold mail moving, and if not, why: the gate's verdict per mailbox, what
 # it needs, what came back this week, and how the leads grade.
 app.include_router(health_router)
+# The dashboard: the whole pipeline, every mailbox, and the event stream.
+app.include_router(dashboard_router)
 # Provider delivery events. Deliberately *not* behind the session auth the two
 # routers above use: a provider cannot hold a token, so an HMAC over the raw
 # body is the credential. See coldops.api.webhooks for why that puts the whole

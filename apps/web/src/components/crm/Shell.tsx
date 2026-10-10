@@ -21,11 +21,14 @@ const CALL_SHEET_URL = `${(process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:
 
 const NAV: { href: string; label: string; exact?: boolean; external?: boolean }[] = [
   { href: '/crm', label: 'Overview', exact: true },
+  { href: '/crm/pipeline', label: 'Pipeline' },
+  { href: '/crm/activity', label: 'Activity' },
   { href: '/crm/leads', label: 'Leads' },
   { href: '/crm/replies', label: 'Replies' },
   // The call sheet is served by the API (it calls bearer-protected endpoints on
   // the same origin), so this one leaves the CRM and opens in a new tab.
   { href: CALL_SHEET_URL, label: 'Calls', external: true },
+  { href: '/crm/mailboxes', label: 'Mailboxes' },
   { href: '/crm/inbox', label: 'Inbox health' },
   { href: '/crm/approvals', label: 'Approvals' },
   { href: '/crm/opportunities', label: 'Opportunities' },

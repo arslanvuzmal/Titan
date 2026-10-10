@@ -303,6 +303,61 @@ export interface Placement {
 }
 
 /** A reply waiting for an answer, as the reply desk returns it. */
+// --- dashboard ---------------------------------------------------------------
+export interface PipelineStage {
+  key: string;
+  label: string;
+  hint: string;
+  count: number;
+  /** Share of the previous stage that reached this one; null for the first. */
+  from_previous: number | null;
+}
+export interface Pipeline {
+  stages: PipelineStage[];
+  computed_at: string;
+}
+export interface StageLead {
+  lead_id: string;
+  business_name: string | null;
+  domain: string | null;
+  at: string | null;
+  latest_score: number | null;
+}
+export interface InboxTest {
+  provider: string;
+  folder: string | null;
+  sent_at: string;
+  checked_at: string | null;
+}
+export interface DashboardMailbox {
+  address: string;
+  carrier: string | null;
+  in_mailbox_file: boolean;
+  enabled: boolean;
+  sender_active: boolean;
+  warmup_day: number;
+  warmup_today: number;
+  cold_sent_7d: number;
+  inbox_tests_7d: number;
+  inbox_landed_7d: number;
+  latest_tests: InboxTest[];
+}
+export interface DashboardMailboxes {
+  mailboxes: DashboardMailbox[];
+  warmup_enabled: boolean;
+  warmup_hours_utc: number[];
+  partners: string[];
+  seeds: string[];
+}
+export interface ActivityEvent {
+  id: number;
+  occurred_at: string;
+  kind: string;
+  lead_id: string | null;
+  business_name: string | null;
+  payload: Record<string, unknown>;
+}
+
 export interface DeskReply {
   draft_id: string;
   draft_version: number;
@@ -741,6 +796,15 @@ export const api = {
   health: (t: string) => call<Health>('/api/v1/health', { token: t }),
   placement: (t: string, days = 14) =>
     call<Placement>(`/api/v1/placement${query({ days })}`, { token: t }),
+
+  // --- dashboard -----------------------------------------------------------
+  pipeline: (t: string) => call<Pipeline>('/api/v1/dashboard/pipeline', { token: t }),
+  pipelineStage: (t: string, stage: string, limit = 100) =>
+    call<StageLead[]>(`/api/v1/dashboard/pipeline/${stage}${query({ limit })}`, { token: t }),
+  dashboardMailboxes: (t: string) =>
+    call<DashboardMailboxes>('/api/v1/dashboard/mailboxes', { token: t }),
+  activity: (t: string, kind?: string, before?: string) =>
+    call<ActivityEvent[]>(`/api/v1/dashboard/activity${query({ kind, before, limit: 100 })}`, { token: t }),
 
   // --- reply desk ----------------------------------------------------------
   replies: (t: string) => call<DeskReply[]>('/api/v1/reply-desk', { token: t }),
