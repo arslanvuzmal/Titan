@@ -159,8 +159,11 @@ class StageOut(BaseModel):
     label: str
     hint: str
     count: int
-    #: Share of the previous stage that reached this one; None for the first.
-    from_previous: float | None
+    #: Share of all discovered businesses that reached this stage. Not "of the
+    #: previous stage": the history is not strictly nested -- a business can
+    #: be contactable without qualifying, and Smartlead-era mail went out with
+    #: no approval on record -- so a stage-to-stage ratio can exceed 100%.
+    of_discovered: float | None
 
 
 class PipelineOut(BaseModel):
@@ -180,7 +183,7 @@ async def pipeline_counts(
     session: AsyncSession, workspace_id: uuid.UUID
 ) -> list[StageOut]:
     out: list[StageOut] = []
-    previous: int | None = None
+    base: int | None = None
     for stage in STAGES:
         count = int(
             (
@@ -196,10 +199,11 @@ async def pipeline_counts(
                 label=stage.label,
                 hint=stage.hint,
                 count=count,
-                from_previous=(count / previous) if previous else None,
+                of_discovered=(count / base) if base else None,
             )
         )
-        previous = count
+        if base is None:
+            base = count
     return out
 
 

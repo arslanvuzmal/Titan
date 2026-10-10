@@ -59,7 +59,7 @@ function StageBar({
           {stage.count.toLocaleString()}
         </span>
         <span className="block text-xs text-slate-500">
-          {stage.from_previous === null ? 'start' : `${pct(stage.from_previous)} of prev`}
+          {stage.of_discovered === null ? 'all found' : `${pct(stage.of_discovered)} of found`}
         </span>
       </span>
     </button>
@@ -117,7 +117,7 @@ export default function PipelinePage() {
         <h1 className="text-xl font-semibold text-slate-900">Pipeline</h1>
         <p className="mt-1 text-sm text-slate-500">
           Every business from discovery to a meeting. Each number counts distinct businesses
-          that reached the stage. Click a stage to see who.
+          that reached the stage, and the share of all businesses found. Click a stage to see who.
         </p>
       </div>
 

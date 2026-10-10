@@ -45,7 +45,8 @@ async def test_the_pipeline_counts_businesses_stage_by_stage(
     assert stages["sent"]["count"] == 1
     assert stages["delivered"]["count"] == 1
     assert stages["replied"]["count"] == 0
-    assert stages["discovered"]["from_previous"] is None
+    assert stages["discovered"]["of_discovered"] is None
+    assert stages["sent"]["of_discovered"] == 1.0
 
 
 @pytest.mark.asyncio

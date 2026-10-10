@@ -309,8 +309,8 @@ export interface PipelineStage {
   label: string;
   hint: string;
   count: number;
-  /** Share of the previous stage that reached this one; null for the first. */
-  from_previous: number | null;
+  /** Share of all discovered businesses that reached this stage; null for the first. */
+  of_discovered: number | null;
 }
 export interface Pipeline {
   stages: PipelineStage[];
