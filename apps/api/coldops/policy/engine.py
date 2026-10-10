@@ -196,6 +196,12 @@ class SendContext:
     approval_draft_version: int | None = None
     draft_version: int | None = None
     approval_expires_at: dt.datetime | None = None
+    #: Fingerprint of the content the approver read, and of the content going
+    #: out (coldops.policy.approval_content). When the approval has one, these
+    #: decide staleness instead of the version counter, which every status
+    #: change moves. Approvals recorded before fingerprints keep the old rule.
+    approval_content_sha256: str | None = None
+    draft_content_sha256: str | None = None
 
     # late-binding state re-read by the outbox worker
     is_suppressed: bool = False
@@ -627,9 +633,20 @@ def _approval_denials(ctx: SendContext, mode: EffectiveMode) -> list[Denial]:
                 f"approval decision is {ctx.approval_decision!r}, not 'approved'",
             )
         ]
-    # Editing a draft bumps its version, which invalidates a prior approval.
-    # Without this, "approve then edit then send" bypasses human review.
-    if (
+    # Approve, then edit, then send must not bypass review. Decided on the
+    # content when the approval recorded what the person read: the version
+    # counter also moves when the approval itself sets the status, so on its
+    # own it refused every draft a person approved.
+    if ctx.approval_content_sha256 is not None and ctx.draft_content_sha256 is not None:
+        if ctx.approval_content_sha256 != ctx.draft_content_sha256:
+            denials.append(
+                Denial(
+                    DenyCode.APPROVAL_STALE,
+                    "the draft's content changed after it was approved",
+                )
+            )
+    # An approval from before fingerprints: the version rule, unchanged.
+    elif (
         ctx.approval_draft_version is not None
         and ctx.draft_version is not None
         and ctx.approval_draft_version != ctx.draft_version

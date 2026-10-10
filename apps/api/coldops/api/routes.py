@@ -84,6 +84,8 @@ from coldops.db.session import (
 from coldops.delivery import quotas
 from coldops.delivery.suppression import suppress
 from coldops.outreach.provisioning import ensure_sequence
+from coldops.policy import approval_content
+from coldops.policy.approval_content import CONTENT_KEY
 from coldops.policy.schedule import default_window_for, describe_derivation
 
 router = APIRouter(prefix="/api/v1")
@@ -879,6 +881,9 @@ async def decide_draft(
             decided_by=principal.user_id,
             decided_at=dt.datetime.now(dt.UTC),
             reason=payload.reason,
+            # What the reviewer actually read. The send gate compares this,
+            # not the version counter, which the status change below moves.
+            policy_snapshot={CONTENT_KEY: approval_content.of_draft(draft)},
             actor_ip=request.client.host if request.client else None,
             actor_user_agent=request.headers.get("user-agent", "")[:400] or None,
         )

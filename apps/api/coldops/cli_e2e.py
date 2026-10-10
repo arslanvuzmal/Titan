@@ -29,7 +29,7 @@ import datetime as dt
 import uuid
 from urllib.parse import urlparse
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 
 from coldops.config import get_settings
 
@@ -74,6 +74,7 @@ async def _start(args: argparse.Namespace) -> int:
     from coldops.db.enums import (
         CampaignStatus,
         ContactSource,
+        DraftStatus,
         LeadStatus,
         VerificationStatus,
     )
@@ -86,6 +87,7 @@ async def _start(args: argparse.Namespace) -> int:
         ContactVerification,
         Lead,
         Message,
+        MessageDraft,
         Organization,
         SenderIdentity,
         Workspace,
@@ -291,6 +293,25 @@ async def _start(args: argparse.Namespace) -> int:
                 return 1
             lead.status = LeadStatus.DISCOVERED
             lead.status_reason = "end-to-end test restarted"
+            # The earlier draft never went out; a fresh one replaces it, so
+            # nothing -- the housekeeping sweep included -- queues the old one.
+            await session.execute(
+                update(MessageDraft)
+                .where(
+                    MessageDraft.lead_id == lead.id,
+                    MessageDraft.status.in_(
+                        (
+                            DraftStatus.GENERATED,
+                            DraftStatus.AWAITING_APPROVAL,
+                            DraftStatus.APPROVED,
+                        )
+                    ),
+                    ~select(Message.id)
+                    .where(Message.draft_id == MessageDraft.id)
+                    .exists(),
+                )
+                .values(status=DraftStatus.SUPERSEDED)
+            )
         else:
             lead = Lead(
                 workspace_id=workspace_id,
@@ -365,6 +386,17 @@ async def _start(args: argparse.Namespace) -> int:
 
     workflow_id = research_workflow_id(str(workspace_id), str(campaign_id), str(lead_id))
     client = await connect()
+    # A restart: the earlier run may still be waiting for an approval of the
+    # draft just retired. Its name is the lead's, so it has to end first.
+    try:
+        from temporalio.client import WorkflowExecutionStatus
+
+        handle = client.get_workflow_handle(workflow_id)
+        if (await handle.describe()).status == WorkflowExecutionStatus.RUNNING:
+            await handle.terminate(reason="coldops e2e restarted")
+            print("ended the earlier research run for this lead")
+    except Exception:  # noqa: S110 - no earlier run is the usual case
+        pass
     try:
         await client.start_workflow(
             "LeadResearchWorkflow",
@@ -419,8 +451,7 @@ async def _send(args: argparse.Namespace) -> int:
                       FROM message_drafts d
                       LEFT JOIN LATERAL (
                            SELECT id, decided_by FROM message_approvals
-                            WHERE draft_id = d.id AND draft_version = d.version
-                              AND decision = 'approved'
+                            WHERE draft_id = d.id AND decision = 'approved'
                             ORDER BY decided_at DESC LIMIT 1) a ON true
                      WHERE d.workspace_id = :ws AND d.campaign_id = :c
                      ORDER BY d.created_at DESC

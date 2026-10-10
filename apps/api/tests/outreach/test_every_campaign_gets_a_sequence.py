@@ -84,6 +84,10 @@ def test_the_creation_paths_are_the_ones_we_think_they_are() -> None:
         "expansion.py",
         "provision_markets.py",
         "seed.py",
+        # The end-to-end test's own campaign. Deliberately left without a
+        # sequence, and so not in the property below: it writes one message to
+        # the operator's own inbox, and a follow-up would be a second, unasked.
+        "cli_e2e.py",
     }, (
         "a new campaign creation path exists; check it calls ensure_sequence "
         f"and add it here. Found: {sorted(paths)}"

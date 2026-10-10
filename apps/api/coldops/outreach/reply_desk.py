@@ -56,6 +56,8 @@ from coldops.delivery.suppression import is_suppressed
 from coldops.intelligence.message_validator import prohibited_content
 from coldops.intelligence.reply_drafter import BLANK
 from coldops.outreach import unsubscribe
+from coldops.policy import approval_content
+from coldops.policy.approval_content import CONTENT_KEY
 
 #: The drafter's blank marker, up to its first brace: "[TODO: ".
 _BLANK_PREFIX = BLANK.split("{", 1)[0]
@@ -377,6 +379,7 @@ async def send(
         decided_by=decided_by,
         decided_at=now,
         reason="sent from the reply desk",
+        policy_snapshot={CONTENT_KEY: approval_content.of_draft(draft)},
         actor_ip=actor_ip,
     )
     session.add(approval)

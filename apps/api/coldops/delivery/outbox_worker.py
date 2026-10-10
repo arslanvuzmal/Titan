@@ -101,6 +101,7 @@ from coldops.intelligence.message_validator import (
 )
 from coldops.intelligence.sender_auth import is_stale
 from coldops.notify.operator import NotificationKind, record_notification
+from coldops.policy import approval_content
 from coldops.policy.calendars import holiday_on, resolve_country
 from coldops.policy.engine import Decision, SendContext, evaluate_send
 from coldops.policy.schedule import SendWindow, local_time, resolve_timezone
@@ -767,6 +768,12 @@ class OutboxWorker:
             approval_draft_version=approval.draft_version if approval else None,
             draft_version=draft.version,
             approval_expires_at=approval.expires_at if approval else None,
+            approval_content_sha256=(
+                (approval.policy_snapshot or {}).get(approval_content.CONTENT_KEY)
+                if approval
+                else None
+            ),
+            draft_content_sha256=approval_content.of_draft(draft),
             is_suppressed=suppression is not None,
             suppression_reason=suppression.reason.value if suppression else None,
             # Only a payload the reply desk wrote, for a reply draft, threaded
