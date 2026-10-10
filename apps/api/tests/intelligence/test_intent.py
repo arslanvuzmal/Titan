@@ -297,6 +297,8 @@ def test_the_first_real_reply_is_read_as_wanting_a_meeting():
         "Happy to find a time for a chat.",
         "I like your ideas.",
         "I really love the proposal",
+        "We are gonna have a meeting at 2pm Tomorrow",
+        "Kindly share all details",
     ],
 )
 def test_everyday_ways_of_saying_yes(body: str):
@@ -310,7 +312,25 @@ def test_everyday_ways_of_saying_yes(body: str):
         "I'd like to be removed from your list.",
         "No time for a meeting, sorry.",
         "Not interested, we don't need to meet.",
+        "We don't need to have a meeting.",
+        "We won't have a call, thanks.",
     ],
 )
 def test_the_new_rules_do_not_turn_a_no_into_a_yes(body: str):
     assert not verdict(body).is_positive, body
+
+
+#: The second real reply, 10 Oct 2026, as it arrived.
+SECOND_REAL_REPLY = (
+    "Nice to hear from you, We are gonna have a meeting at 2pm Tomorrow, Kindly\n"
+    "share all details ..\n\n"
+    "On Sat, 10 Oct 2026, 1:58 pm Arslan Vuzmal Lone, <\n"
+    "outreach@example.com> wrote:\n\n"
+    "> Hi there,\n"
+)
+
+
+def test_the_second_real_reply_is_read_as_a_meeting():
+    result = verdict(SECOND_REAL_REPLY)
+    assert result.reply_class is ReplyClass.WANTS_CALL
+    assert result.is_positive

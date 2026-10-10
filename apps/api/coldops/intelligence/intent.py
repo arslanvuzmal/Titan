@@ -144,6 +144,14 @@ _PATTERNS: tuple[tuple[ReplyClass, tuple[re.Pattern[str], ...]], ...] = (
                 r"set up a (call|meeting))\b",
                 re.I,
             ),
+            # The second real reply: "We are gonna have a meeting at 2pm
+            # Tomorrow". Only a plain future or intention ahead of "have", so
+            # "we don't need to have a meeting" and "we won't have" stay out.
+            re.compile(
+                r"\b(we|i)(\s*'(re|m|ll)|\s+(are|am|will|can|shall))?\s+"
+                r"((gonna|going to)\s+)?have\s+a\s+(meeting|call|chat)\b",
+                re.I,
+            ),
         ),
     ),
     (
@@ -163,7 +171,8 @@ _PATTERNS: tuple[tuple[ReplyClass, tuple[re.Pattern[str], ...]], ...] = (
             re.compile(
                 r"\b(tell me more|more (info|information|detail)|can you (explain|"
                 r"elaborate|clarify)|what (exactly )?(do|would) you (do|mean)|"
-                r"send (me )?(more|some) (info|details))\b",
+                r"send (me )?(more|some) (info|details)|"
+                r"(share|send)( me| us)?( all)?( the)?( more)? details)\b",
                 re.I,
             ),
             re.compile(r"\bhow (does|would) (it|that|this) work\b", re.I),
