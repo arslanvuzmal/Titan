@@ -103,6 +103,7 @@ ignore = [
 "coldops/cli_pdf.py" = ["T20"]
 "coldops/cli_ml.py" = ["T20"]  # a CLI command; printing is the interface
 "coldops/cli_e2e.py" = ["T20"]  # a CLI command; printing is the interface
+"coldops/cli_reactivate.py" = ["T20"]  # a CLI command; printing is the interface
 "coldops/seed.py" = ["T20"]  # operator script; printing is the interface
 "coldops/provision_markets.py" = ["T20"]  # likewise
 "coldops/provision_smartlead.py" = ["T20"]  # likewise
