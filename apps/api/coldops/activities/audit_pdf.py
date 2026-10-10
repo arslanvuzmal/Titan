@@ -51,17 +51,31 @@ async def _candidates(workspace_id: uuid.UUID) -> list[tuple[uuid.UUID, uuid.UUI
             await session.execute(
                 text(
                     """
-                    SELECT o.draft_id, o.lead_id
-                      FROM outbox_messages o
-                     WHERE o.workspace_id = :ws
-                       AND o.status IN ('pending', 'deferred')
-                       AND o.created_at > now() - interval '3 days'
-                       AND NOT EXISTS (
+                    -- Drafts still waiting on a person, as well as queued
+                    -- mail. Queued alone was too late: a free mailbox sends
+                    -- a queued email within seconds, long before this
+                    -- five-minute sweep, so it left without its PDF. The
+                    -- approval wait is the time there is to render in.
+                    SELECT draft_id, lead_id FROM (
+                        SELECT o.draft_id, o.lead_id, o.created_at
+                          FROM outbox_messages o
+                         WHERE o.workspace_id = :ws
+                           AND o.status IN ('pending', 'deferred')
+                           AND o.created_at > now() - interval '3 days'
+                        UNION
+                        SELECT d.id, d.lead_id, d.created_at
+                          FROM message_drafts d
+                         WHERE d.workspace_id = :ws
+                           AND d.status IN ('awaiting_approval', 'approved')
+                           AND d.validation_passed
+                           AND d.created_at > now() - interval '3 days'
+                    ) c
+                     WHERE NOT EXISTS (
                            SELECT 1 FROM messages m
                             WHERE m.workspace_id = :ws
-                              AND m.lead_id = o.lead_id
+                              AND m.lead_id = c.lead_id
                               AND m.sent_at IS NOT NULL)
-                     ORDER BY o.created_at
+                     ORDER BY created_at
                      LIMIT 50
                     """
                 ),
