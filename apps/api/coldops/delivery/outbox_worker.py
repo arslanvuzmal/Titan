@@ -75,6 +75,7 @@ from coldops.db.session import get_sessionmaker
 from coldops.delivery import (
     adaptive_limits,
     deliverability,
+    operator_test,
     placement_gate,
     quotas,
     sender_health,
@@ -768,6 +769,11 @@ class OutboxWorker:
                 (row.payload or {}).get("kind") == "reply"
                 and (draft.template_key or "").startswith("reply:")
             ),
+            is_operator_test=operator_test.is_operator_test(
+                self._settings,
+                recipient=row.to_email_normalized,
+                source=channel.source,
+            ),
         )
         # Unused but fetched for the audit trail; keeps the read in one place.
         _ = contact
@@ -1291,6 +1297,20 @@ class OutboxWorker:
                 now=now,
             )
 
+    async def _is_operator_test(self, session: AsyncSession, row: OutboxMessage) -> bool:
+        """The same two-fact rule build_context applies, read from the draft's channel."""
+        if not operator_test.listed(self._settings, row.to_email_normalized):
+            return False
+        draft = await session.get(MessageDraft, row.draft_id)
+        channel = (
+            await session.get(ContactChannel, draft.contact_channel_id)
+            if draft is not None
+            else None
+        )
+        return channel is not None and operator_test.is_operator_test(
+            self._settings, recipient=row.to_email_normalized, source=channel.source
+        )
+
     async def _check_deliverability(
         self, session: AsyncSession, row: OutboxMessage, email: OutboundEmail
     ) -> deliverability.DeliverabilityReport:
@@ -1454,7 +1474,15 @@ class OutboxWorker:
         # not cold mail: it is not held behind the cold-mail placement gate.
         # Every other check below still applies to it.
         is_reply = (row.payload or {}).get("kind") == "reply"
-        if self._settings.placement_gate_enabled and sender is not None and not is_reply:
+        # The operator's own test is the one message whose landing is the
+        # thing being measured, so a resting domain does not hold it either.
+        is_test = await self._is_operator_test(session, row)
+        if (
+            self._settings.placement_gate_enabled
+            and sender is not None
+            and not is_reply
+            and not is_test
+        ):
             placement = (
                 await placement_gate.verdicts_for(
                     session,

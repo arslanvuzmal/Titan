@@ -237,7 +237,11 @@ async def _own_addresses(
     if operator:
         own.add(operator)
     own |= _warmup_and_seed_addresses()
-    return frozenset(own)
+    # Except the inbox the operator named for ``coldops e2e``: its reply is
+    # the thing that test exists to watch arrive and be read. Listing it is a
+    # deliberate act, and clearing COLDOPS_TEST_RECIPIENTS restores the rule.
+    tests = {r.strip().casefold() for r in get_settings().test_recipients}
+    return frozenset(own - tests)
 
 
 def _warmup_and_seed_addresses() -> set[str]:

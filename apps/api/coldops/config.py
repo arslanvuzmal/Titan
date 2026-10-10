@@ -498,6 +498,14 @@ class Settings(BaseSettings):
     #: the validator below instead. Found by loading Settings against the real
     #: recovered environment; reading the code would not have shown it.
     smartlead_test_recipients: Annotated[tuple[str, ...], NoDecode] = ()
+    #: The operator's own addresses, for ``coldops e2e``: one lead, written to
+    #: through the whole pipeline, received by somebody who can open, click and
+    #: reply. A message is treated as that test only when its address is listed
+    #: here *and* was entered by hand (``manual_entry``); then, and only then,
+    #: the cold-mail placement gate and the paused test campaign do not hold it.
+    #: Approval, suppression, authentication and unsubscribe still apply.
+    #: Empty by default, so nothing is exempt until an operator names an inbox.
+    test_recipients: Annotated[tuple[str, ...], NoDecode] = ()
     #: HMAC secret for verifying Smartlead webhook callbacks. Without it the
     #: webhook route must fail closed -- an unverified callback can mark a
     #: message replied and stop a sequence.
@@ -737,7 +745,7 @@ class Settings(BaseSettings):
     rate_limit_redis_url: str | None = None
 
     # ------------------------------------------------------------ validators
-    @field_validator("smartlead_test_recipients", mode="before")
+    @field_validator("smartlead_test_recipients", "test_recipients", mode="before")
     @classmethod
     def _comma_separated_recipients(cls, value: Any) -> Any:
         """Accept `a@x.com,b@y.com` as well as a JSON array.

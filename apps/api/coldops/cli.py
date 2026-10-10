@@ -33,6 +33,7 @@ from typing import Any
 from pydantic_core import PydanticUndefined
 
 from coldops import __version__
+from coldops.cli_e2e import add_e2e_parser
 from coldops.cli_events import add_events_parser
 from coldops.cli_ml import add_ml_parser
 from coldops.cli_pdf import add_pdf_parser
@@ -2502,6 +2503,7 @@ def main() -> int:
     add_events_parser(sub)
     add_pdf_parser(sub)
     add_ml_parser(sub)
+    add_e2e_parser(sub)
 
     verify_parser = sub.add_parser(
         "verify-contacts",

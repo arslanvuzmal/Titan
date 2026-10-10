@@ -62,7 +62,7 @@ from coldops.db.models import (
     Workspace,
 )
 from coldops.db.session import workspace_session, workspace_unit_of_work
-from coldops.delivery import sender_pool
+from coldops.delivery import operator_test, sender_pool
 from coldops.delivery.suppression import is_suppressed
 from coldops.intelligence import case_studies, evidence_page
 from coldops.intelligence.absence import ABSENCE_ISSUE_TYPES, findings_from_gap
@@ -901,6 +901,21 @@ async def resolve_contact(request: ContactActivityInput) -> ContactActivityResul
                 select(Contact.id).where(Contact.organization_id == org.id).limit(1)
             )
         ).scalar_one_or_none()
+        # The operator's own end-to-end test: they entered the address by hand
+        # and listed it in COLDOPS_TEST_RECIPIENTS, and it is the one the test
+        # is for. Whatever the site publishes is the operator's own mail.
+        if lead.primary_contact_channel_id is not None:
+            entered = await session.get(ContactChannel, lead.primary_contact_channel_id)
+            if (
+                entered is not None
+                and entered.is_active
+                and operator_test.is_operator_test(
+                    get_settings(),
+                    recipient=entered.normalized_value,
+                    source=entered.source,
+                )
+            ):
+                return ContactActivityResult(eligible_channel_id=str(entered.id))
         # Snapshot scalars before the session closes: reading an ORM attribute
         # afterwards raises DetachedInstanceError.
         org_id = org.id
@@ -1999,8 +2014,17 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
         # goes to whichever mailbox has the most room left today, so a batch
         # spreads across the pool instead of filling one mailbox and deferring
         # the rest.
+        # The operator's own end-to-end test is not held behind the cold-mail
+        # placement gate (see coldops.delivery.operator_test); every other
+        # reason a mailbox cannot send still applies to it.
         slots = await sender_pool.load_slots(
-            session, workspace_id, campaign.id, now=_now()
+            session,
+            workspace_id,
+            campaign.id,
+            now=_now(),
+            cold_mail=not operator_test.is_operator_test(
+                get_settings(), recipient=channel.normalized_value, source=channel.source
+            ),
         )
         selection = sender_pool.choose(slots)
         sender = (

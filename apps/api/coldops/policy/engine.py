@@ -254,6 +254,10 @@ class SendContext:
     #: :data:`REPLY_EXEMPT` is lifted and nothing else is: suppression, master
     #: switches, sender authentication, approval and working hours all hold.
     is_reply: bool = False
+    #: The operator's own end-to-end test (coldops.delivery.operator_test). It
+    #: rides a campaign kept paused so the loop never works it; that is the
+    #: only rule lifted here. Everything else applies as to cold mail.
+    is_operator_test: bool = False
 
 
 def evaluate_send(ctx: SendContext) -> Decision:
@@ -523,6 +527,8 @@ def evaluate_send(ctx: SendContext) -> Decision:
 
     if ctx.is_reply:
         denials = [d for d in denials if not _lifted_for_reply(d, ctx)]
+    if ctx.is_operator_test:
+        denials = [d for d in denials if d.code not in OPERATOR_TEST_EXEMPT]
 
     return Decision(
         allowed=not denials,
@@ -550,6 +556,10 @@ REPLY_EXEMPT = frozenset(
         DenyCode.SPACING,
     }
 )
+
+#: Lifted for the operator's own end-to-end test, and only this: its campaign
+#: is paused on purpose, so the campaign loop never discovers or follows up.
+OPERATOR_TEST_EXEMPT = frozenset({DenyCode.CAMPAIGN_NOT_ACTIVE})
 
 #: Terminal lead statuses a reply may still go to: the conversation is what
 #: made them terminal. Suppressed, disqualified, rejected and archived leads
