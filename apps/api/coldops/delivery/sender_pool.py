@@ -176,12 +176,18 @@ async def load_slots(
     now: dt.datetime,
     limit_for: LimitResolver | None = None,
     cold_mail: bool = True,
+    include_paused: bool = False,
 ) -> list[MailboxSlot]:
     """The campaign's pool, with each mailbox's remaining capacity today.
 
     Falls back to the campaign's own ``sender_identity_id`` when no pool rows
     exist, so a campaign configured before this table existed behaves exactly as
     it did -- a pool of one.
+
+    ``include_paused`` offers a mailbox switched off for cold mail as well.
+    Only the operator's own end-to-end test asks for it
+    (coldops.delivery.operator_test): its whole point is to run while the
+    estate is paused. Every other reason a mailbox cannot send still applies.
 
     ``campaign_id=None`` asks for every mailbox in the workspace instead, which
     is what a report wants: the question there is what the whole estate can
@@ -306,7 +312,7 @@ async def load_slots(
     resolve = limit_for or _default_limit
     slots: list[MailboxSlot] = []
     for row in rows:
-        excluded = unavailable_reason(row)
+        excluded = unavailable_reason(row, include_paused=include_paused)
         verdict = placement.get(str(row.from_email).strip().lower())
         if excluded is None and verdict is not None and not verdict.may_send:
             excluded = verdict.detail
@@ -324,7 +330,7 @@ async def load_slots(
     return slots
 
 
-def unavailable_reason(row: Any) -> str | None:
+def unavailable_reason(row: Any, *, include_paused: bool = False) -> str | None:
     """Why this mailbox cannot send at all today.
 
     Deliberately the same conditions ``SenderIdentity.is_ready_to_send``
@@ -348,7 +354,7 @@ def unavailable_reason(row: Any) -> str | None:
     # worker's own throttle is the right place to decide how much.
     if getattr(row, "health", None) == "blocked" and _probation_for(row) is None:
         return "mailbox health is blocked"
-    if not row.is_active:
+    if not row.is_active and not include_paused:
         return "mailbox is inactive"
     if not row.domain_verified:
         return "sending domain is not verified"

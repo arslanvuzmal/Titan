@@ -134,6 +134,11 @@ class WorkspaceMember(Base, TimestampMixin):
     user: Mapped[User] = relationship(back_populates="memberships")
 
 
+#: The one authorization error that means "switched off", not "broken". Named
+#: so the operator's end-to-end test can waive exactly this and nothing else.
+SENDER_INACTIVE = "sender identity is inactive"
+
+
 class SenderIdentity(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
     """A verified From: address plus its compliance metadata.
 
@@ -204,7 +209,7 @@ class SenderIdentity(Base, WorkspaceScoped, TimestampMixin, VersionedMixin):
 
         errors: list[str] = []
         if not self.is_active:
-            errors.append("sender identity is inactive")
+            errors.append(SENDER_INACTIVE)
         if not self.domain_verified:
             errors.append(f"sending domain {self.sending_domain} is not verified")
         elif is_stale(self.last_verified_at):

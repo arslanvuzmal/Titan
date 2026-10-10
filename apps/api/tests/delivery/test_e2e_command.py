@@ -165,8 +165,8 @@ async def test_one_of_our_own_mailboxes_is_refused(
 async def test_a_resting_domain_still_gives_the_test_a_mailbox(
     db_session, sendable, monkeypatch
 ) -> None:
-    """Queue time: the pool must not refuse the test a mailbox the gate holds."""
-    from coldops.db.models import Message, OutboxMessage
+    """Queue time: a paused mailbox behind the gate still takes the test, and only it."""
+    from coldops.db.models import Message, OutboxMessage, SenderIdentity
     from coldops.workflows.types import QueueActivityInput
     from sqlalchemy import delete, update
 
@@ -179,6 +179,11 @@ async def test_a_resting_domain_still_gives_the_test_a_mailbox(
             update(ContactChannel)
             .where(ContactChannel.id == sendable.channel_id)
             .values(source=ContactSource.MANUAL_ENTRY)
+        )
+        await s.execute(
+            update(SenderIdentity)
+            .where(SenderIdentity.id == sendable.sender_id)
+            .values(is_active=False)
         )
 
     def queue() -> object:

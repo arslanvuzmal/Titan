@@ -1,7 +1,7 @@
 """The operator's end-to-end test reaches the carrier; nothing else rides on it.
 
-Each test pauses the campaign and switches the placement gate on with no
-readings at all -- the state the live estate is in while a domain rests -- and
+Each test pauses the campaign, switches the mailbox off, and turns the
+placement gate on with no readings at all -- the state the live estate is in while a domain rests -- and
 then varies exactly one of the two facts that make a message the test.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from coldops.db.enums import CampaignStatus, ContactSource
-from coldops.db.models import Campaign, ContactChannel
+from coldops.db.models import Campaign, ContactChannel, SenderIdentity
 from coldops.db.session import get_sessionmaker
 from coldops.delivery.outbox_worker import OutboxWorker
 from coldops.delivery.providers.mock import MockEmailProvider
@@ -31,6 +31,12 @@ async def _held_back(sendable, *, source: ContactSource) -> None:
             update(ContactChannel)
             .where(ContactChannel.id == sendable.channel_id)
             .values(source=source)
+        )
+        # Every mailbox switched off for cold mail, as on the live estate.
+        await s.execute(
+            update(SenderIdentity)
+            .where(SenderIdentity.id == sendable.sender_id)
+            .values(is_active=False)
         )
 
 

@@ -2015,16 +2015,19 @@ async def queue_message(request: QueueActivityInput) -> QueueActivityResult:
         # spreads across the pool instead of filling one mailbox and deferring
         # the rest.
         # The operator's own end-to-end test is not held behind the cold-mail
-        # placement gate (see coldops.delivery.operator_test); every other
-        # reason a mailbox cannot send still applies to it.
+        # placement gate or the paused mailboxes (see
+        # coldops.delivery.operator_test); every other reason a mailbox cannot
+        # send still applies to it.
+        is_test = operator_test.is_operator_test(
+            get_settings(), recipient=channel.normalized_value, source=channel.source
+        )
         slots = await sender_pool.load_slots(
             session,
             workspace_id,
             campaign.id,
             now=_now(),
-            cold_mail=not operator_test.is_operator_test(
-                get_settings(), recipient=channel.normalized_value, source=channel.source
-            ),
+            cold_mail=not is_test,
+            include_paused=is_test,
         )
         selection = sender_pool.choose(slots)
         sender = (

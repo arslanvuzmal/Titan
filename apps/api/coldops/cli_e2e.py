@@ -146,7 +146,14 @@ async def _start(args: argparse.Namespace) -> int:
         print(f"{to} is on the do-not-contact list ({suppressed.reason.value}).")
         return 1
 
-    usable = [s for s in senders if not s.authorization_errors()]
+    # Switched off for cold mail is fine: the test is excused from that, and
+    # from nothing else a mailbox can be refused for.
+    from coldops.db.models.identity import SENDER_INACTIVE
+
+    def _blocking(s: SenderIdentity) -> list[str]:
+        return [e for e in s.authorization_errors() if e != SENDER_INACTIVE]
+
+    usable = [s for s in senders if not _blocking(s)]
     print(f"End-to-end test: {domain} -> {to}")
     print()
     print("What has to be true for it to send:")
@@ -163,8 +170,11 @@ async def _start(args: argparse.Namespace) -> int:
         f"  mailboxes that may send                                 {len(usable)} of {len(senders)}"
     )
     for s in senders:
-        errors = s.authorization_errors()
-        print(f"    {s.from_email:<40} {'ready' if not errors else '; '.join(errors)}")
+        errors = _blocking(s)
+        state = "; ".join(errors) if errors else "ready"
+        if not errors and not s.is_active:
+            state = "ready (paused for cold mail; this one message is excused)"
+        print(f"    {s.from_email:<40} {state}")
     if settings.placement_gate_enabled:
         print(
             "  placement gate                                          on; this one message is excused"

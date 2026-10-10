@@ -71,6 +71,7 @@ from coldops.db.models import (
     SenderIdentity,
     Workspace,
 )
+from coldops.db.models.identity import SENDER_INACTIVE
 from coldops.db.session import get_sessionmaker
 from coldops.delivery import (
     adaptive_limits,
@@ -698,6 +699,9 @@ class OutboxWorker:
                 },
             )
 
+        is_test = operator_test.is_operator_test(
+            self._settings, recipient=row.to_email_normalized, source=channel.source
+        )
         ctx = SendContext(
             settings=self._settings,
             now=self._now(),
@@ -719,7 +723,13 @@ class OutboxWorker:
                 if s in ContactSource.__members__.values() or _is_member(s)
             ),
             respect_quiet_hours=policy.respect_quiet_hours,
-            sender_authorization_errors=tuple(sender.authorization_errors()),
+            # A mailbox switched off for cold mail may still carry the
+            # operator's own test; nothing else it is refused for is waived.
+            sender_authorization_errors=tuple(
+                e
+                for e in sender.authorization_errors()
+                if not (is_test and e == SENDER_INACTIVE)
+            ),
             lead_status=lead.status,
             lead_score=lead.latest_score,
             lead_replied_at=lead.replied_at,
@@ -769,11 +779,7 @@ class OutboxWorker:
                 (row.payload or {}).get("kind") == "reply"
                 and (draft.template_key or "").startswith("reply:")
             ),
-            is_operator_test=operator_test.is_operator_test(
-                self._settings,
-                recipient=row.to_email_normalized,
-                source=channel.source,
-            ),
+            is_operator_test=is_test,
         )
         # Unused but fetched for the audit trail; keeps the read in one place.
         _ = contact
