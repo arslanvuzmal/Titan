@@ -21,6 +21,14 @@ Then it:
     which ones work
 
 Nothing is sent. Python standard library only, so it runs on the host.
+
+Without a terminal, ``--from-stdin`` reads lines of ``address app-password``
+instead (spaces inside the password are fine), e.g. from a file kept in the
+laptop's gitignored secrets/ folder:
+
+    ssh ... "python3 /opt/coldops/deploy/mailboxes-to-google.py --from-stdin" < app-passwords.txt
+
+A mailbox with no line is switched off, exactly as an empty answer would be.
 """
 
 from __future__ import annotations
@@ -42,12 +50,24 @@ IMAP = {"host": "imap.gmail.com", "port": 993, "security": "ssl"}
 SERVICES = ["api", "outbox-worker", "inbound-worker", "temporal-worker"]
 
 
+def _read_stdin() -> dict[str, str]:
+    """``address password`` per line; the password may contain spaces."""
+    given: dict[str, str] = {}
+    for line in sys.stdin.read().splitlines():
+        parts = line.strip().lstrip("Feff").split(None, 1)
+        if len(parts) == 2 and "@" in parts[0]:
+            given[parts[0].lower()] = parts[1]
+    return given
+
+
 def main() -> int:
     if os.geteuid() != 0:
         print("run as root")
         return 1
-    if not sys.stdin.isatty():
-        print("needs a terminal: run it with `ssh -t ...` so it can ask for passwords")
+    from_stdin = "--from-stdin" in sys.argv[1:]
+    given = _read_stdin() if from_stdin else {}
+    if not from_stdin and not sys.stdin.isatty():
+        print("needs a terminal (ssh -t), or pass --from-stdin with a file")
         return 1
     data = json.loads(FILE.read_text(encoding="utf-8"))
     boxes = data["mailboxes"]
@@ -56,7 +76,10 @@ def main() -> int:
     changed = 0
     for box in boxes:
         address = box["from_email"]
-        secret = getpass.getpass(f"{address}  Google app password (Enter = switch off): ")
+        if from_stdin:
+            secret = given.get(address.lower(), "")
+        else:
+            secret = getpass.getpass(f"{address}  Google app password (Enter = switch off): ")
         secret = secret.replace(" ", "").strip()
         if not secret:
             box["enabled"] = False
