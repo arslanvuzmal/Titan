@@ -73,6 +73,13 @@ def main() -> int:
     boxes = data["mailboxes"]
     print(f"{len(boxes)} mailboxes in {FILE}\n")
 
+    # A line for an address the file does not know yet adds that mailbox --
+    # a Workspace user created after the pool was set up (help@, say).
+    known = {box["from_email"].lower() for box in boxes}
+    for address in sorted(set(given) - known):
+        boxes.append({"from_email": address, "label": "added from Google Workspace", "enabled": False})
+        print(f"  {address}: new mailbox")
+
     changed = 0
     for box in boxes:
         address = box["from_email"]
