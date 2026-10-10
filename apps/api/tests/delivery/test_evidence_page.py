@@ -374,3 +374,70 @@ async def test_the_latest_screenshot_is_served_behind_the_token(
     assert client.get(f"/e/{forged}/shot/desktop.jpg").status_code == 404
     page = client.get(f"/e/{token}")
     assert "/shot/desktop.jpg" in page.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_second_lead_for_the_same_business_sees_its_screenshot(
+    db_session, workspace
+) -> None:
+    """One image is stored once; a second lead for the site must still find it.
+
+    Found on the second end-to-end test of 10 Oct 2026: the re-crawl took the
+    same picture, saved no row of its own, and its PDF had no screenshot.
+    """
+    from coldops.db.enums import CampaignStatus, LeadStatus
+    from coldops.db.models import BrowserArtifact, Campaign, CrawlRun, Lead
+
+    lead_id = await _with_findings(db_session, workspace)
+    run_id = await db_session.scalar(
+        text("SELECT id FROM research_runs WHERE workspace_id = :ws AND lead_id = :lead"),
+        {"ws": workspace, "lead": lead_id},
+    )
+    crawl = CrawlRun(
+        workspace_id=workspace,
+        research_run_id=run_id,
+        seed_url="https://fixture.test/",
+        status="completed",
+    )
+    db_session.add(crawl)
+    await db_session.flush()
+    key = "shots/cd/" + "cd" * 32 + ".jpg"
+    db_session.add(
+        BrowserArtifact(
+            workspace_id=workspace,
+            crawl_run_id=crawl.id,
+            kind="screenshot_desktop",
+            media_type="image/jpeg",
+            storage_key=key,
+            byte_size=4,
+            content_fingerprint="cd" * 32,
+            captured_at=NOW,
+        )
+    )
+    first = await db_session.get(Lead, lead_id)
+    other_campaign = Campaign(
+        workspace_id=workspace,
+        name="another",
+        slug=f"another-{uuid.uuid4().hex[:6]}",
+        status=CampaignStatus.PAUSED,
+    )
+    db_session.add(other_campaign)
+    await db_session.flush()
+    second = Lead(
+        workspace_id=workspace,
+        campaign_id=other_campaign.id,
+        organization_id=first.organization_id,
+        status=LeadStatus.DISCOVERED,
+    )
+    db_session.add(second)
+    await db_session.commit()
+
+    shots = await ep.latest_shots(db_session, workspace_id=workspace, lead_id=second.id)
+    assert shots["desktop"][0] == key
+
+    # And a lead for some other business does not borrow it.
+    stranger = await _with_findings(db_session, workspace)
+    assert (
+        await ep.latest_shots(db_session, workspace_id=workspace, lead_id=stranger) == {}
+    )

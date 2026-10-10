@@ -133,7 +133,14 @@ def shot_path(artifact_dir: str, storage_key: str) -> pathlib.Path | None:
 async def latest_shots(
     session: AsyncSession, *, workspace_id: uuid.UUID, lead_id: uuid.UUID
 ) -> dict[str, tuple[str, dt.datetime]]:
-    """The most recent saved screenshot of each view for this lead."""
+    """The most recent saved screenshot of each view of this lead's business.
+
+    Looked up through the business, not the lead. A screenshot is stored once
+    per identical image (unique on workspace, fingerprint, kind), so a second
+    lead for the same site -- the same business in another campaign, or a
+    re-run of the end-to-end test -- takes the same picture and saves no row of
+    its own; keyed on the lead, its PDF and evidence page showed no screenshot.
+    """
     rows = (
         await session.execute(
             text(
@@ -142,8 +149,11 @@ async def latest_shots(
                   FROM browser_artifacts a
                   JOIN crawl_runs c ON c.id = a.crawl_run_id AND c.workspace_id = :ws
                   JOIN research_runs r ON r.id = c.research_run_id AND r.workspace_id = :ws
+                  JOIN leads l ON l.id = r.lead_id AND l.workspace_id = :ws
                  WHERE a.workspace_id = :ws
-                   AND r.lead_id = :lead
+                   AND l.organization_id = (
+                       SELECT organization_id FROM leads
+                        WHERE id = :lead AND workspace_id = :ws)
                    AND a.kind = ANY(CAST(:kinds AS text[]))
                    AND a.storage_key IS NOT NULL
                  ORDER BY a.kind, a.captured_at DESC
