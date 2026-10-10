@@ -129,6 +129,21 @@ _PATTERNS: tuple[tuple[ReplyClass, tuple[re.Pattern[str], ...]], ...] = (
                 r"(calendar|calendly|booking) link\b",
                 re.I,
             ),
+            # How people actually write it, typed fast on a phone. The first
+            # real reply to the end-to-end test read "we have to make a spot
+            # for meeting" and matched nothing above.
+            re.compile(
+                r"\b(make|find|fix|book|set|get|arrange|schedule|plan|pick)\s+"
+                r"(a\s+|some\s+)?(spot|slot|time|date|day)\s+(for|to)\s+"
+                r"(a\s+|the\s+)?(meeting|call|chat|meet|talk)\b",
+                re.I,
+            ),
+            re.compile(
+                r"\b(let'?s|we (should|can|could|must|have to|need to)|can we|"
+                r"could we|shall we)\s+(meet|have a (call|meeting|chat)|"
+                r"set up a (call|meeting))\b",
+                re.I,
+            ),
         ),
     ),
     (
@@ -158,7 +173,7 @@ _PATTERNS: tuple[tuple[ReplyClass, tuple[re.Pattern[str], ...]], ...] = (
         ReplyClass.INTERESTED,
         (
             re.compile(
-                r"\b(yes|yep|yeah|sure)\b.{0,40}\b(please|interested|let'?s|go ahead|"
+                r"\b(yes|yep|yeah|yeh|yup|sure)\b.{0,40}\b(please|interested|let'?s|go ahead|"
                 r"sounds|do it)\b",
                 re.I | re.S,
             ),
@@ -170,6 +185,13 @@ _PATTERNS: tuple[tuple[ReplyClass, tuple[re.Pattern[str], ...]], ...] = (
                 re.I,
             ),
             re.compile(r"\bgo ahead\b|\bplease proceed\b", re.I),
+            # "I like your ideas" -- and "Ilike", as it arrived. Adjacent words
+            # only, so "I don't like" and "I'd like to unsubscribe" never fire.
+            re.compile(
+                r"\bi\s*(really\s+)?(like|love)\s+(your|the|this|these|that)\s+"
+                r"(idea|ideas|proposal|suggestion|suggestions|approach|work)\b",
+                re.I,
+            ),
         ),
     ),
     (

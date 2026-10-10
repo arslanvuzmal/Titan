@@ -268,3 +268,49 @@ def test_the_excerpt_is_drawn_from_the_reply_not_the_quoted_original():
     assert result.reply_class is ReplyClass.NOT_INTERESTED
     assert result.excerpt is not None
     assert "book a call" not in result.excerpt
+
+
+#: The first real reply to the end-to-end test, 10 Oct 2026, exactly as it
+#: arrived -- typed fast, no apostrophes, a missing space, Gmail's quote header
+#: wrapped onto two lines. It matched no rule and was filed as unknown.
+FIRST_REAL_REPLY = (
+    "Yeh Sure we have to make a spot for meeting, Ilike your ideas I am gonna\n"
+    "get back to u ..\n\n"
+    "On Sat, 10 Oct 2026, 1:21 pm Arslan Vuzmal Lone, <sales@example.com>\n"
+    "wrote:\n\n"
+    "> Hi there,\n"
+    "> I came across your site and noticed there is no phone number.\n"
+)
+
+
+def test_the_first_real_reply_is_read_as_wanting_a_meeting():
+    result = verdict(FIRST_REAL_REPLY)
+    assert result.reply_class is ReplyClass.WANTS_CALL
+    assert result.is_positive
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Let's meet next week.",
+        "Can we have a call on Monday?",
+        "Happy to find a time for a chat.",
+        "I like your ideas.",
+        "I really love the proposal",
+    ],
+)
+def test_everyday_ways_of_saying_yes(body: str):
+    assert verdict(body).is_positive, body
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "I don't like your ideas.",
+        "I'd like to be removed from your list.",
+        "No time for a meeting, sorry.",
+        "Not interested, we don't need to meet.",
+    ],
+)
+def test_the_new_rules_do_not_turn_a_no_into_a_yes(body: str):
+    assert not verdict(body).is_positive, body
