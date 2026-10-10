@@ -54,7 +54,7 @@ def _read_stdin() -> dict[str, str]:
     """``address password`` per line; the password may contain spaces."""
     given: dict[str, str] = {}
     for line in sys.stdin.read().splitlines():
-        parts = line.strip().lstrip("Feff").split(None, 1)
+        parts = line.replace("﻿", "").strip().split(None, 1)
         if len(parts) == 2 and "@" in parts[0]:
             given[parts[0].lower()] = parts[1]
     return given
