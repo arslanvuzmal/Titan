@@ -820,6 +820,13 @@ class OutboxWorker:
         limit = await self._capture_sender_health(session, row)
 
         decision = evaluate_send(ctx)
+        if not decision.allowed and self._only_the_mailbox_is_off(decision):
+            # A mailbox switched off -- paused, or retired -- is a fact about
+            # the mailbox, not the message. Another in the pool may carry it;
+            # with none on, it waits. Blocking here used to strand everything
+            # queued behind a mailbox the moment it was switched off.
+            recorded = await self._defer_or_repin(session, row, decision.reason_text())
+            return ProcessResult(row.id, "deferred", recorded)
         if not decision.allowed:
             # Quota and quiet hours are temporary; everything else is a block.
             if self._is_temporary(decision):
@@ -1542,6 +1549,28 @@ class OutboxWorker:
                 is_reply=is_reply and bool(headers.get("In-Reply-To")),
             )
         )
+
+    def _only_the_mailbox_is_off(self, decision: Decision) -> bool:
+        """Refused because the pinned mailbox is switched off, and nothing worse.
+
+        Temporary refusals may ride along (they apply from any mailbox); any
+        other refusal -- authentication, suppression, approval -- still blocks.
+        """
+        from coldops.policy.engine import DenyCode
+
+        temporary = {
+            DenyCode.QUOTA_EXHAUSTED,
+            DenyCode.QUIET_HOURS,
+            DenyCode.OUTSIDE_SEND_WINDOW,
+            DenyCode.SPACING,
+        }
+        switched_off = [
+            d
+            for d in decision.denials
+            if d.code is DenyCode.SENDER_NOT_AUTHORIZED and d.detail == SENDER_INACTIVE
+        ]
+        rest = [d for d in decision.denials if d not in switched_off]
+        return bool(switched_off) and all(d.code in temporary for d in rest)
 
     def _is_temporary(self, decision: Decision) -> bool:
         from coldops.policy.engine import DenyCode
