@@ -120,7 +120,7 @@ STAGES: tuple[Stage, ...] = (
     Stage(
         "seen",
         "Seen",
-        "opened by a person (confirmed or likely)",
+        "a person opened the email's evidence page (measured from 3 Oct)",
         "SELECT g.lead_id, max(g.occurred_at) AS at FROM engagement_events g "
         "WHERE g.workspace_id = :ws AND g.lead_id IS NOT NULL "
         "AND g.grade IN ('confirmed', 'likely') GROUP BY g.lead_id",
