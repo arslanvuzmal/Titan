@@ -389,15 +389,16 @@ async def _mailboxes(
                   si.dkim_ok,
                   si.dmarc_ok,
                   si.last_verified_at,
-                  -- Whichever is earlier, ColdOps's first send or the provider's
-                  -- warm-up start. Read differently here than in the pool is
-                  -- how a screen and a gate come to disagree about a ramp.
-                  LEAST(
+                  -- Day zero of the warm-up ramp: the declared start when there
+                  -- is one (a provider's warm-up, or a move to a new provider),
+                  -- otherwise ColdOps's first send. Same rule as the outbox gate
+                  -- (outbox_worker._ramp_start).
+                  COALESCE(
+                    si.warmup_started_at,
                     (SELECT min(m.sent_at) FROM messages m
                       WHERE m.workspace_id = :workspace
                         AND m.sender_identity_id = si.id
-                        AND m.sent_at IS NOT NULL),
-                    si.warmup_started_at
+                        AND m.sent_at IS NOT NULL)
                   )                                             AS first_send_at,
                   (SELECT count(*) FROM messages m
                     WHERE m.workspace_id = :workspace

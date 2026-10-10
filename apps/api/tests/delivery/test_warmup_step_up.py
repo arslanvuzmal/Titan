@@ -1,6 +1,6 @@
 """Two components disagreeing about how warm the same mailbox is.
 
-``_capture_sender_health`` positioned a mailbox with ``_earliest(ColdOps's first
+``_capture_sender_health`` positioned a mailbox with ``_ramp_start(ColdOps's first
 send, the provider's warm-up start)``; ``_check_deliverability`` used ColdOps's
 first send alone. On 20 August the snapshot for ``sales@`` recorded day 13,
 allowance 25, and the send gate enforced day 2, allowance 6 -- for the same
@@ -138,8 +138,8 @@ def test_the_two_paths_now_read_the_same_field() -> None:
     gate = inspect.getsource(outbox_worker.OutboxWorker._check_deliverability)
     health = inspect.getsource(outbox_worker.OutboxWorker._capture_sender_health)
 
-    assert "_earliest(" in gate
-    assert "_earliest(" in health
+    assert "_ramp_start(" in gate
+    assert "_ramp_start(" in health
     assert "warmup_started_at" in gate
 
 

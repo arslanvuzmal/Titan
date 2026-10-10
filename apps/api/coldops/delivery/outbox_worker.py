@@ -371,18 +371,25 @@ class ProcessResult:
 WARMUP_PEAK_WINDOW_DAYS = 7
 
 
-def _earliest(*moments: dt.datetime | None) -> dt.datetime | None:
-    """The earliest of several timestamps, ignoring the ones that are absent.
+def _ramp_start(
+    first_send: dt.datetime | None, warmup_started_at: dt.datetime | None
+) -> dt.datetime | None:
+    """Where a mailbox stands on the warm-up ramp: day zero is this moment.
 
-    Used for warm-up position, where the inputs are ColdOps's first send through
-    a mailbox and the date the provider says it began warming. Neither is
-    authoritative alone: ColdOps's history is a lower bound on a mailbox's age,
-    and the provider's record says nothing about whether ColdOps ever used it.
-    Taking the earlier of the two can move a mailbox forward in the ramp and
-    never back, which is the safe direction for a value that decides volume.
+    ``warmup_started_at`` wins when it is set; otherwise ColdOps's first send.
+    It is set for two reasons and both mean "count from here": a provider that
+    was warming the mailbox before ColdOps held a row for it (Smartlead's
+    connected date, earlier than any send), and a move to a new provider (the
+    10 Oct 2026 move to Google Workspace, later than every send).
+
+    This used to take the *earlier* of the two, which handled the first case
+    and inverted the second: five mailboxes new to Google on 10 Oct read as
+    warm since August, and would have gone to the full cold ramp on the first
+    day sending was switched back on. Warm-up traffic already counted from the
+    move (cli._warmup_days); the cold-mail gate, the pool and the day report
+    now agree with it.
     """
-    known = [m for m in moments if m is not None]
-    return min(known) if known else None
+    return warmup_started_at if warmup_started_at is not None else first_send
 
 
 #: Rules re-checked at send time rather than trusted from the day of writing.
@@ -1075,11 +1082,10 @@ class OutboxWorker:
             )
         ).one()
 
-        # Same rule as the pool: whichever is earlier, ColdOps's first send or
-        # the provider's warm-up start. Reading it differently here than in
-        # selection is how a mailbox gets chosen for a batch it is then refused
-        # at the gate.
-        first_send_at = _earliest(stats.first_send_at, sender.warmup_started_at)
+        # Same rule as the pool (see _ramp_start). Reading it differently here
+        # than in selection is how a mailbox gets chosen for a batch it is then
+        # refused at the gate.
+        first_send_at = _ramp_start(stats.first_send_at, sender.warmup_started_at)
         attempted = int(throughput.attempted or 0)
         retries = int(throughput.retries or 0)
         warmup_limit = deliverability.warmup_limit(
@@ -1397,16 +1403,16 @@ class OutboxWorker:
 
         # The same rule ``_capture_sender_health`` uses, and it did not used to
         # be. This read ColdOps's first send alone while the health snapshot took
-        # ``_earliest`` of that and the provider's warm-up start, so the two
+        # the earlier of that and the provider's warm-up start, so the two
         # disagreed about the same mailbox on the same day: the snapshot for
         # sales@ said day 13, allowance 25, and this gate enforced day 2,
         # allowance 6. An operator reading the dashboard was told a number the
         # sender was never going to be given.
         #
-        # ``_earliest`` is the documented rule and the one kept. What stops it
-        # handing a day-13 allowance to a mailbox that has never sent more than
-        # six is ``recent_peak_sends`` below, which bounds the jump rather than
-        # the destination.
+        # ``_ramp_start`` is the rule, shared by both. What stops it handing a
+        # large allowance to a mailbox that has never sent more than six is
+        # ``recent_peak_sends`` below, which bounds the jump rather than the
+        # destination.
         titan_first_send = (
             await session.execute(
                 text(
@@ -1417,7 +1423,7 @@ class OutboxWorker:
                 {"workspace": row.workspace_id, "sender": row.sender_identity_id},
             )
         ).scalar_one_or_none()
-        first_send_at = _earliest(
+        first_send_at = _ramp_start(
             titan_first_send, sender.warmup_started_at if sender else None
         )
 
