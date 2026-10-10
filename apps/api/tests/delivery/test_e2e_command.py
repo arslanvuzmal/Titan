@@ -18,7 +18,7 @@ from coldops.db.models import Campaign, ContactChannel, Lead, Workspace
 from coldops.db.session import get_sessionmaker
 from coldops.workers import temporal_worker
 from coldops.workflows.types import ContactActivityInput
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from .conftest import sending_settings
 
@@ -212,3 +212,45 @@ async def test_a_resting_domain_still_gives_the_test_a_mailbox(
     monkeypatch.setattr(pool, "get_settings", lambda: listed_settings)
     accepted = await queue()
     assert accepted.queued, accepted.refused_reasons
+
+
+@pytest.mark.asyncio
+async def test_again_after_a_send_is_a_first_email_to_a_new_lead(
+    db_session, sendable, listed
+) -> None:
+    """The personal PDF only rides a first email, so a re-run needs a new lead."""
+    import datetime as dt
+
+    from coldops.db.models import Message
+
+    slug = await _slug(sendable.workspace_id)
+    assert await cli_e2e._start(_args(slug)) == 0
+    first_campaign = await cli_e2e._test_campaign_id(sendable.workspace_id)
+
+    async with get_sessionmaker()() as s, s.begin():
+        first_lead = (
+            await s.execute(select(Lead).where(Lead.campaign_id == first_campaign))
+        ).scalar_one()
+        # Stand in for the test email having gone out.
+        await s.execute(
+            update(Message)
+            .where(Message.id == sendable.message_id)
+            .values(lead_id=first_lead.id, sent_at=dt.datetime.now(dt.UTC))
+        )
+
+    # Without --again it refuses rather than writing to the same lead twice.
+    assert await cli_e2e._start(_args(slug)) == 1
+
+    assert await cli_e2e._start(_args(slug, again=True)) == 0
+    second_campaign = await cli_e2e._test_campaign_id(sendable.workspace_id)
+    assert second_campaign != first_campaign
+    async with get_sessionmaker()() as s:
+        campaign = await s.get(Campaign, second_campaign)
+        second_lead = (
+            await s.execute(select(Lead).where(Lead.campaign_id == second_campaign))
+        ).scalar_one()
+    assert campaign.slug == f"{cli_e2e.CAMPAIGN_SLUG}-2"
+    assert campaign.status is CampaignStatus.PAUSED
+    assert second_lead.id != first_lead.id
+    # And the research it started is the new lead's.
+    assert listed.started[-1][1].lead_id == str(second_lead.id)

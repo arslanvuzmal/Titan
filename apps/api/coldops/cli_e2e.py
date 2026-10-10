@@ -57,16 +57,52 @@ async def _workspace_id(slug: str) -> uuid.UUID | None:
         ).scalar_one_or_none()
 
 
+def _is_test_campaign():
+    from coldops.db.models import Campaign
+
+    return (Campaign.slug == CAMPAIGN_SLUG) | Campaign.slug.like(f"{CAMPAIGN_SLUG}-%")
+
+
 async def _test_campaign_id(workspace_id: uuid.UUID) -> uuid.UUID | None:
+    """The newest test campaign. ``--again`` opens a new one per run."""
     from coldops.db.models import Campaign
     from coldops.db.session import workspace_session
 
     async with workspace_session(workspace_id) as session:
         return (
             await session.execute(
-                select(Campaign.id).where(Campaign.slug == CAMPAIGN_SLUG)
+                select(Campaign.id)
+                .where(_is_test_campaign())
+                .order_by(Campaign.created_at.desc())
+                .limit(1)
             )
         ).scalar_one_or_none()
+
+
+async def _retire_unsent_drafts(session, lead_id: uuid.UUID) -> None:
+    """Supersede a lead's drafts that never went out.
+
+    So nothing -- the hourly housekeeping sweep included -- queues one after a
+    fresh run has replaced it.
+    """
+    from coldops.db.enums import DraftStatus
+    from coldops.db.models import Message, MessageDraft
+
+    await session.execute(
+        update(MessageDraft)
+        .where(
+            MessageDraft.lead_id == lead_id,
+            MessageDraft.status.in_(
+                (
+                    DraftStatus.GENERATED,
+                    DraftStatus.AWAITING_APPROVAL,
+                    DraftStatus.APPROVED,
+                )
+            ),
+            ~select(Message.id).where(Message.draft_id == MessageDraft.id).exists(),
+        )
+        .values(status=DraftStatus.SUPERSEDED)
+    )
 
 
 # --------------------------------------------------------------------- start
@@ -74,7 +110,6 @@ async def _start(args: argparse.Namespace) -> int:
     from coldops.db.enums import (
         CampaignStatus,
         ContactSource,
-        DraftStatus,
         LeadStatus,
         VerificationStatus,
     )
@@ -87,7 +122,6 @@ async def _start(args: argparse.Namespace) -> int:
         ContactVerification,
         Lead,
         Message,
-        MessageDraft,
         Organization,
         SenderIdentity,
         Workspace,
@@ -96,6 +130,7 @@ async def _start(args: argparse.Namespace) -> int:
     from coldops.delivery import operator_test
     from coldops.delivery.inbound import _warmup_and_seed_addresses
     from coldops.delivery.suppression import is_suppressed
+    from coldops.workflows.research import research_workflow_id
 
     settings = get_settings()
     to = args.to.strip().lower()
@@ -208,15 +243,72 @@ async def _start(args: argparse.Namespace) -> int:
         return 0
 
     now = dt.datetime.now(dt.UTC)
+    retired_workflows: list[str] = []
     async with workspace_unit_of_work(workspace_id) as session:
-        campaign = (
-            await session.execute(select(Campaign).where(Campaign.slug == CAMPAIGN_SLUG))
+        campaigns = list(
+            (
+                await session.execute(
+                    select(Campaign)
+                    .where(_is_test_campaign())
+                    .order_by(Campaign.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        campaign = campaigns[0] if campaigns else None
+        org = (
+            await session.execute(
+                select(Organization).where(Organization.canonical_domain == domain)
+            )
         ).scalar_one_or_none()
+
+        # A lead already written to has had its first email, and the personal
+        # PDF only ever rides a first email. So a run --again gets a campaign
+        # of its own and with it a new lead -- leads are one per campaign and
+        # business -- and the earlier run keeps its whole history.
+        if campaign is not None and org is not None:
+            previous = (
+                await session.execute(
+                    select(Lead).where(
+                        Lead.campaign_id == campaign.id, Lead.organization_id == org.id
+                    )
+                )
+            ).scalar_one_or_none()
+            sent = (
+                previous is not None
+                and (
+                    await session.execute(
+                        select(Message.id).where(
+                            Message.lead_id == previous.id, Message.sent_at.is_not(None)
+                        )
+                    )
+                ).first()
+                is not None
+            )
+            if sent:
+                if not args.again:
+                    print(
+                        "This lead has already been sent its test email. "
+                        "`coldops e2e status` shows how far it got; pass --again "
+                        "to run it once more, as a first email to a new lead."
+                    )
+                    return 1
+                assert previous is not None
+                await _retire_unsent_drafts(session, previous.id)
+                retired_workflows.append(
+                    research_workflow_id(
+                        str(workspace_id), str(campaign.id), str(previous.id)
+                    )
+                )
+                campaign = None
+
         if campaign is None:
+            run = len(campaigns) + 1
             campaign = Campaign(
                 workspace_id=workspace_id,
-                name=CAMPAIGN_NAME,
-                slug=CAMPAIGN_SLUG,
+                name=CAMPAIGN_NAME if run == 1 else f"{CAMPAIGN_NAME} {run}",
+                slug=CAMPAIGN_SLUG if run == 1 else f"{CAMPAIGN_SLUG}-{run}",
                 # Paused, and kept paused: the campaign loop works only active
                 # campaigns, so nothing but this command ever touches it.
                 status=CampaignStatus.PAUSED,
@@ -252,13 +344,8 @@ async def _start(args: argparse.Namespace) -> int:
                         sender_identity_id=s.id,
                     )
                 )
-            print(f"created campaign '{CAMPAIGN_NAME}' (paused)")
+            print(f"created campaign '{campaign.name}' (paused)")
 
-        org = (
-            await session.execute(
-                select(Organization).where(Organization.canonical_domain == domain)
-            )
-        ).scalar_one_or_none()
         if org is None:
             org = Organization(
                 workspace_id=workspace_id,
@@ -278,40 +365,11 @@ async def _start(args: argparse.Namespace) -> int:
             )
         ).scalar_one_or_none()
         if lead is not None:
-            sent = (
-                await session.execute(
-                    select(Message.id).where(
-                        Message.lead_id == lead.id, Message.sent_at.is_not(None)
-                    )
-                )
-            ).first()
-            if sent is not None and not args.again:
-                print(
-                    "This lead has already been sent its test email. "
-                    "`coldops e2e status` shows how far it got; pass --again to start over."
-                )
-                return 1
+            # Not yet written to: research again, and the fresh draft replaces
+            # the unsent one.
             lead.status = LeadStatus.DISCOVERED
             lead.status_reason = "end-to-end test restarted"
-            # The earlier draft never went out; a fresh one replaces it, so
-            # nothing -- the housekeeping sweep included -- queues the old one.
-            await session.execute(
-                update(MessageDraft)
-                .where(
-                    MessageDraft.lead_id == lead.id,
-                    MessageDraft.status.in_(
-                        (
-                            DraftStatus.GENERATED,
-                            DraftStatus.AWAITING_APPROVAL,
-                            DraftStatus.APPROVED,
-                        )
-                    ),
-                    ~select(Message.id)
-                    .where(Message.draft_id == MessageDraft.id)
-                    .exists(),
-                )
-                .values(status=DraftStatus.SUPERSEDED)
-            )
+            await _retire_unsent_drafts(session, lead.id)
         else:
             lead = Lead(
                 workspace_id=workspace_id,
@@ -381,22 +439,23 @@ async def _start(args: argparse.Namespace) -> int:
     from temporalio.exceptions import WorkflowAlreadyStartedError
 
     from coldops.workers.temporal_worker import RESEARCH_QUEUE, connect
-    from coldops.workflows.research import research_workflow_id
     from coldops.workflows.types import ResearchLeadInput
 
     workflow_id = research_workflow_id(str(workspace_id), str(campaign_id), str(lead_id))
     client = await connect()
-    # A restart: the earlier run may still be waiting for an approval of the
-    # draft just retired. Its name is the lead's, so it has to end first.
-    try:
-        from temporalio.client import WorkflowExecutionStatus
+    # A restart: an earlier run may still be waiting for an approval of a
+    # draft just retired. This lead's own run has to end before its name can
+    # be used again; a retired lead's would otherwise draft into Approvals.
+    for stale in [*retired_workflows, workflow_id]:
+        try:
+            from temporalio.client import WorkflowExecutionStatus
 
-        handle = client.get_workflow_handle(workflow_id)
-        if (await handle.describe()).status == WorkflowExecutionStatus.RUNNING:
-            await handle.terminate(reason="coldops e2e restarted")
-            print("ended the earlier research run for this lead")
-    except Exception:  # noqa: S110 - no earlier run is the usual case
-        pass
+            handle = client.get_workflow_handle(stale)
+            if (await handle.describe()).status == WorkflowExecutionStatus.RUNNING:
+                await handle.terminate(reason="coldops e2e restarted")
+                print("ended an earlier research run")
+        except Exception:  # noqa: S112 - no earlier run is the usual case
+            continue
     try:
         await client.start_workflow(
             "LeadResearchWorkflow",
