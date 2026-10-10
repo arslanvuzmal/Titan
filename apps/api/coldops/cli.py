@@ -1417,6 +1417,17 @@ async def _warmup_days(workspace_id: uuid.UUID) -> dict[str, int]:
     Read from the sender identities rather than from the credential file: the
     file says how to log in, the identity carries the send history, and warm-up
     volume is a property of the history.
+
+    **Every identity, active or not.** Warm-up is what a mailbox does *before*
+    it is allowed to send cold mail, so an inactive sender is exactly the one
+    that needs it; filtering on ``is_active`` held every mailbox at day zero
+    (two messages a day) for as long as cold sending was paused.
+
+    **``warmup_started_at`` wins when it is set.** It marks when the mailbox
+    started being warmed *where it lives now*. A mailbox moved to a new
+    provider is new to that provider's filters whatever it sent before, so on
+    10 Oct 2026 (the move to Google Workspace) its old first send stopped being
+    the right starting point. Without the field, the earliest send is used.
     """
     from sqlalchemy import func, select
 
@@ -1427,15 +1438,7 @@ async def _warmup_days(workspace_id: uuid.UUID) -> dict[str, int]:
     now = dt.datetime.now(dt.UTC)
     days: dict[str, int] = {}
     async with workspace_session(workspace_id) as session:
-        rows = (
-            (
-                await session.execute(
-                    select(SenderIdentity).where(SenderIdentity.is_active.is_(True))
-                )
-            )
-            .scalars()
-            .all()
-        )
+        rows = (await session.execute(select(SenderIdentity))).scalars().all()
         for identity in rows:
             first = await session.scalar(
                 select(func.min(Message.sent_at)).where(
@@ -1443,11 +1446,7 @@ async def _warmup_days(workspace_id: uuid.UUID) -> dict[str, int]:
                     Message.state == "sent",
                 )
             )
-            # The earlier of the two wins, so a mailbox warmed elsewhere before
-            # ColdOps saw it is not put back on day zero.
-            started = min(
-                [d for d in (first, identity.warmup_started_at) if d], default=None
-            )
+            started = identity.warmup_started_at or first
             days[identity.from_email.lower()] = warmup_day(started, now)
     return days
 
