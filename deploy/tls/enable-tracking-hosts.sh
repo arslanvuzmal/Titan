@@ -49,6 +49,12 @@ for HOST in $HOSTS; do
     INSTALLED="$DEPLOY/nginx/tls/track-$HOST.conf"
     LIVE="/etc/letsencrypt/live/$HOST"
 
+    # A host promoted to a full site (move-crm-host.sh) already serves /e/ and
+    # /o/; a second, link-only block would be a duplicate server_name.
+    if [ -f "$DEPLOY/nginx/tls/site-$HOST.conf" ]; then
+        log "$HOST: served by its full site block"
+        continue
+    fi
     if [ -f "$INSTALLED" ] && [ -s "$LIVE/fullchain.pem" ]; then
         log "$HOST: already serving"
         continue
